@@ -43,8 +43,12 @@ function createFindBookSettingsStore() {
   const readerEditShowLineNumbers = ref(initial.readerEditShowLineNumbers);
   const readerEditMinimap = ref(initial.readerEditMinimap);
   const fullscreenReaderWidthPercent = ref(initial.fullscreenReaderWidthPercent);
+  const fullscreenShowSystemTime = ref(initial.fullscreenShowSystemTime);
+  const showSidebar = ref(initial.showSidebar);
   const sidebarWidth = ref(initial.sidebarWidth);
+  const showChapterTag = ref(initial.showChapterTag);
   const timedScrollSettings = ref(initial.timedScrollSettings);
+  const pomodoroSettings = ref(initial.pomodoroSettings);
 
   const effectiveCacheDir = computed(() => {
     const configured = cacheDir.value.trim();
@@ -89,8 +93,12 @@ function createFindBookSettingsStore() {
         readerEditShowLineNumbers: readerEditShowLineNumbers.value,
         readerEditMinimap: readerEditMinimap.value,
         fullscreenReaderWidthPercent: fullscreenReaderWidthPercent.value,
+        fullscreenShowSystemTime: fullscreenShowSystemTime.value,
+        showSidebar: showSidebar.value,
         sidebarWidth: sidebarWidth.value,
+        showChapterTag: showChapterTag.value,
         timedScrollSettings: timedScrollSettings.value,
+        pomodoroSettings: pomodoroSettings.value,
       }),
     );
     syncHttpProxyToMain();
@@ -132,8 +140,12 @@ function createFindBookSettingsStore() {
     readerEditShowLineNumbers,
     readerEditMinimap,
     fullscreenReaderWidthPercent,
+    fullscreenShowSystemTime,
+    showSidebar,
     sidebarWidth,
+    showChapterTag,
     timedScrollSettings,
+    pomodoroSettings,
     persistAll,
     persistReaderUiPrefs,
   };

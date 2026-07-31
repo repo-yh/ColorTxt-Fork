@@ -4,11 +4,12 @@ import AppModal from "../../components/AppModal.vue";
 import AppTabBar from "../../components/AppTabBar.vue";
 import AppShellMenuTeleport from "../../components/AppShellMenuTeleport.vue";
 import AutoResizeTextarea from "../../components/AutoResizeTextarea.vue";
+import HighlightedCodeTextarea from "../../components/HighlightedCodeTextarea.vue";
 import IconButton from "../../components/IconButton.vue";
 import SwitchToggle from "../../components/SwitchToggle.vue";
 import { useAnchoredAppShellMenu } from "../../composables/useAnchoredAppShellMenu";
 import { icons } from "../../icons";
-import { appPrompt } from "../../services/appDialog";
+import { appConfirm, appPrompt } from "../../services/appDialog";
 import { appToast } from "../../services/appToast";
 import { useBookSourceApi } from "../composables/useBookSource";
 import type { BookSourceRecord } from "@shared/bookSource/types";
@@ -21,11 +22,18 @@ import {
   BOOK_SOURCE_SEARCH_FIELDS,
   BOOK_SOURCE_TABS,
   BOOK_SOURCE_TOC_FIELDS,
+  EDIT_BOOK_SOURCE_TEXTAREA_MAX_HEIGHT_PX,
   type BookSourceEditTab,
   type BookSourceFieldDef,
 } from "../editBookSourceFields";
+import { bookSourceFieldUsesHighlight } from "../highlightBookSourceCode";
+import {
+  bookSourceFieldMonacoLanguage,
+  type BookSourceMonacoLanguage,
+} from "../formatBookSourceFieldText";
 import { newEmptyBookSource } from "../composables/useBookSource";
 import BookSourceLoginPanel from "./BookSourceLoginPanel.vue";
+import BookSourceFieldMonacoModal from "./BookSourceFieldMonacoModal.vue";
 
 const props = withDefaults(
   defineProps<{
@@ -57,9 +65,19 @@ const panelTitle = computed(() => (isCreate.value ? "新建书源" : "编辑书�
 const activeTab = ref<BookSourceEditTab>("basic");
 const editFieldsRef = ref<HTMLElement | null>(null);
 const draft = ref<BookSourceRecord>(newEmptyBookSource());
+/** 打开/加载完成后的快照，用于判断是否有未保存改动 */
+const baselineJson = ref("");
 const saving = ref(false);
 const showLogin = ref(false);
 const loginSource = ref<BookSourceRecord | null>(null);
+/** 关闭确认进行中，避免 Esc/×/取消 连点重复弹框 */
+let closeConfirmPending = false;
+
+const monacoOpen = ref(false);
+const monacoTitle = ref("编辑器");
+const monacoLanguage = ref<BookSourceMonacoLanguage>("javascript");
+const monacoInitialText = ref("");
+const monacoField = ref<BookSourceFieldDef | null>(null);
 
 const moreBtnRef = ref<HTMLElement | null>(null);
 const moreMenu = useAnchoredAppShellMenu({
@@ -115,14 +133,36 @@ const fieldsForTab = computed((): BookSourceFieldDef[] => {
 async function loadDraft() {
   if (props.draftSource) {
     draft.value = JSON.parse(JSON.stringify(props.draftSource));
-    return;
-  }
-  if (props.sourceUrl) {
+  } else if (props.sourceUrl) {
     const s = await getSource(props.sourceUrl);
     draft.value = s ? JSON.parse(JSON.stringify(s)) : newEmptyBookSource();
   } else {
     draft.value = newEmptyBookSource();
   }
+  baselineJson.value = JSON.stringify(draft.value);
+}
+
+function isDraftDirty(): boolean {
+  return JSON.stringify(draft.value) !== baselineJson.value;
+}
+
+async function confirmDiscardIfDirty(): Promise<boolean> {
+  if (!isDraftDirty()) return true;
+  if (closeConfirmPending) return false;
+  closeConfirmPending = true;
+  try {
+    return await appConfirm(
+      "当前书源已修改但尚未保存，确定要放弃这些改动吗？",
+      "修改未保存",
+    );
+  } finally {
+    closeConfirmPending = false;
+  }
+}
+
+async function requestClose() {
+  if (!(await confirmDiscardIfDirty())) return;
+  modelValue.value = false;
 }
 
 watch(modelValue, (open) => {
@@ -173,6 +213,22 @@ function setFieldValue(field: BookSourceFieldDef, value: string) {
   (draft.value as Record<string, unknown>)[field.rulePath] = block;
 }
 
+function openFieldMonaco(field: BookSourceFieldDef) {
+  monacoField.value = field;
+  monacoLanguage.value = bookSourceFieldMonacoLanguage(field.key);
+  monacoInitialText.value = getFieldValue(field);
+  const keyPart =
+    field.label !== field.key ? `（${field.key}）` : "";
+  monacoTitle.value = `${field.label}${keyPart}`;
+  monacoOpen.value = true;
+}
+
+function onMonacoConfirm(text: string) {
+  const field = monacoField.value;
+  if (field) setFieldValue(field, text);
+  monacoField.value = null;
+}
+
 async function onSave() {
   saving.value = true;
   try {
@@ -182,6 +238,7 @@ async function onSave() {
     if (!props.draftOnly) {
       await saveSource(saved);
     }
+    baselineJson.value = JSON.stringify(saved);
     modelValue.value = false;
     emit("done", saved);
   } finally {
@@ -256,6 +313,7 @@ async function onSearchSource() {
       );
       return;
     }
+    baselineJson.value = JSON.stringify(saved);
     modelValue.value = false;
     emit("done", saved);
     emit("searchSource", {
@@ -351,6 +409,7 @@ async function onSetSourceVariable() {
     :mask-closable="false"
     :esc-closable="true"
     :body-scroll="false"
+    :before-close="confirmDiscardIfDirty"
   >
     <div class="editShell">
       <div class="editTabRow">
@@ -437,24 +496,49 @@ async function onSetSourceVariable() {
 
       <BookSourceLoginPanel v-model="showLogin" :source="loginSource" />
 
+      <BookSourceFieldMonacoModal
+        v-model="monacoOpen"
+        :title="monacoTitle"
+        :language="monacoLanguage"
+        :initial-text="monacoInitialText"
+        @confirm="onMonacoConfirm"
+      />
+
       <div ref="editFieldsRef" class="editFields">
-        <label
+        <div
           v-for="field in fieldsForTab"
           :key="`${field.rulePath ?? ''}-${field.key}`"
           class="editField"
         >
-          <span class="editFieldLabel">
+          <div class="editFieldLabel">
             <span class="editFieldLabelTitle">{{ field.label }}</span>
             <span v-if="field.label !== field.key" class="editFieldLabelKey"
               >（{{ field.key }}）</span
             >
-          </span>
-          <AutoResizeTextarea
+            <IconButton
+              v-if="bookSourceFieldUsesHighlight(field.key)"
+              class="editFieldMonacoBtn"
+              :icon-html="icons.sourceCode"
+              title="编辑器"
+              aria-label="编辑器"
+              @click.stop="openFieldMonaco(field)"
+            />
+          </div>
+          <HighlightedCodeTextarea
+            v-if="bookSourceFieldUsesHighlight(field.key)"
             class="editFieldInput"
+            :max-height="EDIT_BOOK_SOURCE_TEXTAREA_MAX_HEIGHT_PX"
             :model-value="getFieldValue(field)"
             @update:model-value="setFieldValue(field, $event)"
           />
-        </label>
+          <AutoResizeTextarea
+            v-else
+            class="editFieldInput"
+            :max-height="EDIT_BOOK_SOURCE_TEXTAREA_MAX_HEIGHT_PX"
+            :model-value="getFieldValue(field)"
+            @update:model-value="setFieldValue(field, $event)"
+          />
+        </div>
       </div>
     </div>
 
@@ -475,7 +559,7 @@ async function onSetSourceVariable() {
           </label>
         </div>
         <div class="editFooterActions">
-          <button type="button" class="btn" size="large" @click="modelValue = false">取消</button>
+          <button type="button" class="btn" size="large" @click="requestClose">取消</button>
           <button type="button" class="btn primary" size="large" :disabled="saving" @click="onSave">
             确定
           </button>
@@ -538,8 +622,13 @@ async function onSetSourceVariable() {
   gap: 5px;
 }
 .editFieldLabel {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
   font-size: 12px;
   line-height: 1.4;
+  width: 100%;
 }
 .editFieldLabelTitle {
   font-weight: 600;
@@ -548,6 +637,10 @@ async function onSetSourceVariable() {
 .editFieldLabelKey {
   font-weight: 400;
   color: var(--muted);
+}
+.editFieldMonacoBtn {
+  flex-shrink: 0;
+  margin-left: auto;
 }
 .editFieldInput {
   width: 100%;

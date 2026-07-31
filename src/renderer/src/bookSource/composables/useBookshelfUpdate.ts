@@ -22,6 +22,10 @@ const sourceUpdateTail = new Map<string, Promise<void>>();
 
 export const bookshelfUpdateBusy = computed(() => updatingKeys.value.size > 0);
 
+export const bookshelfUpdateHasLog = computed(
+  () => bookshelfUpdateLogEntries.value.length > 0,
+);
+
 export function getBookshelfUpdateLogText(): string {
   return bookshelfUpdateLogEntries.value.length
     ? bookshelfUpdateLogEntries.value.join("\n\n")
@@ -111,6 +115,9 @@ function buildInfoPatch(
   const nextBookUrl = detail.bookUrl?.trim();
   if (nextBookUrl && nextBookUrl !== book.bookUrl) {
     patch.bookUrl = nextBookUrl;
+  }
+  if (detail.variable && Object.keys(detail.variable).length) {
+    patch.variable = detail.variable;
   }
   return patch;
 }

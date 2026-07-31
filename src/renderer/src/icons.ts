@@ -23,6 +23,7 @@ import quitIcon from "./assets/quit.svg?raw";
 import fontFamilyIcon from "./assets/font_family.svg?raw";
 import editIcon from "./assets/edit.svg?raw";
 import saveIcon from "./assets/save.svg?raw";
+import sourceCodeIcon from "./assets/source_code.svg?raw";
 import removeIcon from "./assets/remove.svg?raw";
 import upIcon from "./assets/up.svg?raw";
 import downIcon from "./assets/down.svg?raw";
@@ -100,7 +101,7 @@ import deleteLineationIcon from "./assets/delete_lineation.svg?raw";
 import speakIcon from "./assets/speak.svg?raw";
 import speak0Icon from "./assets/speak_0.svg?raw";
 import speak1Icon from "./assets/speak_1.svg?raw";
-import loginIcon from "./assets/login.svg?raw";
+import userIcon from "./assets/user.svg?raw";
 import buyIcon from "./assets/buy.svg?raw";
 import okIcon from "./assets/ok.svg?raw";
 import lockIcon from "./assets/lock.svg?raw";
@@ -108,6 +109,7 @@ import unlockIcon from "./assets/unlock.svg?raw";
 import disclaimerIcon from "./assets/disclaimer.svg?raw";
 import desktopShortcutIcon from "./assets/desktop_shortcut.svg?raw";
 import cacheIcon from "./assets/cache.svg?raw";
+import subheadIcon from "./assets/subhead.svg?raw";
 
 /** 角色卡「语音」播放动画帧：speak_0 → speak_1 → speak */
 export const speakIconAnimFrames = [
@@ -125,7 +127,7 @@ export const icons = {
   palette: paletteIcon,
   more: moreIcon,
   /** 书源列表行「登录」 */
-  login: loginIcon,
+  user: userIcon,
   /** VIP 章节购买 */
   buy: buyIcon,
   ok: okIcon,
@@ -154,6 +156,7 @@ export const icons = {
   fontFamily: fontFamilyIcon,
   edit: editIcon,
   save: saveIcon,
+  sourceCode: sourceCodeIcon,
   remove: removeIcon,
   up: upIcon,
   down: downIcon,
@@ -266,4 +269,6 @@ export const icons = {
   desktopShortcut: desktopShortcutIcon,
   /** 离线缓存 */
   cache: cacheIcon,
+  /** 目录附加信息（章名下 tag） */
+  subhead: subheadIcon,
 } as const;

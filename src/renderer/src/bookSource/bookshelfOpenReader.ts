@@ -85,6 +85,7 @@ export async function loadBookshelfReaderPayload(
     lastChapter: detail.lastChapter,
     wordCount: detail.wordCount,
     updateTime: detail.updateTime,
+    variable: detail.variable,
   });
 
   return {

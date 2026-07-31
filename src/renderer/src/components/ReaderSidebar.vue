@@ -260,6 +260,10 @@ const emit = defineEmits<{
   clearInlineSearchHighlight: [];
   clearHighlights: [];
   addHighlightTerm: [text: string, isRegex: boolean];
+  exportBookHighlightsJson: [];
+  importBookHighlightsJson: [];
+  exportFavoriteHighlightsJson: [];
+  importFavoriteHighlightsJson: [];
   jumpToAnnotation: [ann: ReaderAnnotationRecord];
   removeAnnotation: [id: string];
   clearAnnotations: [];
@@ -477,6 +481,10 @@ const aiAssistantPanelRef = ref<{
 const annotationPanelRef = ref<InstanceType<typeof AnnotationListPanel> | null>(
   null,
 );
+const highlightPanelRef = ref<InstanceType<typeof HighlightListPanel> | null>(
+  null,
+);
+const highlightsHeaderMoreBtnRef = ref<HTMLButtonElement | null>(null);
 const notesHeaderMoreBtnRef = ref<HTMLButtonElement | null>(null);
 const aiAssistantHeaderMoreBtnRef = ref<HTMLButtonElement | null>(null);
 const addHighlightInputRef = ref<HTMLInputElement | null>(null);
@@ -822,6 +830,18 @@ defineExpose({
             <span class="svg" v-html="icons.more" />
           </button>
         </div>
+        <div v-else-if="activeTab === 'highlights'" class="sidebarHeaderEnd">
+          <button
+            ref="highlightsHeaderMoreBtnRef"
+            type="button"
+            class="aiReaderSidebarHeaderIconBtn"
+            title="更多"
+            aria-label="更多"
+            @click="highlightPanelRef?.openMoreMenu()"
+          >
+            <span class="svg" v-html="icons.more" />
+          </button>
+        </div>
         <div v-else-if="activeTab === 'notes'" class="sidebarHeaderEnd">
           <button
             ref="notesHeaderMoreBtnRef"
@@ -944,18 +964,24 @@ defineExpose({
         @bind-list-ref="bindBookmarkListRef"
       />
       <HighlightListPanel
+        ref="highlightPanelRef"
         v-show="activeTab === 'highlights'"
         :current-file-path="currentFilePath"
         :highlight-terms="highlightTerms"
         :has-inline-search-highlight="hasInlineSearchHighlight"
         :highlight-preview-bg="highlightPreviewBg"
         :monaco-font-family="monacoFontFamily"
+        :menu-anchor-el="highlightsHeaderMoreBtnRef"
         @find-highlight-term="(text, isRegex) => emit('findHighlightTerm', text, isRegex)"
         @remove-highlight-term="emit('removeHighlightTerm', $event)"
         @favorite-highlight-term="emit('favoriteHighlightTerm', $event)"
         @unfavorite-highlight-term="emit('unfavoriteHighlightTerm', $event)"
         @clear-inline-search-highlight="emit('clearInlineSearchHighlight')"
         @clear-highlights="emit('clearHighlights')"
+        @export-book-highlights-json="emit('exportBookHighlightsJson')"
+        @import-book-highlights-json="emit('importBookHighlightsJson')"
+        @export-favorite-highlights-json="emit('exportFavoriteHighlightsJson')"
+        @import-favorite-highlights-json="emit('importFavoriteHighlightsJson')"
       />
       <AnnotationListPanel
         ref="annotationPanelRef"

@@ -11,6 +11,7 @@ import type { ChapterMatchRule } from "../chapter";
 import type { AiCustomSkill, AiSkillUserOverride } from "@shared/aiSkills";
 import type { VoiceReadSettings } from "../constants/voiceRead";
 import type { TimedScrollSettings } from "../constants/timedScroll";
+import type { PomodoroSettings } from "../constants/pomodoro";
 import type { VoiceReadProfile } from "@shared/voiceReadProfiles";
 import type { CharacterRosterEntry } from "@shared/characterTypes";
 import { bookmarkNoteInputRefKey } from "../injectionKeys";
@@ -37,6 +38,7 @@ const props = defineProps<{
   recentFilesHistoryLimit: number;
   chapterMinCharCount: number;
   fullscreenReaderWidthPercent: number;
+  fullscreenShowSystemTime: boolean;
   readerFontSize: number;
   readerLineHeightMultiple: number;
   monacoSmoothScrolling: boolean;
@@ -51,6 +53,7 @@ const props = defineProps<{
   monacoCustomHighlight: boolean;
   txtrDelimitedMatchCrossLine: boolean;
   timedScrollSettings: TimedScrollSettings;
+  pomodoroSettings: PomodoroSettings;
   chapterRules: ChapterMatchRule[];
   chapterRuleErrorText: string;
   /** 编辑态打开文本替换时面板主按钮为「应用」 */
@@ -211,6 +214,7 @@ onBeforeUnmount(() => {
     :recent-files-history-limit="recentFilesHistoryLimit"
     :chapter-min-char-count="chapterMinCharCount"
     :fullscreen-reader-width-percent="fullscreenReaderWidthPercent"
+    :fullscreen-show-system-time="fullscreenShowSystemTime"
     :reader-font-size="readerFontSize"
     :reader-line-height-multiple="readerLineHeightMultiple"
     :monaco-smooth-scrolling="monacoSmoothScrolling"
@@ -225,6 +229,7 @@ onBeforeUnmount(() => {
     :monaco-custom-highlight="monacoCustomHighlight"
     :txtr-delimited-match-cross-line="txtrDelimitedMatchCrossLine"
     :timed-scroll-settings="timedScrollSettings"
+    :pomodoro-settings="pomodoroSettings"
     :ebook-convert-output-dir="ebookConvertOutputDir"
     :character-portrait-cache-dir="characterPortraitCacheDir"
     :ai-skills-enabled="aiSkillsEnabled"
@@ -267,6 +272,7 @@ onBeforeUnmount(() => {
   />
 
   <AppModal
+    v-model="addBookmarkOpen"
     :title="editingBookmarkLine == null ? '添加书签' : '编辑书签'"
     max-width="480px"
   >

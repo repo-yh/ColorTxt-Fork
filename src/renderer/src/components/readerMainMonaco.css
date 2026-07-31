@@ -359,8 +359,9 @@ body > .overflowingContentWidgets
 
 /*
  * 概览尺与竖向滚动条同宽重叠（Monaco layout）；Canvas 透明底、叠在轨道之上，避免底色挡住光标标记。
+ * 须限定在 `.readerPane`，避免书源全屏 Monaco 等其它实例被阅读器滚动条色污染。
  */
-.monaco-editor .decorationsOverviewRuler {
+.readerPane .monaco-editor .decorationsOverviewRuler {
   background-color: transparent;
   z-index: 11;
   pointer-events: none;
@@ -369,26 +370,40 @@ body > .overflowingContentWidgets
 /*
  * 滚动条轨道与小地图同色；概览尺 Canvas 在上层绘制光标/装饰标记。
  */
-.monaco-editor .monaco-scrollable-element > .scrollbar.vertical,
-.monaco-editor .monaco-scrollable-element > .scrollbar.vertical.visible {
+.readerPane .monaco-editor .monaco-scrollable-element > .scrollbar.vertical,
+.readerPane
+  .monaco-editor
+  .monaco-scrollable-element
+  > .scrollbar.vertical.visible {
   background: var(--vscode-scrollbar-background) !important;
   z-index: 10;
 }
 
-.monaco-editor .monaco-scrollable-element > .scrollbar.horizontal,
-.monaco-editor .monaco-scrollable-element > .scrollbar.horizontal.visible {
+.readerPane .monaco-editor .monaco-scrollable-element > .scrollbar.horizontal,
+.readerPane
+  .monaco-editor
+  .monaco-scrollable-element
+  > .scrollbar.horizontal.visible {
   background: var(--vscode-scrollbar-background) !important;
 }
 
-.monaco-editor .monaco-scrollable-element > .scrollbar > .slider {
+.readerPane .monaco-editor .monaco-scrollable-element > .scrollbar > .slider {
   background: var(--vscode-scrollbarSlider-background) !important;
 }
 
-.monaco-editor .monaco-scrollable-element > .scrollbar > .slider:hover {
+.readerPane
+  .monaco-editor
+  .monaco-scrollable-element
+  > .scrollbar
+  > .slider:hover {
   background: var(--vscode-scrollbarSlider-hoverBackground) !important;
 }
 
-.monaco-editor .monaco-scrollable-element > .scrollbar > .slider.active {
+.readerPane
+  .monaco-editor
+  .monaco-scrollable-element
+  > .scrollbar
+  > .slider.active {
   background: var(--vscode-scrollbarSlider-activeBackground) !important;
 }
 

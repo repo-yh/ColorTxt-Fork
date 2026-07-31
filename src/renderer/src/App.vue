@@ -26,7 +26,14 @@ import AppDialogHost from "./components/AppDialogHost.vue";
 import AppCaptchaHost from "./components/AppCaptchaHost.vue";
 import AppToastHost from "./components/AppToastHost.vue";
 import AppOverlays from "./components/AppOverlays.vue";
+import FullscreenSystemClock from "./components/FullscreenSystemClock.vue";
+import PomodoroBreakOverlay from "./components/PomodoroBreakOverlay.vue";
 import type { SettingsApplyPayload } from "./components/SettingsPanel.vue";
+import { usePomodoroTimer } from "./composables/usePomodoroTimer";
+import {
+  mergePomodoroSettings,
+  type PomodoroSettings,
+} from "./constants/pomodoro";
 import type { AiCustomSkill, AiSkillUserOverride } from "@shared/aiSkills";
 import type { ColorTxtShowMessageBoxOptions } from "@shared/colorTxtShowMessageBox";
 import type {
@@ -121,6 +128,7 @@ import {
   defaultCompressBlankLines,
   defaultChapterMinCharCount,
   defaultFullscreenReaderWidthPercent,
+  defaultFullscreenShowSystemTime,
   defaultLeadIndentFullWidth,
   defaultTextConvertDigitMode,
   defaultTextConvertLetterMode,
@@ -586,9 +594,26 @@ const canUseAiSmartFormat = computed(() =>
 );
 /** 全屏时阅读区域宽度（百分比） */
 const fullscreenReaderWidthPercent = ref(defaultFullscreenReaderWidthPercent);
+/** 全屏时是否在左下角显示系统时间 */
+const fullscreenShowSystemTime = ref(defaultFullscreenShowSystemTime);
 const timedScrollSettings = ref<TimedScrollSettings>(
   mergeTimedScrollSettings(undefined),
 );
+const pomodoroSettings = ref<PomodoroSettings>(mergePomodoroSettings(undefined));
+const {
+  phase: pomodoroPhase,
+  displayMode: pomodoroDisplayMode,
+  progress: pomodoroProgress,
+  countdownText: pomodoroCountdownText,
+  pauseResumeLabel: pomodoroPauseResumeLabel,
+  paused: pomodoroPaused,
+  showBreakOverlay: pomodoroShowBreakOverlay,
+  start: startPomodoro,
+  toggleDisplayMode: togglePomodoroDisplayMode,
+  togglePause: togglePomodoroPause,
+  stop: stopPomodoro,
+  finishBreakEarly: finishPomodoroBreakEarly,
+} = usePomodoroTimer(pomodoroSettings);
 /** 电子书转换缓存目录；默认 userData/ConvertedTxt；设置里清空则为与源文件同目录 */
 const ebookConvertOutputDir = ref(
   (() => {
@@ -1204,7 +1229,9 @@ const persistence = useAppPersistence({
   editAutoRefreshChapterList,
   aiSmartFormat,
   fullscreenReaderWidthPercent,
+  fullscreenShowSystemTime,
   timedScrollSettings,
+  pomodoroSettings,
   fileMetaRecords,
   shortcutBindings,
   defaultShortcutBindings,
@@ -1845,7 +1872,7 @@ const showReaderChapterNav = computed(
   () =>
     chapterNavToolbarEnabled.value &&
     Boolean(currentFile.value) &&
-    chapters.value.length > 0,
+    chapters.value.length > 1,
 );
 
 const readerChapterNavUiVisible = computed(
@@ -1901,7 +1928,7 @@ function applyChaptersFromReaderPlainText() {
 
 async function onToggleReaderEdit() {
   if (readerEditMode.value && aiSmartFormatReviewSession.value) {
-    appToast("排版预览进行中，请先点击「应用」或「放弃」。");
+    appToast("排版预览进行中，请先点击「应用」或「放弃」。", { kind: "info" });
     return;
   }
   if (readerEditMode.value) {
@@ -1937,7 +1964,7 @@ async function onToggleReaderEdit() {
     // 成功时保持 suppress，待流式加载结束 syncChapters 后解除
   } else {
     if (!canEnterReaderEditMode.value) {
-      appToast("请等待当前文件加载完成后再进入编辑模式。");
+      appToast("请等待当前文件加载完成后再进入编辑模式。", { kind: "info" });
       return;
     }
     pendingReaderEditRestoreAnchor.value =
@@ -2443,6 +2470,102 @@ async function clearCurrentFileHighlightTerms() {
     () => ({ highlightWordsByIndex: undefined }),
   );
   persistFileMeta();
+}
+
+async function onExportBookHighlightsJson() {
+  const path = currentFile.value;
+  const map = currentFileHighlightWords.value;
+  if (!path || !map) return;
+  const {
+    buildHighlightExportDefaultName,
+    buildReaderHighlightsExportJson,
+    countHighlightWordsInMap,
+    saveHighlightExportFile,
+  } = await import("./utils/readerHighlightExport");
+  if (countHighlightWordsInMap(map) <= 0) return;
+  const name = buildHighlightExportDefaultName(fileNameKey(path));
+  const data = buildReaderHighlightsExportJson(map);
+  const r = await saveHighlightExportFile(name, data);
+  if (!r.ok && "error" in r) await appAlert(r.error);
+}
+
+async function onImportBookHighlightsJson() {
+  const path = currentFile.value;
+  if (!path) return;
+  const {
+    countHighlightWordsInMap,
+    mergeImportedHighlightWords,
+    parseReaderHighlightsExportJson,
+    pickAndReadHighlightJsonFile,
+  } = await import("./utils/readerHighlightExport");
+  const picked = await pickAndReadHighlightJsonFile("导入本书高亮词（JSON）");
+  if (!picked.ok) {
+    if ("error" in picked) await appAlert(picked.error);
+    return;
+  }
+  const envelope = parseReaderHighlightsExportJson(picked.text);
+  if (!envelope) {
+    await appAlert("无效的高亮词 JSON 文件");
+    return;
+  }
+  const imported = envelope.highlightWordsByIndex;
+  const merged = mergeImportedHighlightWords(
+    currentFileHighlightWords.value,
+    imported,
+  );
+  fileMetaRecords.value = upsertFileMetaRecord(
+    fileMetaRecords.value,
+    path,
+    () => ({ highlightWordsByIndex: merged }),
+  );
+  persistFileMeta();
+  appToast(`已导入 ${countHighlightWordsInMap(imported)} 个高亮词到本书`, {
+    kind: "success",
+  });
+}
+
+async function onExportFavoriteHighlightsJson() {
+  const map = highlightWordsByIndexGlobal.value;
+  if (!map) return;
+  const {
+    buildFavoriteHighlightExportDefaultName,
+    buildReaderHighlightsExportJson,
+    countHighlightWordsInMap,
+    saveHighlightExportFile,
+  } = await import("./utils/readerHighlightExport");
+  if (countHighlightWordsInMap(map) <= 0) return;
+  const name = buildFavoriteHighlightExportDefaultName();
+  const data = buildReaderHighlightsExportJson(map);
+  const r = await saveHighlightExportFile(name, data);
+  if (!r.ok && "error" in r) await appAlert(r.error);
+}
+
+async function onImportFavoriteHighlightsJson() {
+  const {
+    countHighlightWordsInMap,
+    mergeImportedHighlightWords,
+    parseReaderHighlightsExportJson,
+    pickAndReadHighlightJsonFile,
+  } = await import("./utils/readerHighlightExport");
+  const picked = await pickAndReadHighlightJsonFile("导入收藏高亮词（JSON）");
+  if (!picked.ok) {
+    if ("error" in picked) await appAlert(picked.error);
+    return;
+  }
+  const envelope = parseReaderHighlightsExportJson(picked.text);
+  if (!envelope) {
+    await appAlert("无效的高亮词 JSON 文件");
+    return;
+  }
+  const imported = envelope.highlightWordsByIndex;
+  highlightWordsByIndexGlobal.value = mergeImportedHighlightWords(
+    highlightWordsByIndexGlobal.value,
+    imported,
+  );
+  persistSettings();
+  appToast(`已导入 ${countHighlightWordsInMap(imported)} 个收藏高亮词`, {
+    kind: "success",
+  });
 }
 
 function onFindHighlightTermFromSidebar(text: string, isRegex?: boolean) {
@@ -2981,6 +3104,7 @@ async function applySettings(payload: SettingsApplyPayload) {
   chapterNavToolbarEnabled.value = payload.chapterNavToolbarEnabled;
   chapterCharCountExact.value = payload.chapterCharCountExact;
   timedScrollSettings.value = mergeTimedScrollSettings(payload.timedScroll);
+  pomodoroSettings.value = mergePomodoroSettings(payload.pomodoro);
   readerEditShowLineNumbers.value = payload.readerEditShowLineNumbers;
   readerEditMinimap.value = payload.readerEditMinimap;
   editAutoRefreshChapterList.value = payload.editAutoRefreshChapterList;
@@ -3007,6 +3131,7 @@ async function applySettings(payload: SettingsApplyPayload) {
       Math.floor(payload.fullscreenReaderWidthPercent),
     ),
   );
+  fullscreenShowSystemTime.value = payload.fullscreenShowSystemTime;
   ebookConvertOutputDir.value = payload.ebookConvertOutputDir;
   const prevPortraitCache = characterPortraitCacheDir.value.trim();
   const nextPortraitCache = payload.characterPortraitCacheDir.trim();
@@ -3421,6 +3546,10 @@ useAppShellThemeWatch({
           @favorite-highlight-term="onFavoriteHighlightTerm"
           @unfavorite-highlight-term="onUnfavoriteHighlightTerm"
           @clear-highlights="clearCurrentFileHighlightTerms"
+          @export-book-highlights-json="onExportBookHighlightsJson"
+          @import-book-highlights-json="onImportBookHighlightsJson"
+          @export-favorite-highlights-json="onExportFavoriteHighlightsJson"
+          @import-favorite-highlights-json="onImportFavoriteHighlightsJson"
           @jump-to-annotation="onJumpToReaderAnnotation"
           @remove-annotation="onRemoveReaderAnnotation"
           @clear-annotations="onClearReaderAnnotationsWithConfirm"
@@ -3608,6 +3737,12 @@ useAppShellThemeWatch({
     >
       按 ESC 退出全屏
     </div>
+    <FullscreenSystemClock
+      :visible="isFullscreenView && fullscreenShowSystemTime"
+      :pomodoro-visible="isFullscreenView && pomodoroPhase !== 'idle'"
+      :pomodoro-progress="pomodoroProgress"
+      :pomodoro-paused="pomodoroPaused"
+    />
 
     <div
       :ref="setFullscreenFooterOverlayEl"
@@ -3643,13 +3778,29 @@ useAppShellThemeWatch({
         :path-menu-reconvert-enabled="footerPathMenuReconvertEnabled"
         :path-menu-close-enabled="footerPathMenuCloseEnabled"
         :edit-cursor-label="readerEditCursorFooterLabel"
+        :pomodoro-enabled="pomodoroSettings.enabled"
+        :pomodoro-phase="pomodoroPhase"
+        :pomodoro-display-mode="pomodoroDisplayMode"
+        :pomodoro-progress="pomodoroProgress"
+        :pomodoro-countdown-text="pomodoroCountdownText"
+        :pomodoro-pause-resume-label="pomodoroPauseResumeLabel"
+        :pomodoro-paused="pomodoroPaused"
         @path-reveal-in-folder="revealCurrentFileInFolder"
         @path-reload="reloadCurrentFileFromDisk"
         @path-reconvert="reconvertCurrentEbookFromDisk"
         @path-close="closeCurrentFile"
         @save-file-as-encoding="onFooterSaveFileAsEncoding"
+        @pomodoro-start="startPomodoro"
+        @pomodoro-toggle-display-mode="togglePomodoroDisplayMode"
+        @pomodoro-toggle-pause="togglePomodoroPause"
+        @pomodoro-stop="stopPomodoro"
       />
     </div>
+    <PomodoroBreakOverlay
+      :visible="pomodoroShowBreakOverlay"
+      :countdown-text="pomodoroCountdownText"
+      @finish="finishPomodoroBreakEarly"
+    />
 
     <AppDialogHost />
     <AppCaptchaHost />
@@ -3681,6 +3832,7 @@ useAppShellThemeWatch({
       :recent-files-history-limit="recentFilesHistoryLimit"
       :chapter-min-char-count="chapterMinCharCount"
       :fullscreen-reader-width-percent="fullscreenReaderWidthPercent"
+      :fullscreen-show-system-time="fullscreenShowSystemTime"
       :reader-font-size="readerFontSize"
       :reader-line-height-multiple="readerLineHeightMultiple"
       :compress-blank-keep-one-blank="compressBlankKeepOneBlank"
@@ -3689,6 +3841,7 @@ useAppShellThemeWatch({
       :chapter-nav-toolbar-enabled="chapterNavToolbarEnabled"
       :chapter-char-count-exact="chapterCharCountExact"
       :timed-scroll-settings="timedScrollSettings"
+      :pomodoro-settings="pomodoroSettings"
       :reader-edit-show-line-numbers="readerEditShowLineNumbers"
       :reader-edit-minimap="readerEditMinimap"
       :edit-auto-refresh-chapter-list="editAutoRefreshChapterList"

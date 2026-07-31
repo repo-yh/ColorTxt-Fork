@@ -18,32 +18,38 @@ export const CHAPTER_TITLE_LINE_CLASS = "chapterTitleLine";
 const STICKY_NO_CLICK_STYLE_ID = "txtr-monaco-sticky-chapter-no-click";
 
 /**
- * 禁止点击粘性章节条触发 Monaco 内部跳转（全局一次注入即可）。
+ * 禁止点击阅读器粘性章节条触发 Monaco 内部跳转。
+ * 选择器须限定在 `.readerPane`（ReaderMain），避免波及书源全屏 Monaco 等其它实例。
  */
 export function ensureStickyChapterBarClickDisabled(): void {
-  if (document.getElementById(STICKY_NO_CLICK_STYLE_ID)) return;
-  const el = document.createElement("style");
-  el.id = STICKY_NO_CLICK_STYLE_ID;
+  let el = document.getElementById(
+    STICKY_NO_CLICK_STYLE_ID,
+  ) as HTMLStyleElement | null;
+  if (!el) {
+    el = document.createElement("style");
+    el.id = STICKY_NO_CLICK_STYLE_ID;
+    document.head.appendChild(el);
+  }
+  // 始终写入：热更新或旧版全局选择器残留时可被纠正
   el.textContent = `
-.monaco-editor .sticky-widget {
+.readerPane .monaco-editor .sticky-widget {
   pointer-events: none !important;
   background-color: var(--reader-bg) !important;
 }
 /* 子区域仍用 VS Code 变量；编辑器背景透明后需与阅读区底色一致，避免透出正文 */
-.monaco-editor .sticky-widget .sticky-widget-line-numbers {
+.readerPane .monaco-editor .sticky-widget .sticky-widget-line-numbers {
   background-color: var(--reader-bg) !important;
 }
-.monaco-editor .sticky-widget .sticky-widget-lines-scrollable {
+.readerPane .monaco-editor .sticky-widget .sticky-widget-lines-scrollable {
   background-color: var(--reader-bg) !important;
 }
-.monaco-editor .sticky-widget .sticky-line-content:hover {
+.readerPane .monaco-editor .sticky-widget .sticky-line-content:hover {
   background-color: var(--reader-bg) !important;
 }
-.monaco-editor .sticky-widget .sticky-line-content {
+.readerPane .monaco-editor .sticky-widget .sticky-line-content {
   color: var(--reader-chapter-title) !important;
 }
 `;
-  document.head.appendChild(el);
 }
 
 export type ChapterStickyScrollProvidersHandle = {
@@ -214,4 +220,12 @@ export function refreshStickyChapterScrollWidget(
       editor.setScrollTop(scrollTop);
     }
   });
+}
+
+// HMR / 旧版全局选择器残留：模块加载时若已注入样式则立即纠正
+if (
+  typeof document !== "undefined" &&
+  document.getElementById(STICKY_NO_CLICK_STYLE_ID)
+) {
+  ensureStickyChapterBarClickDisabled();
 }

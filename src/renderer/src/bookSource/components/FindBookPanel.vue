@@ -6,6 +6,8 @@ import IconButton from "../../components/IconButton.vue";
 import SwitchToggle from "../../components/SwitchToggle.vue";
 import AppShellMenuTeleport from "../../components/AppShellMenuTeleport.vue";
 import AppCustomSelect from "../../components/AppCustomSelect.vue";
+import FileCategoryManageModal from "../../components/FileCategoryManageModal.vue";
+import type { CustomSelectItem } from "../../components/AppCustomSelect.vue";
 import { icons } from "../../icons";
 import { useAnchoredAppShellMenu } from "../../composables/useAnchoredAppShellMenu";
 import BookSourcePanel from "./BookSourcePanel.vue";
@@ -55,7 +57,21 @@ import {
   saveBookshelfSortMode,
   type BookshelfSortMode,
 } from "../findBookshelfSort";
-import { bookshelfUpdateBusy, getBookshelfUpdateLogText } from "../composables/useBookshelfUpdate";
+import {
+  BOOKSHELF_CATEGORY_CATALOG_KEY,
+  loadBookshelfCategoryCatalog,
+  loadBookshelfCategoryFilter,
+  saveBookshelfCategoryCatalog,
+  saveBookshelfCategoryFilter,
+} from "../findBookshelfCategory";
+import {
+  FILE_CATEGORY_ACTION_MANAGE,
+  FILE_CATEGORY_FILTER_ALL,
+  FILE_CATEGORY_FILTER_UNCATEGORIZED,
+  UNCATEGORIZED_LIST_BORDER_COLOR,
+  type CategoryEditorRow,
+  type FileCategoryDefinition,
+} from "../../constants/fileCategories";
 import {
   persistKey,
   persistedSettingsChangedEvent,
@@ -64,6 +80,7 @@ import {
   loadPersistedSettingsData,
   persistSettingsData,
 } from "../../stores/cacheStore";
+import { bookshelfUpdateBusy, bookshelfUpdateHasLog, getBookshelfUpdateLogText } from "../composables/useBookshelfUpdate";
 import {
   applyAppShellTheme,
   listenPersistedSettingsSync,
@@ -89,6 +106,11 @@ const discoverExploreActive = ref(false);
 const bookshelfFilter = ref("");
 const bookshelfSortMode = ref<BookshelfSortMode>(loadBookshelfSortMode());
 const bookshelfSortItems = createBookshelfSortItems();
+const bookshelfCategoryFilter = ref(loadBookshelfCategoryFilter());
+const bookshelfCategoryCatalog = ref<FileCategoryDefinition[]>(
+  loadBookshelfCategoryCatalog(),
+);
+const bookshelfCategoryManageOpen = ref(false);
 
 const bookshelfSortDisplayLabel = computed(() =>
   bookshelfSortLabel(bookshelfSortMode.value),
@@ -101,6 +123,141 @@ function onBookshelfSortChange(mode: string) {
   const next = mode as BookshelfSortMode;
   bookshelfSortMode.value = next;
   saveBookshelfSortMode(next);
+}
+
+const { applyBooks, books: bookshelfBooks, applyCategoryCatalogEdit } =
+  useFindBookBookshelf();
+
+const bookshelfCategoryMenuCounts = computed(() => {
+  const files = bookshelfBooks.value;
+  const all = files.length;
+  let uncategorized = 0;
+  const byName: Record<string, number> = {};
+  for (const c of bookshelfCategoryCatalog.value) {
+    byName[c.name] = 0;
+  }
+  for (const f of files) {
+    const n = (f.category ?? "").trim();
+    if (!n) {
+      uncategorized++;
+      continue;
+    }
+    if (Object.prototype.hasOwnProperty.call(byName, n)) {
+      byName[n] = (byName[n] ?? 0) + 1;
+    }
+  }
+  return { all, uncategorized, byName };
+});
+
+const bookshelfCategoryFixedTop = computed((): CustomSelectItem[] => {
+  const m = bookshelfCategoryMenuCounts.value;
+  return [
+    {
+      kind: "item",
+      id: FILE_CATEGORY_FILTER_ALL,
+      label: "全部",
+      skipCategoryMark: true,
+      labelSuffix: `(${m.all})`,
+    },
+    {
+      kind: "item",
+      id: FILE_CATEGORY_FILTER_UNCATEGORIZED,
+      label: "未分类",
+      skipCategoryMark: true,
+      labelSuffix: `(${m.uncategorized})`,
+    },
+    { kind: "divider" },
+  ];
+});
+
+const bookshelfCategoryScrollItems = computed((): CustomSelectItem[] => {
+  const m = bookshelfCategoryMenuCounts.value;
+  return bookshelfCategoryCatalog.value.map((c) => ({
+    kind: "item" as const,
+    id: c.name,
+    label: c.name,
+    borderColor: c.color,
+    labelSuffix: `(${m.byName[c.name] ?? 0})`,
+  }));
+});
+
+const bookshelfCategoryFixedBottom = computed((): CustomSelectItem[] => [
+  { kind: "divider" },
+  {
+    kind: "item",
+    id: FILE_CATEGORY_ACTION_MANAGE,
+    label: "分类管理",
+    actionOnly: true,
+  },
+]);
+
+const bookshelfCategoryTriggerLabel = computed(() => {
+  const v = bookshelfCategoryFilter.value;
+  if (v === FILE_CATEGORY_FILTER_ALL) return "全部";
+  if (v === FILE_CATEGORY_FILTER_UNCATEGORIZED) return "未分类";
+  return v;
+});
+
+const bookshelfCategoryTriggerMarkColor = computed(() => {
+  const v = bookshelfCategoryFilter.value;
+  if (
+    v === FILE_CATEGORY_FILTER_ALL ||
+    v === FILE_CATEGORY_FILTER_UNCATEGORIZED
+  ) {
+    return undefined;
+  }
+  const hit = bookshelfCategoryCatalog.value.find((x) => x.name === v);
+  if (hit) return hit.color;
+  return UNCATEGORIZED_LIST_BORDER_COLOR;
+});
+
+function onBookshelfCategorySelect(id: string) {
+  bookshelfCategoryFilter.value = id;
+  saveBookshelfCategoryFilter(id);
+}
+
+function onBookshelfCategoryAction(id: string) {
+  if (id === FILE_CATEGORY_ACTION_MANAGE) {
+    bookshelfCategoryManageOpen.value = true;
+  }
+}
+
+function onApplyBookshelfCategoryCatalog(payload: {
+  initial: CategoryEditorRow[];
+  draft: CategoryEditorRow[];
+  catalog: FileCategoryDefinition[];
+}) {
+  applyCategoryCatalogEdit(payload.initial, payload.draft);
+  bookshelfCategoryCatalog.value = payload.catalog.map((c) => ({ ...c }));
+  saveBookshelfCategoryCatalog(bookshelfCategoryCatalog.value);
+  const fc = bookshelfCategoryFilter.value;
+  if (
+    fc !== FILE_CATEGORY_FILTER_ALL &&
+    fc !== FILE_CATEGORY_FILTER_UNCATEGORIZED &&
+    !payload.catalog.some((c) => c.name === fc)
+  ) {
+    bookshelfCategoryFilter.value = FILE_CATEGORY_FILTER_ALL;
+    saveBookshelfCategoryFilter(FILE_CATEGORY_FILTER_ALL);
+  }
+}
+
+function syncBookshelfCategoryCatalogFromStorage() {
+  bookshelfCategoryCatalog.value = loadBookshelfCategoryCatalog();
+  const fc = bookshelfCategoryFilter.value;
+  if (
+    fc !== FILE_CATEGORY_FILTER_ALL &&
+    fc !== FILE_CATEGORY_FILTER_UNCATEGORIZED &&
+    !bookshelfCategoryCatalog.value.some((c) => c.name === fc)
+  ) {
+    bookshelfCategoryFilter.value = FILE_CATEGORY_FILTER_ALL;
+    saveBookshelfCategoryFilter(FILE_CATEGORY_FILTER_ALL);
+  }
+}
+
+function onBookshelfCategoryCatalogStorage(ev: StorageEvent) {
+  if (ev.key === BOOKSHELF_CATEGORY_CATALOG_KEY) {
+    syncBookshelfCategoryCatalogFromStorage();
+  }
 }
 
 const bookshelfPanelRef = ref<InstanceType<typeof FindBookshelfPanel> | null>(null);
@@ -153,7 +310,6 @@ const props = withDefaults(
 );
 
 const findBookSettings = useFindBookSettings();
-const { applyBooks } = useFindBookBookshelf();
 const effectiveCacheDir = findBookSettings.effectiveCacheDir;
 const effectiveDownloadDir = findBookSettings.effectiveDownloadDir;
 
@@ -418,6 +574,7 @@ function onSearchScroll(ev: Event) {
 
 async function tryAutoLoadMoreSearch() {
   await nextTick();
+  if (mainTab.value !== "search") return;
   const el = findBookBodyRef.value;
   if (!el || pageLoading.value || !searchHasMore.value || !hasResults.value) {
     return;
@@ -742,6 +899,26 @@ async function onSearchFromSource(item: {
   searchInputRef.value?.focus();
 }
 
+async function onSearchAuthor(author: string) {
+  const k = author.trim();
+  if (!k) return;
+  showBookDetail.value = false;
+  showBookReader.value = false;
+  showBookSourcePanel.value = false;
+  showSettingsPanel.value = false;
+  showReplaceRulePanel.value = false;
+  showDisclaimerPanel.value = false;
+  searchScope.value = null;
+  precisionSearch.value = true;
+  mainTab.value = "search";
+  query.value = k;
+  if (searching.value) await cancel();
+  await nextTick();
+  searchHistory.value = addFindBookSearchHistory(k);
+  void search(k, buildSearchOptions());
+  searchInputRef.value?.blur();
+}
+
 function clearSearchScope() {
   searchScope.value = null;
   rerunSearchIfNeeded();
@@ -784,6 +961,7 @@ onMounted(() => {
   void refreshHasEnabledSearchSources();
   offThemeSync = listenPersistedSettingsSync(syncThemeFromStorage);
   window.addEventListener(persistedSettingsChangedEvent, syncThemeFromStorage);
+  window.addEventListener("storage", onBookshelfCategoryCatalogStorage);
   offActivateTab = window.colorTxt.onFindBookActivateTab((tab) => {
     if (tab === "bookshelf" || tab === "search" || tab === "discover") {
       mainTab.value = tab;
@@ -800,6 +978,7 @@ onBeforeUnmount(() => {
     persistedSettingsChangedEvent,
     syncThemeFromStorage,
   );
+  window.removeEventListener("storage", onBookshelfCategoryCatalogStorage);
 });
 
 watch(modelValue, (open) => {
@@ -832,6 +1011,7 @@ watch(mainTab, (tab) => {
   }
   if (tab === "search") {
     void refreshHasEnabledSearchSources();
+    void tryAutoLoadMoreSearch();
   }
 });
 
@@ -996,6 +1176,20 @@ function onGoMain() {
           />
         </div>
         <AppCustomSelect
+          class="findBookBookshelfCategorySelect"
+          :model-value="bookshelfCategoryFilter"
+          :display-label="bookshelfCategoryTriggerLabel"
+          :trigger-mark-color="bookshelfCategoryTriggerMarkColor"
+          :fixed-top-items="bookshelfCategoryFixedTop"
+          :scroll-items="bookshelfCategoryScrollItems"
+          :fixed-bottom-items="bookshelfCategoryFixedBottom"
+          :scroll-max-height="300"
+          ariaLabel="书架分类"
+          category-color-marks
+          @update:model-value="onBookshelfCategorySelect"
+          @action="onBookshelfCategoryAction"
+        />
+        <AppCustomSelect
           v-model="bookshelfSortMode"
           class="findBookBookshelfSortSelect"
           :display-label="bookshelfSortDisplayLabel"
@@ -1043,7 +1237,7 @@ function onGoMain() {
           type="button"
           class="appShellMenuItem"
           role="menuitem"
-          :disabled="bookshelfUpdateBusy"
+          :disabled="bookshelfUpdateBusy || bookshelfBooks.length === 0"
           @click="onBookshelfUpdateAll"
         >
           <span class="appShellMenuLabel">更新书籍目录</span>
@@ -1053,6 +1247,7 @@ function onGoMain() {
           class="appShellMenuItem"
           :class="{ 'appShellMenuItem--warning': bookshelfManaging }"
           role="menuitem"
+          :disabled="bookshelfBooks.length === 0 && !bookshelfManaging"
           @click="onBookshelfManage"
         >
           <span class="appShellMenuLabel">{{
@@ -1063,6 +1258,7 @@ function onGoMain() {
           type="button"
           class="appShellMenuItem"
           role="menuitem"
+          :disabled="!bookshelfUpdateHasLog"
           @click="onBookshelfUpdateLogs"
         >
           <span class="appShellMenuLabel">日志</span>
@@ -1177,139 +1373,144 @@ function onGoMain() {
         v-show="mainTab === 'bookshelf'"
         :active="mainTab === 'bookshelf'"
         :filter="bookshelfFilter"
+        :category-filter="bookshelfCategoryFilter"
+        :category-catalog="bookshelfCategoryCatalog"
         :sort-mode="bookshelfSortMode"
         @read-book="onReadBookshelfBook"
         @open-book-info="onOpenBook"
         @search-source="onSearchFromSource"
+        @select-category="onBookshelfCategorySelect"
+        @search-author="onSearchAuthor"
+        @search-book-name="onSearchAuthor"
         @managing-change="bookshelfManaging = $event"
       />
 
-      <template v-if="mainTab === 'search'">
-      <div v-if="showSearchStatus" class="findBookStatus">
-        <div
-          v-if="pageLoading"
-          class="findBookProgressBar"
-          role="progressbar"
-          :aria-valuenow="progress.completed"
-          aria-valuemin="0"
-          :aria-valuemax="progress.total"
-          :aria-label="`搜索进度 ${progress.completed} / ${progress.total}`"
-        >
+      <div v-show="mainTab === 'search'" class="findBookSearchPane">
+        <div v-if="showSearchStatus" class="findBookStatus">
           <div
-            class="findBookProgressBarFill"
-            :style="{ width: `${searchProgressPercent}%` }"
+            v-if="pageLoading"
+            class="findBookProgressBar"
+            role="progressbar"
+            :aria-valuenow="progress.completed"
+            aria-valuemin="0"
+            :aria-valuemax="progress.total"
+            :aria-label="`搜索进度 ${progress.completed} / ${progress.total}`"
+          >
+            <div
+              class="findBookProgressBarFill"
+              :style="{ width: `${searchProgressPercent}%` }"
+            />
+          </div>
+          <span class="findBookStatusText">
+            第
+            <span class="findBookStatusEm findBookStatusEm--warning">{{ searchPage }}</span>
+            页，
+            <template v-if="searchPhase === 'stopped'">已停止：</template>
+            <template v-else>{{ pageLoading ? "加载中" : "已完成" }}：</template>
+            <span class="findBookStatusEm" :class="searchStatusProgressClass">
+              {{ progress.completed }}/{{ progress.total }}
+            </span>，共
+            <span class="findBookStatusEm findBookStatusEm--warning">{{ results.length }}</span>
+            个结果
+          </span>
+          <IconButton
+            v-if="showSearchLogsBtn"
+            class="findBookStatusLogBtn"
+            :class="{ 'findBookStatusLogBtn--warning': searchLogsHasErrors }"
+            :icon-html="icons.info"
+            title="查看搜索日志"
+            aria-label="查看搜索日志"
+            @click="onShowSearchLogs"
           />
         </div>
-        <span class="findBookStatusText">
-          第
-          <span class="findBookStatusEm findBookStatusEm--warning">{{ searchPage }}</span>
-          页，
-          <template v-if="searchPhase === 'stopped'">已停止：</template>
-          <template v-else>{{ pageLoading ? "加载中" : "已完成" }}：</template>
-          <span class="findBookStatusEm" :class="searchStatusProgressClass">
-            {{ progress.completed }}/{{ progress.total }}
-          </span>，共
-          <span class="findBookStatusEm findBookStatusEm--warning">{{ results.length }}</span>
-          个结果
-        </span>
-        <IconButton
-          v-if="showSearchLogsBtn"
-          class="findBookStatusLogBtn"
-          :class="{ 'findBookStatusLogBtn--warning': searchLogsHasErrors }"
-          :icon-html="icons.info"
-          title="查看搜索日志"
-          aria-label="查看搜索日志"
-          @click="onShowSearchLogs"
-        />
-      </div>
 
-      <div ref="findBookBodyRef" class="findBookBody" @scroll="onSearchScroll">
-        <div v-if="showHistory" class="findBookHistory">
-          <div class="findBookHistoryHead">
-            <span class="findBookHistoryTitle">搜索历史</span>
-            <button
-              v-if="searchHistory.length"
-              type="button"
-              class="link danger hoverMode findBookHistoryClear"
-              @mousedown.prevent
-              @click="onClearHistory"
-            >
-              清空
-            </button>
-          </div>
-          <div v-if="filteredSearchHistory.length" class="findBookHistoryTags">
-            <div
-              v-for="item in filteredSearchHistory"
-              :key="item"
-              class="findBookHistoryTagWrap"
-            >
+        <div ref="findBookBodyRef" class="findBookBody" @scroll="onSearchScroll">
+          <div v-if="showHistory" class="findBookHistory">
+            <div class="findBookHistoryHead">
+              <span class="findBookHistoryTitle">搜索历史</span>
               <button
+                v-if="searchHistory.length"
                 type="button"
-                class="findBookHistoryTag"
+                class="link danger hoverMode findBookHistoryClear"
                 @mousedown.prevent
-                @click="onHistoryPick(item)"
+                @click="onClearHistory"
               >
-                {{ item }}
-              </button>
-              <button
-                type="button"
-                class="findBookHistoryTagRemove"
-                :aria-label="`移除 ${item}`"
-                title="移除"
-                @mousedown.prevent
-                @click.stop="onRemoveHistoryItem(item)"
-              >
-                <span class="findBookHistoryTagRemoveIcon" v-html="icons.close" />
+                清空
               </button>
             </div>
+            <div v-if="filteredSearchHistory.length" class="findBookHistoryTags">
+              <div
+                v-for="item in filteredSearchHistory"
+                :key="item"
+                class="findBookHistoryTagWrap"
+              >
+                <button
+                  type="button"
+                  class="findBookHistoryTag"
+                  @mousedown.prevent
+                  @click="onHistoryPick(item)"
+                >
+                  {{ item }}
+                </button>
+                <button
+                  type="button"
+                  class="findBookHistoryTagRemove"
+                  :aria-label="`移除 ${item}`"
+                  title="移除"
+                  @mousedown.prevent
+                  @click.stop="onRemoveHistoryItem(item)"
+                >
+                  <span class="findBookHistoryTagRemoveIcon" v-html="icons.close" />
+                </button>
+              </div>
+            </div>
+            <p v-else-if="searchHistory.length" class="findBookHistoryEmpty">无匹配的搜索历史</p>
+            <p v-else class="findBookHistoryEmpty">暂无搜索历史</p>
           </div>
-          <p v-else-if="searchHistory.length" class="findBookHistoryEmpty">无匹配的搜索历史</p>
-          <p v-else class="findBookHistoryEmpty">暂无搜索历史</p>
-        </div>
-        <div v-else-if="showSearchLoading" class="findBookEmpty">
-          <p class="findBookEmptyText findBookEmptyText--loading">
-            加载中<LoadingDotsBounce />
-          </p>
-        </div>
-        <div v-else-if="showEmpty" class="findBookEmpty">
-          <p class="findBookEmptyIcon">{{ emptyIdleIcon }}</p>
-          <p class="findBookEmptyText">{{ emptyIdleText }}</p>
-        </div>
-        <div v-else-if="showNoResults" class="findBookEmpty">
-          <p class="findBookEmptyIcon">(; '⌒' )</p>
-          <p class="findBookEmptyText">{{ noResultsText }}</p>
-        </div>
-        <div v-else-if="showResults" class="findBookResults">
-          <VirtualList
-            class="findBookResultsVirtual"
-            role="list"
-            :item-count="results.length"
-            :row-stride="FIND_BOOK_LIST_ROW_STRIDE"
-            :overscan="6"
-            :external-scroll-el="findBookBodyRef"
-            :item-key="(i) => results[i]?.id ?? i"
-            @visible-indices="onSearchVisibleIndices"
-          >
-            <template #default="{ index }">
-              <FindBookListItem
-                v-if="results[index]"
-                :item="results[index]"
-                :cover-url="getCoverUrl(results[index]!) ?? ''"
-                :cover-pending="isCoverPending(results[index]!)"
-                @click="onOpenBook"
-              />
-            </template>
-          </VirtualList>
-          <div
-            v-if="pageLoading && hasResults"
-            class="findBookResultsLoading"
-            aria-live="polite"
-          >
-            加载中<LoadingDotsBounce />
+          <div v-else-if="showSearchLoading" class="findBookEmpty">
+            <p class="findBookEmptyText findBookEmptyText--loading">
+              加载中<LoadingDotsBounce />
+            </p>
+          </div>
+          <div v-else-if="showEmpty" class="findBookEmpty">
+            <p class="findBookEmptyIcon">{{ emptyIdleIcon }}</p>
+            <p class="findBookEmptyText">{{ emptyIdleText }}</p>
+          </div>
+          <div v-else-if="showNoResults" class="findBookEmpty">
+            <p class="findBookEmptyIcon">(; '⌒' )</p>
+            <p class="findBookEmptyText">{{ noResultsText }}</p>
+          </div>
+          <div v-else-if="showResults" class="findBookResults">
+            <VirtualList
+              class="findBookResultsVirtual"
+              role="list"
+              :item-count="results.length"
+              :row-stride="FIND_BOOK_LIST_ROW_STRIDE"
+              :overscan="6"
+              :external-scroll-el="findBookBodyRef"
+              :item-key="(i) => results[i]?.id ?? i"
+              @visible-indices="onSearchVisibleIndices"
+            >
+              <template #default="{ index }">
+                <FindBookListItem
+                  v-if="results[index]"
+                  :item="results[index]"
+                  :cover-url="getCoverUrl(results[index]!) ?? ''"
+                  :cover-pending="isCoverPending(results[index]!)"
+                  @click="onOpenBook"
+                />
+              </template>
+            </VirtualList>
+            <div
+              v-if="pageLoading && hasResults"
+              class="findBookResultsLoading"
+              aria-live="polite"
+            >
+              加载中<LoadingDotsBounce />
+            </div>
           </div>
         </div>
       </div>
-      </template>
 
       <FindDiscoverPanel
         ref="discoverPanelRef"
@@ -1329,10 +1530,17 @@ function onGoMain() {
       :item="selectedBook"
       :download-dir="effectiveDownloadDir"
       :cache-dir="effectiveCacheDir"
+      :category-catalog="bookshelfCategoryCatalog"
       @file-downloaded="onBookDownloaded"
       @read-chapter="onReadChapter"
       @chapter-cache-cleared="onChapterCacheCleared"
       @search-source="onSearchFromSource"
+    />
+
+    <FileCategoryManageModal
+      v-model="bookshelfCategoryManageOpen"
+      :catalog="bookshelfCategoryCatalog"
+      @apply="onApplyBookshelfCategoryCatalog"
     />
 
     <FindBookReaderPanel
@@ -1646,6 +1854,11 @@ function onGoMain() {
 }
 .findBookBookshelfToolbar {
   gap: 8px;
+}
+.findBookBookshelfCategorySelect {
+  flex-shrink: 0;
+  width: 112px;
+  min-width: 112px;
 }
 .findBookBookshelfSortSelect {
   flex-shrink: 0;

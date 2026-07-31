@@ -16,6 +16,7 @@ import {
 import {
   defaultCompressBlankKeepOneBlank,
   defaultFullscreenReaderWidthPercent,
+  defaultFullscreenShowSystemTime,
   defaultMonacoSmoothScrolling,
   defaultReaderEditMinimap,
   defaultReaderEditShowLineNumbers,
@@ -26,6 +27,13 @@ import {
 } from "../../constants/appUi";
 import { mergeTimedScrollSettings } from "../../constants/timedScroll";
 import type { TimedScrollRange } from "../../constants/timedScroll";
+import {
+  defaultPomodoroEnabled,
+  defaultPomodoroFocusMinutes,
+  defaultPomodoroLongBreakMinutes,
+  defaultPomodoroShortBreakMinutes,
+  mergePomodoroSettings,
+} from "../../constants/pomodoro";
 import { useFindBookSettings } from "../composables/useFindBookSettings";
 import {
   DEFAULT_FIND_BOOK_DOWNLOAD_AFTER_ACTION,
@@ -81,6 +89,11 @@ const draftReaderEditMinimap = ref(defaultReaderEditMinimap);
 const draftCompressBlankKeepOneBlank = ref(defaultCompressBlankKeepOneBlank);
 const draftTxtrDelimitedMatchCrossLine = ref(defaultTxtrDelimitedMatchCrossLine);
 const draftFullscreenReaderWidthPercent = ref(defaultFullscreenReaderWidthPercent);
+const draftFullscreenShowSystemTime = ref(defaultFullscreenShowSystemTime);
+const draftPomodoroEnabled = ref(defaultPomodoroEnabled);
+const draftPomodoroFocusMinutes = ref(defaultPomodoroFocusMinutes);
+const draftPomodoroShortBreakMinutes = ref(defaultPomodoroShortBreakMinutes);
+const draftPomodoroLongBreakMinutes = ref(defaultPomodoroLongBreakMinutes);
 const draftTimedScrollRange = ref<TimedScrollRange>(defaultTimedScrollRange);
 const draftTimedScrollIntervalMs = ref(defaultTimedScrollIntervalMs);
 
@@ -109,6 +122,12 @@ function syncDraftFromStore() {
   draftCompressBlankKeepOneBlank.value = fb.compressBlankKeepOneBlank.value;
   draftTxtrDelimitedMatchCrossLine.value = fb.txtrDelimitedMatchCrossLine.value;
   draftFullscreenReaderWidthPercent.value = fb.fullscreenReaderWidthPercent.value;
+  draftFullscreenShowSystemTime.value = fb.fullscreenShowSystemTime.value;
+  const pomodoroMerged = mergePomodoroSettings(fb.pomodoroSettings.value);
+  draftPomodoroEnabled.value = pomodoroMerged.enabled;
+  draftPomodoroFocusMinutes.value = pomodoroMerged.focusMinutes;
+  draftPomodoroShortBreakMinutes.value = pomodoroMerged.shortBreakMinutes;
+  draftPomodoroLongBreakMinutes.value = pomodoroMerged.longBreakMinutes;
   const timedScrollMerged = mergeTimedScrollSettings(fb.timedScrollSettings.value);
   draftTimedScrollRange.value = timedScrollMerged.range;
   draftTimedScrollIntervalMs.value = timedScrollMerged.intervalMs;
@@ -140,6 +159,11 @@ function resetReadingDraft() {
   draftCompressBlankKeepOneBlank.value = defaultCompressBlankKeepOneBlank;
   draftTxtrDelimitedMatchCrossLine.value = defaultTxtrDelimitedMatchCrossLine;
   draftFullscreenReaderWidthPercent.value = defaultFullscreenReaderWidthPercent;
+  draftFullscreenShowSystemTime.value = defaultFullscreenShowSystemTime;
+  draftPomodoroEnabled.value = defaultPomodoroEnabled;
+  draftPomodoroFocusMinutes.value = defaultPomodoroFocusMinutes;
+  draftPomodoroShortBreakMinutes.value = defaultPomodoroShortBreakMinutes;
+  draftPomodoroLongBreakMinutes.value = defaultPomodoroLongBreakMinutes;
   draftTimedScrollRange.value = defaultTimedScrollRange;
   draftTimedScrollIntervalMs.value = defaultTimedScrollIntervalMs;
 }
@@ -187,6 +211,13 @@ function onConfirm() {
   fb.compressBlankKeepOneBlank.value = draftCompressBlankKeepOneBlank.value;
   fb.txtrDelimitedMatchCrossLine.value = draftTxtrDelimitedMatchCrossLine.value;
   fb.fullscreenReaderWidthPercent.value = draftFullscreenReaderWidthPercent.value;
+  fb.fullscreenShowSystemTime.value = draftFullscreenShowSystemTime.value;
+  fb.pomodoroSettings.value = mergePomodoroSettings({
+    enabled: draftPomodoroEnabled.value,
+    focusMinutes: draftPomodoroFocusMinutes.value,
+    shortBreakMinutes: draftPomodoroShortBreakMinutes.value,
+    longBreakMinutes: draftPomodoroLongBreakMinutes.value,
+  });
   fb.timedScrollSettings.value = mergeTimedScrollSettings({
     range: draftTimedScrollRange.value,
     intervalMs: draftTimedScrollIntervalMs.value,
@@ -264,6 +295,11 @@ watch(draftFontSize, (size) => {
               v-model:draft-compress-blank-keep-one-blank="draftCompressBlankKeepOneBlank"
               v-model:draft-txtr-delimited-match-cross-line="draftTxtrDelimitedMatchCrossLine"
               v-model:draft-fullscreen-reader-width-percent="draftFullscreenReaderWidthPercent"
+              v-model:draft-fullscreen-show-system-time="draftFullscreenShowSystemTime"
+              v-model:draft-pomodoro-enabled="draftPomodoroEnabled"
+              v-model:draft-pomodoro-focus-minutes="draftPomodoroFocusMinutes"
+              v-model:draft-pomodoro-short-break-minutes="draftPomodoroShortBreakMinutes"
+              v-model:draft-pomodoro-long-break-minutes="draftPomodoroLongBreakMinutes"
               v-model:draft-timed-scroll-range="draftTimedScrollRange"
               v-model:draft-timed-scroll-interval-ms="draftTimedScrollIntervalMs"
               :monaco-custom-highlight="fb.monacoCustomHighlight.value"

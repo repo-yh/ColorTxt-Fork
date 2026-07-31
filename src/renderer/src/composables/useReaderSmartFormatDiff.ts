@@ -16,6 +16,7 @@ import {
   buildReaderEditorFontSizeUpdate,
   type ReaderEditorCreateOptionsInput,
 } from "../monaco/readerEditorOptions";
+import { readerMonacoThemeForAppTheme } from "../monaco/readerInlineDecorations";
 import {
   enhanceSmartFormatDiffRevertButtons,
   installSmartFormatDiffRevertUi,
@@ -215,7 +216,9 @@ export function useReaderSmartFormatDiff(deps: {
     await waitForLayout(host);
 
     const input = deps.getCreateOptionsInput();
-    monaco.editor.setTheme(input.theme ?? "vs");
+    monaco.editor.setTheme(
+      readerMonacoThemeForAppTheme(input.theme ?? "vs"),
+    );
 
     const editor = monaco.editor.createDiffEditor(
       host,

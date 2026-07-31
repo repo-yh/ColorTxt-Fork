@@ -1,21 +1,33 @@
 import { computed, ref } from "vue";
 import type { SearchBookItem } from "@shared/bookSource/types";
+import type { CategoryEditorRow } from "../../constants/fileCategories";
 import {
   addToFindBookBookshelf,
+  applyBookshelfCategoryCatalogEdit,
   bookshelfBookKey,
   loadFindBookBookshelf,
   removeFromFindBookBookshelf,
   saveFindBookBookshelf,
   setFindBookBookshelfCanUpdate,
+  setFindBookBookshelfCategories,
+  setFindBookBookshelfCategory,
   updateFindBookBookshelfReadProgress,
   type BookshelfAddOptions,
   type BookshelfBook,
 } from "../findBookBookshelf";
 
+const STORAGE_KEY = "colortxt:findBookBookshelf";
+
 const booksRef = ref<BookshelfBook[]>(loadFindBookBookshelf());
 
 function syncFromStorage() {
   booksRef.value = loadFindBookBookshelf();
+}
+
+if (typeof window !== "undefined") {
+  window.addEventListener("storage", (ev) => {
+    if (ev.key === STORAGE_KEY) syncFromStorage();
+  });
 }
 
 export function useFindBookBookshelf() {
@@ -85,6 +97,30 @@ export function useFindBookBookshelf() {
     return true;
   }
 
+  function setCategory(bookUrl: string, origin: string, category: string) {
+    const next = setFindBookBookshelfCategory(bookUrl, origin, category);
+    if (!next) return false;
+    booksRef.value = next;
+    return true;
+  }
+
+  function setCategories(
+    keys: readonly { bookUrl: string; origin: string }[],
+    category: string,
+  ) {
+    const next = setFindBookBookshelfCategories(keys, category);
+    if (!next) return false;
+    booksRef.value = next;
+    return true;
+  }
+
+  function applyCategoryCatalogEdit(
+    initial: CategoryEditorRow[],
+    draft: CategoryEditorRow[],
+  ) {
+    booksRef.value = applyBookshelfCategoryCatalogEdit(initial, draft);
+  }
+
   function applyBooks(next: BookshelfBook[]) {
     booksRef.value = next;
   }
@@ -100,6 +136,9 @@ export function useFindBookBookshelf() {
     updateReadProgress,
     setOrder,
     setCanUpdate,
+    setCategory,
+    setCategories,
+    applyCategoryCatalogEdit,
     applyBooks,
   };
 }

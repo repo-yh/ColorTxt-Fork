@@ -7,6 +7,7 @@ import IconButton from "../../components/IconButton.vue";
 import SwitchToggle from "../../components/SwitchToggle.vue";
 import AppShellMenuTeleport from "../../components/AppShellMenuTeleport.vue";
 import { useAnchoredAppShellMenu } from "../../composables/useAnchoredAppShellMenu";
+import { useListSelectionHotkeys } from "../../composables/useListSelectionHotkeys";
 import {
   SORTABLE_ROW_HANDLE_CLASS,
   useSortableReorder,
@@ -63,6 +64,8 @@ const {
 } = useBookSourceApi();
 
 const sourceListRef = ref<HTMLElement | null>(null);
+/** 列表快捷键焦点容器（与侧栏文件列表一致） */
+const listFocusRef = ref<HTMLElement | null>(null);
 
 const items = ref<BookSourceListItem[]>([]);
 const filter = ref("");
@@ -71,6 +74,8 @@ const filterMode = ref<BookSourceFilterMode>(DEFAULT_BOOK_SOURCE_FILTER);
 const sortScrollItems = createBookSourceSortItems();
 const filterScrollItems = createBookSourceFilterItems();
 const selected = ref<Set<string>>(new Set());
+/** Shift 连选锚点（与侧栏文件列表 / 书架管理一致） */
+const lastSelectedUrl = ref<string | null>(null);
 const headerMoreBtnRef = ref<HTMLElement | null>(null);
 const headerMoreMenu = useAnchoredAppShellMenu({
   anchor: headerMoreBtnRef,
@@ -278,20 +283,6 @@ function notifySourcesChanged() {
   emit("sourcesChanged");
 }
 
-watch(modelValue, (open) => {
-  if (open) {
-    void refresh();
-    return;
-  }
-  clearSelection();
-  // 关闭面板时保留各项校验结果文案；仅收起进度并停止进行中的校验
-  checkProgressText.value = "";
-  if (checking.value) {
-    checking.value = false;
-    void window.colorTxt.bookSourceCheckCancel();
-  }
-});
-
 watch(items, (next) => {
   if (selected.value.size === 0) return;
   const valid = new Set(next.map((i) => i.bookSourceUrl));
@@ -300,22 +291,21 @@ watch(items, (next) => {
     if (valid.has(url)) pruned.add(url);
   }
   selected.value = pruned;
+  if (lastSelectedUrl.value && !pruned.has(lastSelectedUrl.value)) {
+    lastSelectedUrl.value =
+      pruned.size > 0 ? [...pruned][pruned.size - 1]! : null;
+  }
 });
 
 function clearSelection() {
   selected.value = new Set();
-}
-
-function onRowClick(item: BookSourceListItem) {
-  const url = item.bookSourceUrl;
-  const next = new Set(selected.value);
-  if (next.has(url)) next.delete(url);
-  else next.add(url);
-  selected.value = next;
+  lastSelectedUrl.value = null;
 }
 
 function selectAll() {
-  selected.value = new Set(filtered.value.map((i) => i.bookSourceUrl));
+  const urls = filtered.value.map((i) => i.bookSourceUrl);
+  selected.value = new Set(urls);
+  lastSelectedUrl.value = urls.length > 0 ? urls[urls.length - 1]! : null;
 }
 
 function invertSelect() {
@@ -329,24 +319,82 @@ function invertSelect() {
     if (!selected.value.has(url)) next.add(url);
   }
   selected.value = next;
+  lastSelectedUrl.value =
+    next.size > 0 ? [...next][next.size - 1]! : null;
 }
 
-/** 对齐 Legado：选中当前过滤列表中已选首尾项之间的全部项 */
-function selectSelectedRange() {
+const { onListKeydown, focusList } = useListSelectionHotkeys({
+  listEl: listFocusRef,
+  enabled: () =>
+    modelValue.value &&
+    !showImport.value &&
+    !showEdit.value &&
+    !showLogin.value &&
+    !showCheckConfig.value,
+  onSelectAll: selectAll,
+  onInvert: invertSelect,
+});
+
+watch(modelValue, (open) => {
+  if (open) {
+    void refresh();
+    focusList();
+    return;
+  }
+  clearSelection();
+  // 关闭面板时保留各项校验结果文案；仅收起进度并停止进行中的校验
+  checkProgressText.value = "";
+  if (checking.value) {
+    checking.value = false;
+    void window.colorTxt.bookSourceCheckCancel();
+  }
+});
+
+/** 与资源管理器一致：单击单选、Ctrl 多选、Shift 连选 */
+function onRowClick(item: BookSourceListItem, listIndex: number, ev: MouseEvent) {
+  const url = item.bookSourceUrl;
   const list = filtered.value;
-  let first = -1;
-  let last = -1;
-  for (let i = 0; i < list.length; i++) {
-    if (!selected.value.has(list[i]!.bookSourceUrl)) continue;
-    if (first < 0) first = i;
-    last = i;
+  const toggleMod = ev.ctrlKey || ev.metaKey;
+  const rangeMod = ev.shiftKey;
+
+  if (rangeMod) {
+    const anchor = lastSelectedUrl.value;
+    if (!anchor) {
+      lastSelectedUrl.value = url;
+      selected.value = new Set([url]);
+      focusList();
+      return;
+    }
+    const anchorIdx = list.findIndex((i) => i.bookSourceUrl === anchor);
+    const clickedIdx = listIndex;
+    if (anchorIdx < 0 || clickedIdx < 0) {
+      lastSelectedUrl.value = url;
+      selected.value = new Set([url]);
+      focusList();
+      return;
+    }
+    const start = Math.min(anchorIdx, clickedIdx);
+    const end = Math.max(anchorIdx, clickedIdx);
+    selected.value = new Set(
+      list.slice(start, end + 1).map((i) => i.bookSourceUrl),
+    );
+    focusList();
+    return;
   }
-  if (first < 0 || last <= first) return;
-  const next = new Set(selected.value);
-  for (let i = first; i <= last; i++) {
-    next.add(list[i]!.bookSourceUrl);
+
+  if (toggleMod) {
+    const next = new Set(selected.value);
+    if (next.has(url)) next.delete(url);
+    else next.add(url);
+    selected.value = next;
+    lastSelectedUrl.value = url;
+    focusList();
+    return;
   }
-  selected.value = next;
+
+  selected.value = new Set([url]);
+  lastSelectedUrl.value = url;
+  focusList();
 }
 
 function onToggleSelectAll() {
@@ -569,6 +617,10 @@ async function onRowMenuDelete() {
   const next = new Set(selected.value);
   next.delete(item.bookSourceUrl);
   selected.value = next;
+  if (lastSelectedUrl.value === item.bookSourceUrl) {
+    lastSelectedUrl.value =
+      next.size > 0 ? [...next][next.size - 1]! : null;
+  }
   await refreshAndNotify();
 }
 
@@ -620,6 +672,7 @@ async function onClipboardImport() {
 
 function onImportDone() {
   showImport.value = false;
+  focusList();
   void refreshAndNotify();
 }
 
@@ -647,6 +700,7 @@ function onEditDone() {
   showEdit.value = false;
   editingUrl.value = null;
   editingDraft.value = null;
+  focusList();
   void refreshAndNotify();
 }
 </script>
@@ -723,16 +777,21 @@ function onEditDone() {
         </div>
       </header>
 
-      <div class="bsListArea">
+      <div
+        ref="listFocusRef"
+        class="bsListArea"
+        tabindex="0"
+        @keydown="onListKeydown"
+      >
         <BookSourceCenterState v-if="!filtered.length">
           {{ listEmptyText }}
         </BookSourceCenterState>
         <ul v-else ref="sourceListRef" class="bsList">
           <li
-            v-for="item in filtered"
+            v-for="(item, index) in filtered"
             :key="item.bookSourceUrl"
             class="bsRow"
-            @click="onRowClick(item)"
+            @click="onRowClick(item, index, $event)"
           >
             <button
               v-if="canDragReorder"
@@ -786,7 +845,7 @@ function onEditDone() {
               />
               <IconButton
                 v-if="item.hasLoginUrl"
-                :icon-html="icons.login"
+                :icon-html="icons.user"
                 title="登录"
                 aria-label="登录"
                 @click="onLogin(item)"
@@ -868,16 +927,6 @@ function onEditDone() {
           </AppCheckbox>
           <div class="bsFooterActions">
             <button type="button" class="btn bsFooterBtn" size="large" @click="invertSelect">反选</button>
-            <button
-              type="button"
-              class="btn bsFooterBtn"
-              size="large"
-              :disabled="selectedCount < 2"
-              title="选中当前列表中已选首尾项之间的全部书源"
-              @click="selectSelectedRange"
-            >
-              选中所选区间
-            </button>
             <button
               type="button"
               class="btn danger bsFooterBtn"
@@ -1011,7 +1060,7 @@ function onEditDone() {
   padding: 0;
 }
 .appModalPanel.bookSourcePanel .bookSourceToolbarHeader {
-  padding: 10px;
+  padding: 0 10px 10px 10px;
   border-bottom: 1px solid var(--border, rgba(0, 0, 0, 0.08));
 }
 .appModalPanel.bookSourcePanel .appModalFooter {
@@ -1076,6 +1125,7 @@ function onEditDone() {
   min-height: 0;
   display: flex;
   flex-direction: column;
+  outline: none;
 }
 .bsList {
   flex: 1;

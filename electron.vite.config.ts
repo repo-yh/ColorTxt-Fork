@@ -149,7 +149,7 @@ export default defineConfig({
       },
       vue(),
       monacoEditorPlugin({
-        languageWorkers: ["editorWorkerService"],
+        languageWorkers: ["editorWorkerService", "typescript", "json"],
         customWorkers: [],
         publicPath: MONACO_EDITOR_WORKERS_PUBLIC_PATH,
         // 插件默认 path.join(root, outDir, base, publicPath)；在 Windows 上 root 与 outDir 若均为绝对路径，

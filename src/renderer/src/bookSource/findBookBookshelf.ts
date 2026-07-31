@@ -1,5 +1,6 @@
 import type { BookChapter, SearchBookItem, Book } from "@shared/bookSource/types";
 import { searchBookToBook } from "@shared/bookSource/bookModel";
+import type { CategoryEditorRow } from "../constants/fileCategories";
 import {
   bookshelfContentChapters,
   extractUpdateTimeFromKind,
@@ -24,6 +25,8 @@ export type BookshelfBook = Book & {
   canUpdate?: boolean;
   /** 章节目录缓存（打开阅读器时复用） */
   chapters?: BookChapter[];
+  /** 书架分类名（独立于主界面文件分类；缺省或空为未分类） */
+  category?: string;
 };
 
 /** 书架项上的 Book 字段（去掉进度等） */
@@ -59,6 +62,8 @@ export type BookshelfBookInfoPatch = {
   bookUrl?: string;
   tocUrl?: string;
   chapters?: BookChapter[];
+  /** 详情 @put / headers 等（对齐 Legado Book.variable，正文规则 java.get 依赖） */
+  variable?: Record<string, string>;
 };
 
 export type BookshelfAddOptions = {
@@ -87,6 +92,18 @@ function isBookshelfBook(v: unknown): v is BookshelfBook {
   );
 }
 
+function normalizeBookshelfCategory(book: BookshelfBook): BookshelfBook {
+  const raw = book.category;
+  const category = typeof raw === "string" ? raw.trim() : "";
+  if (!category) {
+    if (raw === undefined) return book;
+    const { category: _, ...rest } = book;
+    return rest;
+  }
+  if (raw === category) return book;
+  return { ...book, category };
+}
+
 export function loadFindBookBookshelf(): BookshelfBook[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -100,7 +117,7 @@ export function loadFindBookBookshelf(): BookshelfBook[] {
       const key = bookshelfBookKey(item.bookUrl, item.origin);
       if (seen.has(key)) continue;
       seen.add(key);
-      out.push(item);
+      out.push(normalizeBookshelfCategory(item));
     }
     return out;
   } catch {
@@ -198,6 +215,19 @@ export function updateFindBookBookshelfBookInfo(
       merged.bookUrl = patch.bookUrl.trim();
     }
     if (patch.tocUrl?.trim()) merged.tocUrl = patch.tocUrl.trim();
+    if (patch.variable && typeof patch.variable === "object") {
+      const prev =
+        merged.variable &&
+        typeof merged.variable === "object" &&
+        !Array.isArray(merged.variable)
+          ? merged.variable
+          : {};
+      const next: Record<string, string> = { ...prev };
+      for (const [k, v] of Object.entries(patch.variable)) {
+        if (v != null && String(v).trim()) next[k] = String(v).trim();
+      }
+      if (Object.keys(next).length) merged.variable = next;
+    }
     if (patch.chapters?.length) {
       merged.chapters = patch.chapters;
       // 对齐 Legado BookChapterList：有目录后用最新章标题覆盖 lastChapter
@@ -234,6 +264,110 @@ export function setFindBookBookshelfCanUpdate(
     return { ...b, canUpdate: false };
   });
   if (!changed) return null;
+  saveFindBookBookshelf(next);
+  return next;
+}
+
+function withBookshelfCategory(
+  book: BookshelfBook,
+  category: string | undefined,
+): BookshelfBook {
+  const next = category?.trim() || undefined;
+  const prev = book.category?.trim() || undefined;
+  if (prev === next) return book;
+  if (!next) {
+    const { category: _, ...rest } = book;
+    return rest;
+  }
+  return { ...book, category: next };
+}
+
+/** 设置单本书架书籍分类（空字符串 / 空白 = 未分类） */
+export function setFindBookBookshelfCategory(
+  bookUrl: string,
+  origin: string,
+  category: string,
+): BookshelfBook[] | null {
+  const key = bookshelfBookKey(bookUrl, origin);
+  let changed = false;
+  const next = loadFindBookBookshelf().map((b) => {
+    if (bookshelfBookKey(b.bookUrl, b.origin) !== key) return b;
+    const updated = withBookshelfCategory(b, category);
+    if (updated !== b) changed = true;
+    return updated;
+  });
+  if (!changed) return null;
+  saveFindBookBookshelf(next);
+  return next;
+}
+
+/** 批量设置书架书籍分类（空字符串 / 空白 = 未分类） */
+export function setFindBookBookshelfCategories(
+  keys: readonly { bookUrl: string; origin: string }[],
+  category: string,
+): BookshelfBook[] | null {
+  if (keys.length === 0) return null;
+  const keySet = new Set(
+    keys.map((k) => bookshelfBookKey(k.bookUrl, k.origin)),
+  );
+  let changed = false;
+  const next = loadFindBookBookshelf().map((b) => {
+    if (!keySet.has(bookshelfBookKey(b.bookUrl, b.origin))) return b;
+    const updated = withBookshelfCategory(b, category);
+    if (updated !== b) changed = true;
+    return updated;
+  });
+  if (!changed) return null;
+  saveFindBookBookshelf(next);
+  return next;
+}
+
+/**
+ * 「分类管理」保存后：按行 key 对书架项上的分类名改名 / 清除已删除分类。
+ */
+export function syncBookshelfCategoriesAfterCatalogEdit(
+  books: BookshelfBook[],
+  initial: CategoryEditorRow[],
+  draft: CategoryEditorRow[],
+): BookshelfBook[] {
+  let next = books.map((b) => ({ ...b }));
+  const im = new Map(initial.map((r) => [r.key, r]));
+  const dm = new Map(draft.map((r) => [r.key, r]));
+  for (const [k, d] of dm) {
+    const prevRow = im.get(k);
+    if (prevRow && prevRow.name.trim() !== d.name.trim()) {
+      const from = prevRow.name.trim();
+      const to = d.name.trim();
+      next = next.map((b) => {
+        const c = (b.category ?? "").trim();
+        return c === from ? { ...b, category: to } : b;
+      });
+    }
+  }
+  for (const [k, p] of im) {
+    if (!dm.has(k)) {
+      const name = p.name.trim();
+      next = next.map((b) => {
+        const c = (b.category ?? "").trim();
+        if (c !== name) return b;
+        const { category: _, ...rest } = b;
+        return rest;
+      });
+    }
+  }
+  return next;
+}
+
+/** 应用分类管理结果并写回书架存储 */
+export function applyBookshelfCategoryCatalogEdit(
+  initial: CategoryEditorRow[],
+  draft: CategoryEditorRow[],
+): BookshelfBook[] {
+  const next = syncBookshelfCategoriesAfterCatalogEdit(
+    loadFindBookBookshelf(),
+    initial,
+    draft,
+  );
   saveFindBookBookshelf(next);
   return next;
 }

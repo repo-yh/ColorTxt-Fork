@@ -20,6 +20,7 @@ import {
   buildChapterMinimapSectionHeaderDecorations,
   buildChapterTitleDecorations,
   getReaderMinimapCursorLineDecorColor,
+  readerMonacoThemeForAppTheme,
   setReaderSyntaxHighlightEnabled,
 } from "../monaco/readerInlineDecorations";
 import { useReaderInlineSearch } from "../composables/useReaderInlineSearch";
@@ -587,7 +588,7 @@ function getDiffEditorOptionsInput(): import("../monaco/readerEditorOptions").Re
     fontSize,
     lineHeightMultiple,
     fontFamily: currentFontFamily,
-    theme: lastAppThemeName,
+    theme: readerMonacoThemeForAppTheme(lastAppThemeName),
     smoothScrolling: props.monacoSmoothScrolling,
     wrappingStrategyAdvanced: props.monacoAdvancedWrapping,
   };
@@ -2138,13 +2139,7 @@ function syncMinimapCursorLineDecoration() {
 function setTheme(themeName: string) {
   lastAppThemeName = themeName;
   syncMinimapCursorLineDecoration();
-  if (themeName === "vs") {
-    monaco.editor.setTheme("vs");
-  } else if (builtInThemes.has(themeName)) {
-    monaco.editor.setTheme(themeName);
-  } else {
-    monaco.editor.setTheme("vs-dark");
-  }
+  monaco.editor.setTheme(readerMonacoThemeForAppTheme(themeName));
   syncReaderMonacoOverflowHostTheme(themeName);
   forceOverviewRulerCanvasRepaint();
   if (smartFormatReviewActive.value) {
@@ -3234,6 +3229,7 @@ onMounted(() => {
       fontSize: READER_EDITOR_DEFAULT_FONT_SIZE,
       lineHeightMultiple,
       fontFamily: currentFontFamily,
+      theme: readerMonacoThemeForAppTheme(lastAppThemeName),
       wrappingStrategyAdvanced: props.monacoAdvancedWrapping,
       smoothScrolling: props.monacoSmoothScrolling,
       stickyChapterTitleEnabled: props.stickyChapterTitleEnabled,

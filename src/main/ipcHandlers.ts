@@ -62,6 +62,10 @@ import { attributeVoiceReadSpeakers } from "./ai/voiceReadSpeaker";
 import { registerVoiceReadIpcHandlers } from "./voiceRead/registerVoiceReadIpc";
 import { registerBookSourceIpcHandlers } from "./bookSource/registerBookSourceIpc";
 import { createFindBookDesktopShortcut } from "./findBookLaunch";
+import {
+  focusOrOpenMainReaderWindow,
+  openTxtInMainWindow,
+} from "./openTxtInMainWindow";
 
 type TxtFileItem = { name: string; path: string; size: number };
 type DirListScanProgress = (item: { name: string; path: string }) => void;
@@ -356,21 +360,11 @@ export function registerMainIpcHandlers(
   });
 
   ipcMain.handle("window:focusOrOpenMain", () => {
-    const mains = BrowserWindow.getAllWindows().filter(
-      (w) => !w.isDestroyed() && !findBookWindowByWindowId.get(w.id),
-    );
-    if (mains.length > 0) {
-      const preferred = mainWindowFocusState.lastId
-        ? mains.find((w) => w.id === mainWindowFocusState.lastId)
-        : undefined;
-      const target = preferred ?? mains[mains.length - 1]!;
-      if (target.isMinimized()) target.restore();
-      target.show();
-      target.focus();
-      mainWindowFocusState.lastId = target.id;
-      return;
-    }
-    createWindow({});
+    focusOrOpenMainReaderWindow({
+      createWindow,
+      findBookWindowByWindowId,
+      mainWindowFocusState,
+    });
   });
 
   ipcMain.handle("window:openFileInMain", (_evt, filePath: unknown) => {
@@ -379,22 +373,12 @@ export function registerMainIpcHandlers(
         ? filePath.trim()
         : null;
     if (!resolved) return;
-    const mains = BrowserWindow.getAllWindows().filter(
-      (w) => !w.isDestroyed() && !findBookWindowByWindowId.get(w.id),
-    );
-    if (mains.length === 0) {
-      createWindow({ openTxtPath: resolved });
-      return;
-    }
-    const preferred = mainWindowFocusState.lastId
-      ? mains.find((w) => w.id === mainWindowFocusState.lastId)
-      : undefined;
-    const target = preferred ?? mains[mains.length - 1]!;
-    if (target.isMinimized()) target.restore();
-    target.show();
-    target.focus();
-    mainWindowFocusState.lastId = target.id;
-    target.webContents.send("app:open-txt-path", resolved);
+    openTxtInMainWindow({
+      filePath: resolved,
+      createWindow,
+      findBookWindowByWindowId,
+      mainWindowFocusState,
+    });
   });
 
   ipcMain.handle("window:toggleDevTools", (evt) => {

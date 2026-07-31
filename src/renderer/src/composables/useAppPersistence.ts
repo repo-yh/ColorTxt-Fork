@@ -86,6 +86,7 @@ import {
 import {
   defaultChapterMinCharCount,
   defaultFullscreenReaderWidthPercent,
+  defaultFullscreenShowSystemTime,
   defaultRecentFilesHistoryLimit,
   maxFullscreenReaderWidthPercent,
   clampLineHeightMultipleForFontSize,
@@ -119,6 +120,7 @@ import {
   mergeTimedScrollSettings,
   type TimedScrollSettings,
 } from "../constants/timedScroll";
+import { mergePomodoroSettings } from "../constants/pomodoro";
 import {
   collectVoiceReadProfileApiKeys,
   hydrateVoiceReadProfilesApiKeys,
@@ -218,7 +220,9 @@ export function useAppPersistence(deps: {
   editAutoRefreshChapterList: Ref<boolean>;
   aiSmartFormat: Ref<AiSmartFormatSettings>;
   fullscreenReaderWidthPercent: Ref<number>;
+  fullscreenShowSystemTime: Ref<boolean>;
   timedScrollSettings: Ref<TimedScrollSettings>;
+  pomodoroSettings: Ref<import("../constants/pomodoro").PomodoroSettings>;
   fileMetaRecords: Ref<FileMetaRecord[]>;
   shortcutBindings: Ref<ShortcutBindingMap>;
   defaultShortcutBindings: ShortcutBindingMap;
@@ -946,7 +950,13 @@ export function useAppPersistence(deps: {
       deps.fullscreenReaderWidthPercent.value =
         defaultFullscreenReaderWidthPercent;
     }
+    if (typeof data.fullscreenShowSystemTime === "boolean") {
+      deps.fullscreenShowSystemTime.value = data.fullscreenShowSystemTime;
+    } else {
+      deps.fullscreenShowSystemTime.value = defaultFullscreenShowSystemTime;
+    }
     deps.timedScrollSettings.value = mergeTimedScrollSettings(data.timedScroll);
+    deps.pomodoroSettings.value = mergePomodoroSettings(data.pomodoro);
     deps.shortcutBindings.value = mergeShortcutBindings(
       deps.defaultShortcutBindings,
       data.shortcutBindings,
@@ -1145,7 +1155,9 @@ export function useAppPersistence(deps: {
       editAutoRefreshChapterList: deps.editAutoRefreshChapterList.value,
       aiSmartFormat: deps.aiSmartFormat.value,
       fullscreenReaderWidthPercent: deps.fullscreenReaderWidthPercent.value,
+      fullscreenShowSystemTime: deps.fullscreenShowSystemTime.value,
       timedScroll: deps.timedScrollSettings.value,
+      pomodoro: deps.pomodoroSettings.value,
       shortcutBindings: deps.shortcutBindings.value,
       readerPaletteOverridesLight:
         Object.keys(deps.readerPaletteOverridesLight.value).length > 0

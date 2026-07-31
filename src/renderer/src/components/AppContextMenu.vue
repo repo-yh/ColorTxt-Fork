@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+
+defineOptions({ inheritAttrs: false });
 
 type ContextMenuItem = {
   id: string;
@@ -29,12 +31,15 @@ const props = withDefaults(
     footerTopPx?: number | null;
     /** `placement === 'aboveFooterMouseX'` 时：打开菜单时的指针 `clientX` */
     pointerXPx?: number | null;
+    /** 叠放层级；默认高于嵌套 AppModal */
+    zIndex?: number;
   }>(),
   {
     placement: "point",
     footerTopPx: null,
     pointerXPx: null,
     excludeCloseWithin: undefined,
+    zIndex: undefined,
   },
 );
 
@@ -46,6 +51,8 @@ const emit = defineEmits<{
 const menuRef = ref<HTMLElement | null>(null);
 const posX = ref(0);
 const posY = ref(0);
+
+const zIndexStyle = computed(() => props.zIndex ?? 12000);
 
 function itemClass(item: ContextMenuItem) {
   const c = ["appShellMenuItem"];
@@ -143,44 +150,51 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div
-    v-if="open"
-    ref="menuRef"
-    class="contextMenu appShellMenuPanel"
-    role="menu"
-    :style="{
-      left: `${posX}px`,
-      top: `${posY}px`,
-      minWidth: `${minWidth ?? 140}px`,
-    }"
-    @click.stop
-  >
-    <template v-for="item in items" :key="item.id">
-      <div v-if="item.separator" class="appShellMenuDivider" role="separator" />
-      <button
-        v-else
-        type="button"
-        :class="itemClass(item)"
-        role="menuitem"
-        :disabled="item.disabled"
-        @click="onMenuItemClick(item)"
-      >
-        <span
-          v-if="item.iconHtml"
-          class="appShellMenuItemPrefix"
-          aria-hidden="true"
-          v-html="item.iconHtml"
-        />
-        {{ item.label }}
-      </button>
-    </template>
-  </div>
+  <Teleport to="body">
+    <div
+      v-if="open"
+      ref="menuRef"
+      v-bind="$attrs"
+      class="contextMenu appShellMenuPanel"
+      role="menu"
+      :style="{
+        left: `${posX}px`,
+        top: `${posY}px`,
+        minWidth: `${minWidth ?? 140}px`,
+        zIndex: zIndexStyle,
+      }"
+      @click.stop
+      @contextmenu.prevent
+      @pointerdown.stop
+    >
+      <template v-for="item in items" :key="item.id">
+        <div v-if="item.separator" class="appShellMenuDivider" role="separator" />
+        <button
+          v-else
+          type="button"
+          :class="itemClass(item)"
+          role="menuitem"
+          :disabled="item.disabled"
+          @click="onMenuItemClick(item)"
+        >
+          <span
+            v-if="item.iconHtml"
+            class="appShellMenuItemPrefix"
+            aria-hidden="true"
+            v-html="item.iconHtml"
+          />
+          {{ item.label }}
+        </button>
+      </template>
+    </div>
+  </Teleport>
 </template>
 
 <style scoped>
 .contextMenu {
   position: fixed;
-  z-index: 7000;
+  /* 默认高于嵌套 AppModal（6000+）；全屏编辑等场景可经 zIndex 再抬高 */
+  z-index: 12000;
 }
 
 .contextMenu :deep(.appShellMenuItemPrefix svg path) {

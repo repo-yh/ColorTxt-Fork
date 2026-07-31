@@ -75,8 +75,16 @@
   /** SwitchToggle 未勾选时轨道背景 */
   --switch-track-off-bg: #dcdfe6;
 
+  /** 编辑书源轻量代码高亮（对齐 legado-E CodeView 色系） */
+  --bs-hl-legado: #e65100;
+  --bs-hl-json: #1565c0;
+  --bs-hl-js-wrap: #78909c;
+  --bs-hl-js-op: #e65100;
+  --bs-hl-js-kw: #039be5;
+
   /* 首帧回退；运行时常量见 constants/readerPalette.ts，由 applyReaderSurfaceToDocument 写入 html */
   --reader-bg: #f4ead7;
+  --reader-body-text: #000000;
   --reader-chapter-title: #b88230;
 
   --female: #cc0033;
@@ -149,7 +157,14 @@ html.dark {
 
   --switch-track-off-bg: #4c4d4f;
 
+  --bs-hl-legado: #ffb74d;
+  --bs-hl-json: #64b5f6;
+  --bs-hl-js-wrap: #90a4ae;
+  --bs-hl-js-op: #ffb74d;
+  --bs-hl-js-kw: #4fc3f7;
+
   --reader-bg: #1e1e1e;
+  --reader-body-text: #d4d4d4;
   --reader-chapter-title: #569cd6;
 }
 

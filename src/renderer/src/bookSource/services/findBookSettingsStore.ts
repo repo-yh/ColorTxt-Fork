@@ -3,6 +3,8 @@ import {
   defaultCompressBlankKeepOneBlank,
   defaultCompressBlankLines,
   defaultFullscreenReaderWidthPercent,
+  defaultFullscreenShowSystemTime,
+  defaultShowSidebar,
   defaultLeadIndentFullWidth,
   defaultMonacoAdvancedWrapping,
   defaultMonacoCustomHighlight,
@@ -23,6 +25,10 @@ import {
   mergeTimedScrollSettings,
   type TimedScrollSettings,
 } from "../../constants/timedScroll";
+import {
+  mergePomodoroSettings,
+  type PomodoroSettings,
+} from "../../constants/pomodoro";
 import { READER_EDITOR_DEFAULT_FONT_FAMILY } from "../../monaco/readerEditorOptions";
 import { loadPersistedSettingsData } from "../../stores/cacheStore";
 import { resolveDefaultBookSourceDownloadDirSync, resolveDefaultBookSourceChapterCacheDirSync } from "../../utils/defaultCacheDirs";
@@ -35,6 +41,7 @@ import {
   DEFAULT_FIND_BOOK_DOWNLOAD_CATEGORY,
   DEFAULT_FIND_BOOK_PROXY_SETTINGS,
   defaultFindBookChapterNavToolbarEnabled,
+  defaultFindBookShowChapterTag,
   findBookSettingsKey,
   isFindBookDownloadAfterAction,
   normalizeFindBookProxySettings,
@@ -101,6 +108,8 @@ function seedFromMainSettings(
   copyIfUndef("readerEditShowLineNumbers", main.readerEditShowLineNumbers);
   copyIfUndef("readerEditMinimap", main.readerEditMinimap);
   copyIfUndef("fullscreenReaderWidthPercent", main.fullscreenReaderWidthPercent);
+  copyIfUndef("fullscreenShowSystemTime", main.fullscreenShowSystemTime);
+  copyIfUndef("showSidebar", main.showSidebar);
   if (out.sidebarWidth === undefined && typeof main.sidebarWidth === "number") {
     out.sidebarWidth = Math.max(
       FIND_BOOK_SIDEBAR_MIN_WIDTH,
@@ -108,6 +117,9 @@ function seedFromMainSettings(
     );
   }
   copyIfUndef("timedScroll", main.timedScroll);
+  if (out.pomodoro === undefined && main.pomodoro) {
+    out.pomodoro = main.pomodoro;
+  }
 
   return out;
 }
@@ -154,8 +166,12 @@ export function snapshotFindBookSettingsFromStore(state: {
   readerEditShowLineNumbers: boolean;
   readerEditMinimap: boolean;
   fullscreenReaderWidthPercent: number;
+  fullscreenShowSystemTime: boolean;
+  showSidebar: boolean;
   sidebarWidth: number;
+  showChapterTag: boolean;
   timedScrollSettings: TimedScrollSettings;
+  pomodoroSettings: PomodoroSettings;
 }): PersistedFindBookSettings {
   return {
     cacheDir: state.cacheDir.trim(),
@@ -183,8 +199,12 @@ export function snapshotFindBookSettingsFromStore(state: {
     readerEditShowLineNumbers: state.readerEditShowLineNumbers,
     readerEditMinimap: state.readerEditMinimap,
     fullscreenReaderWidthPercent: state.fullscreenReaderWidthPercent,
+    fullscreenShowSystemTime: state.fullscreenShowSystemTime,
+    showSidebar: state.showSidebar,
     sidebarWidth: state.sidebarWidth,
+    showChapterTag: state.showChapterTag,
     timedScroll: state.timedScrollSettings,
+    pomodoro: state.pomodoroSettings,
   };
 }
 
@@ -278,6 +298,14 @@ export function createInitialFindBookSettingsState() {
       typeof data.fullscreenReaderWidthPercent === "number"
         ? data.fullscreenReaderWidthPercent
         : defaultFullscreenReaderWidthPercent,
+    fullscreenShowSystemTime:
+      typeof data.fullscreenShowSystemTime === "boolean"
+        ? data.fullscreenShowSystemTime
+        : defaultFullscreenShowSystemTime,
+    showSidebar:
+      typeof data.showSidebar === "boolean"
+        ? data.showSidebar
+        : defaultShowSidebar,
     sidebarWidth:
       typeof data.sidebarWidth === "number" && Number.isFinite(data.sidebarWidth)
         ? Math.max(
@@ -285,7 +313,12 @@ export function createInitialFindBookSettingsState() {
             Math.floor(data.sidebarWidth),
           )
         : 270 - SIDEBAR_ACTIVITY_BAR_WIDTH,
+    showChapterTag:
+      typeof data.showChapterTag === "boolean"
+        ? data.showChapterTag
+        : defaultFindBookShowChapterTag,
     timedScrollSettings: mergeTimedScrollSettings(data.timedScroll),
+    pomodoroSettings: mergePomodoroSettings(data.pomodoro),
   };
 }
 

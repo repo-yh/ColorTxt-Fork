@@ -8,6 +8,16 @@ export type BookSourceFieldDef = {
   multiline?: boolean;
 };
 
+/**
+ * 编辑书源输入框自动增高上限（约 10 行）。
+ * 与 AutoResizeTextarea / HighlightedCodeTextarea 的
+ * font-size:13px、line-height:1.45、padding-y:8px 对齐。
+ */
+export const EDIT_BOOK_SOURCE_TEXTAREA_MAX_LINES = 10;
+export const EDIT_BOOK_SOURCE_TEXTAREA_MAX_HEIGHT_PX = Math.ceil(
+  13 * 1.45 * EDIT_BOOK_SOURCE_TEXTAREA_MAX_LINES + 8 * 2,
+);
+
 export const BOOK_SOURCE_BASIC_FIELDS: BookSourceFieldDef[] = [
   { key: "bookSourceUrl", label: "源 URL" },
   { key: "bookSourceName", label: "源名称" },

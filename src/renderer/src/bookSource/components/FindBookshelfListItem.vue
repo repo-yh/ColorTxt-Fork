@@ -3,7 +3,7 @@ import { computed, ref, watch } from "vue";
 import DefaultBookCover from "./DefaultBookCover.vue";
 import AppCheckbox from "../../components/AppCheckbox.vue";
 import type { BookshelfBook } from "../findBookBookshelf";
-import { formatBookAuthor } from "../bookSourceDisplay";
+import { formatCoverAuthor } from "../bookSourceDisplay";
 import {
   formatBookshelfLastRead,
   formatBookshelfLatestChapter,
@@ -14,6 +14,10 @@ import {
 import { SORTABLE_ROW_HANDLE_CLASS } from "../../composables/useSortableReorder";
 import { icons } from "../../icons";
 import RefreshIcon from "../../components/RefreshIcon.vue";
+import {
+  UNCATEGORIZED_LIST_BORDER_COLOR,
+  type FileCategoryDefinition,
+} from "../../constants/fileCategories";
 
 const props = withDefaults(
   defineProps<{
@@ -24,6 +28,8 @@ const props = withDefaults(
     forceDefaultCover?: boolean;
     /** 最后阅读展示（含异步解析的章节名） */
     lastReadText?: string;
+    /** 书架分类目录（用于取色） */
+    categoryCatalog?: FileCategoryDefinition[];
     /** 手动排序模式下显示拖动手柄 */
     showDragHandle?: boolean;
     /** 正在更新书籍信息 */
@@ -35,6 +41,7 @@ const props = withDefaults(
   }>(),
   {
     coverPending: false,
+    categoryCatalog: () => [],
     showDragHandle: false,
     updating: false,
     managing: false,
@@ -43,10 +50,14 @@ const props = withDefaults(
 );
 
 const emit = defineEmits<{
-  click: [item: BookshelfBook];
+  click: [item: BookshelfBook, event: MouseEvent];
   coverError: [item: BookshelfBook];
   more: [item: BookshelfBook, event: MouseEvent];
   remove: [item: BookshelfBook];
+  searchSource: [item: BookshelfBook];
+  selectCategory: [category: string];
+  openBookInfo: [item: BookshelfBook];
+  searchAuthor: [author: string];
 }>();
 
 const coverLoadFailed = ref(false);
@@ -87,6 +98,23 @@ const lastReadChapterVip = computed(() =>
 );
 const updateDisabled = computed(() => props.item.canUpdate === false);
 
+const categoryName = computed(() => (props.item.category ?? "").trim());
+const categoryColor = computed(() => {
+  const n = categoryName.value;
+  if (!n) return UNCATEGORIZED_LIST_BORDER_COLOR;
+  const hit = props.categoryCatalog.find((c) => c.name === n);
+  return hit?.color ?? UNCATEGORIZED_LIST_BORDER_COLOR;
+});
+const showOriginMeta = computed(
+  () => Boolean(props.item.originName) || Boolean(categoryName.value),
+);
+
+const authorDisplay = computed(() => formatCoverAuthor(props.item.author));
+const authorSearchable = computed(() => {
+  const a = authorDisplay.value;
+  return Boolean(a && a !== "未知");
+});
+
 watch(
   () => props.coverUrl,
   () => {
@@ -94,8 +122,8 @@ watch(
   },
 );
 
-function onClick() {
-  emit("click", props.item);
+function onClick(e: MouseEvent) {
+  emit("click", props.item, e);
 }
 
 function onCoverError() {
@@ -115,6 +143,33 @@ function onMoreClick(e: MouseEvent) {
 function onRemoveClick(e: MouseEvent) {
   e.stopPropagation();
   emit("remove", props.item);
+}
+
+function onOpenBookInfoClick(e: MouseEvent) {
+  if (props.managing) return;
+  e.stopPropagation();
+  emit("openBookInfo", props.item);
+}
+
+function onSearchAuthorClick(e: MouseEvent) {
+  if (props.managing) return;
+  e.stopPropagation();
+  if (!authorSearchable.value) return;
+  emit("searchAuthor", authorDisplay.value);
+}
+
+function onSearchSourceClick(e: MouseEvent) {
+  if (props.managing) return;
+  e.stopPropagation();
+  emit("searchSource", props.item);
+}
+
+function onSelectCategoryClick(e: MouseEvent) {
+  if (props.managing) return;
+  e.stopPropagation();
+  const name = categoryName.value;
+  if (!name) return;
+  emit("selectCategory", name);
 }
 </script>
 
@@ -169,10 +224,40 @@ function onRemoveClick(e: MouseEvent) {
       :class="{ 'findBookListItemMain--managing': managing }"
     >
       <div class="findBookListItemBody">
-        <div class="findBookListItemTitle">{{ item.name }}</div>
-        <div class="findBookListItemAuthor">{{ formatBookAuthor(item.author) }}</div>
+        <div class="findBookListItemTitle">
+          <button
+            type="button"
+            class="link findBookshelfTitleLink"
+            :title="item.name"
+            @click="onOpenBookInfoClick"
+          >
+            {{ item.name }}
+          </button>
+        </div>
+        <div class="findBookListItemAuthor">
+          <span
+            class="findBookshelfMetaIcon"
+            title="作者"
+            aria-label="作者"
+            v-html="icons.user"
+          />
+          <button
+            type="button"
+            class="link findBookshelfAuthorLink"
+            :disabled="!authorSearchable"
+            :title="authorSearchable ? `搜索：${authorDisplay}` : authorDisplay"
+            @click="onSearchAuthorClick"
+          >
+            {{ authorDisplay }}
+          </button>
+        </div>
         <div class="findBookListItemLatest">
-          最新章节：<span
+          <span
+            class="findBookshelfMetaIcon"
+            title="最新章节"
+            aria-label="最新章节"
+            v-html="icons.history"
+          /><span
             v-if="latestChapterVip"
             class="findBookshelfChapterLock"
             v-html="icons.lock"
@@ -180,14 +265,59 @@ function onRemoveClick(e: MouseEvent) {
           /><span :title="latestChapterText">{{ latestChapterText }}</span>
         </div>
         <div class="findBookListItemLatest">
-          最后阅读：<span
+          <span
+            class="findBookshelfMetaIcon"
+            title="最后阅读"
+            aria-label="最后阅读"
+            v-html="icons.read"
+          /><span
             v-if="lastReadChapterVip"
             class="findBookshelfChapterLock"
             v-html="icons.lock"
             aria-hidden="true"
           /><span :title="lastReadText">{{ lastReadText }}</span>
         </div>
-        <div v-if="item.originName" class="findBookListItemOrigin">{{ item.originName }}</div>
+        <div v-if="showOriginMeta" class="findBookListItemOrigin">
+          <span v-if="item.originName" class="findBookshelfOrigin">
+            <span
+              class="findBookshelfMetaIcon findBookshelfMetaIcon--origin"
+              title="书源"
+              aria-label="书源"
+              v-html="icons.findBook"
+            />
+            <button
+              type="button"
+              class="link findBookshelfOriginLink"
+              :disabled="!item.origin?.trim()"
+              :title="`${item.originName}：搜索`"
+              @click="onSearchSourceClick"
+            >
+              {{ item.originName }}
+            </button>
+          </span>
+          <span
+            v-if="categoryName"
+            class="findBookshelfCategory"
+            :style="{ color: categoryColor }"
+          >
+            <span
+              class="findBookshelfMetaIcon findBookshelfMetaIcon--category"
+              title="分类"
+              aria-label="分类"
+              aria-hidden="true"
+              v-html="icons.folderOpen"
+            />
+            <button
+              type="button"
+              class="link findBookshelfCategoryLink"
+              :title="`分类：${categoryName}`"
+              :style="{ color: categoryColor }"
+              @click="onSelectCategoryClick"
+            >
+              {{ categoryName }}
+            </button>
+          </span>
+        </div>
       </div>
       <div v-if="!managing" class="findBookListItemActions">
         <button
@@ -266,17 +396,18 @@ function onRemoveClick(e: MouseEvent) {
 }
 .findBookListItem--selected {
   border-color: var(--accent);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent);
 }
 .findBookListItem--selected:hover {
-  box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent),
-    0 2px 8px color-mix(in srgb, var(--fg) 12%, transparent);
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.findBookListItem--managing {
+  cursor: default;
 }
 .findBookshelfSelectCheckbox {
   flex-shrink: 0;
   align-self: center;
   margin: 0;
+  pointer-events: none;
 }
 .findBookListItemActions {
   position: absolute;
@@ -377,6 +508,9 @@ img.findBookListItemCover {
   align-items: stretch;
   gap: 10px;
 }
+.findBookListItemMain--managing * {
+  pointer-events: none;
+}
 .findBookListItemBody {
   flex: 1;
   min-width: 0;
@@ -396,22 +530,75 @@ img.findBookListItemCover {
   font-size: 15px;
   line-height: 1.35;
   color: var(--fg);
-  overflow: hidden;
-  text-overflow: ellipsis;
+  margin-bottom: 4px;
+}
+.findBookshelfTitleLink {
   display: -webkit-box;
   -webkit-line-clamp: 2;
   line-clamp: 2;
   -webkit-box-orient: vertical;
-  margin-bottom: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+  color: inherit;
+  font-weight: inherit;
+  font-size: inherit;
+  line-height: inherit;
+  text-align: left;
+  white-space: normal;
+}
+.findBookshelfTitleLink:not(:disabled):hover {
+  color: var(--accent);
 }
 .findBookListItemOrigin {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 10px;
   margin-top: 6px;
   font-size: 11px;
   line-height: 1.45;
   color: var(--book-source);
+  min-width: 0;
+}
+.findBookshelfOrigin {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+}
+.findBookshelfOriginLink {
+  min-width: 0;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  color: var(--book-source);
+  font-size: inherit;
+  line-height: inherit;
+}
+.findBookshelfOriginLink:not(:disabled):hover {
+  color: var(--book-source);
+}
+.findBookshelfCategory {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+}
+.findBookshelfCategoryLink {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: inherit;
+  line-height: inherit;
+}
+.findBookshelfCategoryLink:not(:disabled):hover {
+  color: inherit;
 }
 .findBookshelfMoreBtn {
   display: flex;
@@ -506,9 +693,29 @@ img.findBookListItemCover {
   white-space: nowrap;
 }
 .findBookListItemAuthor {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  min-width: 0;
   font-size: 13px;
-  color: var(--muted);
+  color: var(--fg);
   margin-bottom: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.findBookshelfAuthorLink {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: inherit;
+  font-size: inherit;
+  line-height: inherit;
+}
+.findBookshelfAuthorLink:not(:disabled):hover {
+  color: var(--accent);
 }
 .findBookListItemLatest {
   font-size: 12px;
@@ -517,6 +724,28 @@ img.findBookListItemCover {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.findBookshelfMetaIcon {
+  display: inline-flex;
+  align-items: center;
+  vertical-align: -0.15em;
+  margin-right: 4px;
+  color: var(--muted);
+  flex-shrink: 0;
+}
+.findBookshelfMetaIcon--origin {
+  margin-right: 0;
+}
+.findBookshelfMetaIcon--category {
+  margin-right: 0;
+}
+.findBookshelfMetaIcon :deep(svg) {
+  width: 12px;
+  height: 12px;
+  display: block;
+}
+.findBookshelfMetaIcon :deep(svg > path) {
+  fill: currentColor;
 }
 .findBookshelfChapterLock {
   display: inline-flex;

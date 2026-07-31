@@ -18,7 +18,16 @@ import VirtualList from "../../components/VirtualList.vue";
 import ReaderMain from "../../components/ReaderMain.vue";
 import VoiceReadToolbar from "../../components/VoiceReadToolbar.vue";
 import ReaderChapterNavBar from "../../components/ReaderChapterNavBar.vue";
+import FullscreenSystemClock from "../../components/FullscreenSystemClock.vue";
+import PomodoroBreakOverlay from "../../components/PomodoroBreakOverlay.vue";
+import FindBookReaderFooter from "./FindBookReaderFooter.vue";
 import FindBookReaderHeader from "./FindBookReaderHeader.vue";
+import {
+  countCharsForLine,
+  floorReadingProgressPercentByLines,
+  formatCharCount,
+} from "../../utils/format";
+import { usePomodoroTimer } from "../../composables/usePomodoroTimer";
 import EditBookSourcePanel from "./EditBookSourcePanel.vue";
 import BookSourceLoginPanel from "./BookSourceLoginPanel.vue";
 import AppShellMenuTeleport from "../../components/AppShellMenuTeleport.vue";
@@ -83,6 +92,9 @@ import {
   persistSettingsData,
 } from "../../stores/cacheStore";
 import { READER_SIDEBAR_ROW_STRIDE } from "../../composables/useReaderSidebarLists";
+
+/** 章名下有 tag（updateTime）时两行展示的行距 */
+const READER_SIDEBAR_ROW_STRIDE_WITH_TAG = 56;
 import {
   contentChaptersInReadingOrder,
   displayIndexForReadingOrder,
@@ -163,16 +175,41 @@ const viewportTopLine = ref(1);
 const viewportEndLine = ref(1);
 const viewportVisualProgressPercent = ref(0);
 const viewportAtBottom = ref(false);
+/** 当前章节在阅读器中的展示总行数 */
+const totalLineCount = ref(0);
 const readerEditMode = ref(false);
 const readerEditorDirty = ref(false);
 const loading = ref(false);
 /** 仅切到未缓存章节时为 true，控制侧栏 loading 图标与「加载中」提示 */
 const showChapterLoadingUi = ref(false);
-const showSidebar = ref(true);
 
 const settings = useFindBookReaderSettings();
 const findBookSettings = useFindBookSettings();
+/** 阅读器侧栏 UI 态；持久化偏好在 findBookSettings.showSidebar */
+const showSidebar = ref(findBookSettings.showSidebar.value);
+const showChapterTag = findBookSettings.showChapterTag;
+/** 本会话是否已按「章节数」应用过打开时的侧栏策略（单章临时收起等） */
+let sidebarOpenPolicyApplied = false;
+/** 本次打开后用户是否已手动切换侧栏（此后不再套用单章临时收起） */
+let sidebarUserToggledThisOpen = false;
 const effectiveCacheDir = findBookSettings.effectiveCacheDir;
+const {
+  phase: pomodoroPhase,
+  displayMode: pomodoroDisplayMode,
+  progress: pomodoroProgress,
+  countdownText: pomodoroCountdownText,
+  pauseResumeLabel: pomodoroPauseResumeLabel,
+  paused: pomodoroPaused,
+  showBreakOverlay: pomodoroShowBreakOverlay,
+  start: startPomodoro,
+  toggleDisplayMode: togglePomodoroDisplayMode,
+  togglePause: togglePomodoroPause,
+  stop: stopPomodoro,
+  finishBreakEarly: finishPomodoroBreakEarly,
+} = usePomodoroTimer(findBookSettings.pomodoroSettings);
+const pomodoroEnabled = computed(
+  () => findBookSettings.pomodoroSettings.value.enabled,
+);
 const {
   currentTheme,
   sidebarWidth,
@@ -195,6 +232,7 @@ const {
   readerEditShowLineNumbers,
   readerEditMinimap,
   fullscreenReaderWidthPercent,
+  fullscreenShowSystemTime,
   chapterMinCharCount,
   timedScrollSettings,
   aiFeaturesEnabled,
@@ -397,7 +435,7 @@ const sidebarShellVisible = computed(() =>
 const chapterNavUiVisible = computed(
   () =>
     chapterNavToolbarEnabled.value &&
-    displayChapters.value.length > 0 &&
+    displayChapters.value.length > 1 &&
     !isVoiceReadActive.value,
 );
 
@@ -526,10 +564,34 @@ async function refreshConvertedChapterTitles() {
   convertedChapterTitlesByIndex.value = next;
 }
 
-function chapterDisplayTitle(index: number): string {
+function chapterDisplayBaseTitle(index: number): string {
   const ch = displayChapters.value[index];
   if (!ch) return "";
   return convertedChapterTitlesByIndex.value.get(index) ?? ch.title;
+}
+
+function chapterDisplayTitle(index: number): string {
+  const ch = displayChapters.value[index];
+  if (!ch) return "";
+  const base = chapterDisplayBaseTitle(index);
+  const tag = showChapterTag.value ? (ch.tag?.trim() ?? "") : "";
+  return tag ? `${base}\n${tag}` : base;
+}
+
+const chapterListRowStride = computed(() =>
+  showChapterTag.value &&
+  displayChapters.value.some((ch) => ch.tag?.trim())
+    ? READER_SIDEBAR_ROW_STRIDE_WITH_TAG
+    : READER_SIDEBAR_ROW_STRIDE,
+);
+
+const hasChapterTags = computed(() =>
+  displayChapters.value.some((ch) => Boolean(ch.tag?.trim())),
+);
+
+function toggleShowChapterTag() {
+  showChapterTag.value = !showChapterTag.value;
+  findBookSettings.persistAll();
 }
 const sidebarPanelWidth = computed(() =>
   Math.max(FIND_BOOK_SIDEBAR_MIN_WIDTH, sidebarWidth.value),
@@ -770,6 +832,7 @@ async function renderChapterText(
     heavy: false,
     resetScroll: opts?.resetScroll ?? true,
   });
+  totalLineCount.value = reader.getModelLineCount?.() ?? formatted.lineCount;
   if (rawTitle) {
     const lineNumber =
       formatted.chapterTitleDisplayLineByPhysical.get(1) ?? 1;
@@ -783,6 +846,18 @@ async function renderChapterText(
   } else {
     reader.setChapters([]);
   }
+}
+
+function syncFooterLineCountFromReader() {
+  const n = readerRef.value?.getModelLineCount?.();
+  if (typeof n === "number" && Number.isFinite(n) && n >= 0) {
+    totalLineCount.value = n;
+  }
+}
+
+function onFindBookViewportEndLineChange(line: number) {
+  readerUi.onViewportEndLineChange(line);
+  syncFooterLineCountFromReader();
 }
 
 function stripLeadingChapterTitleFromBody(body: string, title: string): string {
@@ -841,7 +916,7 @@ async function onToggleReaderEdit() {
     return;
   }
   if (!canEnterReaderEditMode.value) {
-    appToast("请等待当前章节加载完成后再进入编辑模式。");
+    appToast("请等待当前章节加载完成后再进入编辑模式。", { kind: "info" });
     return;
   }
   voiceRead.exitVoiceRead();
@@ -854,6 +929,7 @@ async function onToggleReaderEdit() {
   const reader = readerRef.value;
   if (reader) {
     await reader.setFullText(editText, { heavy: false, resetScroll: false });
+    totalLineCount.value = reader.getModelLineCount?.() ?? 0;
     if (lastChapterTitle.value.trim()) {
       reader.setChapters([
         {
@@ -910,7 +986,25 @@ async function loadChapterAtDisplayIndex(
     readerEditorDirty.value = false;
   }
   const contentIndex = contentIndexFor(ch);
-  if (contentIndex < 0) return;
+  if (contentIndex < 0) {
+    // 分卷标题：不拉正文规则（对齐 Legado），仅展示卷名
+    if (ch.isVolume) {
+      if (!(await confirmIfReaderEditDiscard())) return;
+      if (readerEditMode.value) {
+        readerEditMode.value = false;
+        readerEditorDirty.value = false;
+      }
+      currentDisplayIndex.value = index;
+      cancelChapterLoad();
+      readerContentKey.value = `findbook://volume#${encodeURIComponent(ch.url)}`;
+      lastChapterTitle.value = ch.title;
+      lastChapterBody.value = "";
+      totalLineCount.value = 0;
+      await renderChapterText(ch.title, "");
+      void scrollChapterListToCurrent({ smooth: options?.smoothScroll ?? true });
+    }
+    return;
+  }
   const preferCache = options?.preferCache !== false;
   const fromCache = preferCache && isChapterCached(ch);
   const wantSmooth = options?.smoothScroll ?? true;
@@ -925,6 +1019,7 @@ async function loadChapterAtDisplayIndex(
     readerContentKey.value = null;
     lastChapterTitle.value = "";
     lastChapterBody.value = "";
+    totalLineCount.value = 0;
   }
   const listLen = displayChapters.value.length;
   const readingIdx = readingOrderIndexFromDisplay(
@@ -956,13 +1051,16 @@ async function loadChapterAtDisplayIndex(
       chapterUrl: ch.url,
       chapterTitle: ch.title,
       chapterIndex: contentIndex,
+      isVolume: ch.isVolume,
       nextChapterUrl: nextInReadingOrder?.url,
       chapterUrls: chapterUrlsInReadingOrder,
       cacheDir: effectiveCacheDir.value.trim() || undefined,
       preferCache,
     });
     if (loaded == null) {
-      if (chapterError.value) appToast(chapterError.value);
+      readerContentKey.value = null;
+      lastChapterTitle.value = ch.title;
+      lastChapterBody.value = "";
       return;
     }
     const { content: body, displayTitle } = loaded;
@@ -1006,6 +1104,45 @@ const currentReadingOrderIndex = computed(() =>
     displayChapters.value.length,
     chapterSortDesc.value,
   ),
+);
+
+const footerReadingProgress = computed(() => {
+  const totalChapters = displayChapters.value.length;
+  const hasContent = Boolean(readerContentKey.value);
+  if (!hasContent || totalChapters <= 0 || currentReadingOrderIndex.value < 0) {
+    return {
+      percentPart: "-",
+      detailPart: "",
+      placeholder: true,
+      complete: false,
+    };
+  }
+  const chapterRo1 = currentReadingOrderIndex.value + 1;
+  const percentValue = floorReadingProgressPercentByLines(
+    chapterRo1,
+    totalChapters,
+  );
+  const totalLines = Math.max(0, totalLineCount.value);
+  const currentLine =
+    totalLines > 0
+      ? Math.min(totalLines, Math.max(1, viewportEndLine.value))
+      : 0;
+  const percent = percentValue.toFixed(1).replace(/\.0$/, "");
+  return {
+    percentPart: `${percent}%`,
+    detailPart: ` (${chapterRo1}/${totalChapters}，${currentLine}/${totalLines})`,
+    placeholder: false,
+    complete: chapterRo1 >= totalChapters,
+  };
+});
+
+const footerChapterCharCountText = computed(() =>
+  formatCharCount(countCharsForLine(lastChapterBody.value)),
+);
+
+const footerHasContent = computed(() => Boolean(readerContentKey.value));
+const footerLoading = computed(
+  () => readerBootLoading.value || showChapterLoadingUi.value,
 );
 
 const canGoPrevChapter = computed(() => currentReadingOrderIndex.value > 0);
@@ -1104,6 +1241,8 @@ const { shortcutBindings } = useFindBookReaderShortcuts({
   decreaseLineHeight: () => readerUi.decreaseLineHeight(),
   jumpToPrevChapter: jumpToPrevChapterWithShortcut,
   jumpToNextChapter: jumpToNextChapterWithShortcut,
+  toggleSidebar: () => onToggleSidebar(),
+  toggleFullscreen: () => void toggleFullscreen(),
   isVoiceReadScrollLocked,
   isVoiceReadBlocksFind,
 });
@@ -1536,6 +1675,10 @@ async function onStartOfflineCache() {
 }
 
 function buildShelfItem(): SearchBookItem {
+  const variable = {
+    ...(props.item.variable ?? {}),
+    ...(props.detail.variable ?? {}),
+  };
   return {
     ...props.item,
     name: props.detail.name,
@@ -1547,6 +1690,7 @@ function buildShelfItem(): SearchBookItem {
     kind: props.detail.kind ?? props.item.kind,
     wordCount: props.detail.wordCount ?? props.item.wordCount,
     bookUrl: props.detail.bookUrl,
+    ...(Object.keys(variable).length ? { variable } : {}),
   };
 }
 
@@ -1570,10 +1714,11 @@ function onToggleBookshelf() {
       updateFindBookBookshelfBookInfo(props.detail.bookUrl, props.item.origin, {
         tocUrl: props.detail.tocUrl,
         chapters: props.chapters,
+        variable: props.detail.variable,
       });
     }
   }
-  appToast(added ? "已放入书架" : "已从书架移除");
+  appToast(added ? "已放入书架" : "已从书架移除", { kind: added ? "success" : "info" });
 }
 
 function persistSharedTheme(theme: AppShellTheme) {
@@ -1676,12 +1821,42 @@ async function bootstrapReaderContent() {
   void loadChapterAtDisplayIndex(startIndex, { smoothScroll: false });
 }
 
+/** 打开时：先恢复持久化偏好；仅一章时临时收起（不写盘） */
+function applySidebarOpenPolicy() {
+  if (
+    !modelValue.value ||
+    sidebarOpenPolicyApplied ||
+    sidebarUserToggledThisOpen
+  ) {
+    return;
+  }
+  const chapterCount = contentChapters.value.length;
+  if (chapterCount <= 0) {
+    showSidebar.value = findBookSettings.showSidebar.value;
+    return;
+  }
+  showSidebar.value = findBookSettings.showSidebar.value;
+  if (chapterCount === 1) {
+    showSidebar.value = false;
+  }
+  sidebarOpenPolicyApplied = true;
+}
+
+function onToggleSidebar() {
+  showSidebar.value = !showSidebar.value;
+  findBookSettings.showSidebar.value = showSidebar.value;
+  findBookSettings.persistReaderUiPrefs();
+  sidebarUserToggledThisOpen = true;
+  sidebarOpenPolicyApplied = true;
+}
+
 watch(
   modelValue,
   async (open) => {
     if (!open) {
       voiceRead.exitVoiceRead();
       timedScroll.stopTimedScroll();
+      stopPomodoro();
       cancelChapterLoad();
       if (offlineCaching.value) void cancelOfflineCache();
       loading.value = false;
@@ -1691,6 +1866,9 @@ watch(
       readerContentKey.value = null;
       lastChapterBody.value = "";
       lastChapterTitle.value = "";
+      totalLineCount.value = 0;
+      sidebarOpenPolicyApplied = false;
+      sidebarUserToggledThisOpen = false;
       if (isFullscreenView.value) {
         try {
           await window.colorTxt.setFullscreen(false);
@@ -1701,7 +1879,7 @@ watch(
       }
       return;
     }
-    showSidebar.value = true;
+    applySidebarOpenPolicy();
     applyAppShellTheme(currentTheme.value);
     await nextTick();
     applyReaderAppearance();
@@ -1710,7 +1888,7 @@ watch(
   { immediate: true },
 );
 
-/** 书架先开阅读器、目录迟到时：目录就绪后加载正文 */
+/** 书架先开阅读器、目录迟到时：目录就绪后加载正文，并补做单章侧栏策略 */
 watch(
   () => [modelValue.value, props.chapters.length, props.tocLoading] as const,
   async ([open, chapterCount, tocLoading], prev) => {
@@ -1719,6 +1897,7 @@ watch(
     const wasTocLoading = prev?.[2] ?? false;
     // 目录从空到有，或 tocLoading 刚结束且已有章节
     if (prevCount > 0 && !wasTocLoading) return;
+    applySidebarOpenPolicy();
     await nextTick();
     await bootstrapReaderContent();
   },
@@ -1832,7 +2011,14 @@ const modalRef = ref<InstanceType<typeof AppModal> | null>(null);
               class="findBookReaderBreadcrumbSep"
               aria-hidden="true"
             >/</span>
-            <span class="findBookReaderBreadcrumbCurrent">{{ detail.name }}</span>
+            <button
+              type="button"
+              class="findBookReaderBreadcrumbCurrent"
+              title="书籍信息"
+              @click="onOpenBookDetail"
+            >
+              {{ detail.name }}
+            </button>
           </nav>
           <div class="findBookReaderTopBarActions">
             <IconButton
@@ -1869,7 +2055,7 @@ const modalRef = ref<InstanceType<typeof AppModal> | null>(null);
             />
             <IconButton
               v-if="sourceNeedsLogin"
-              :icon-html="icons.login"
+              :icon-html="icons.user"
               title="登录"
               aria-label="登录"
               @click="onLogin"
@@ -1894,14 +2080,6 @@ const modalRef = ref<InstanceType<typeof AppModal> | null>(null);
           :top="topMoreTop"
           :on-panel-mount="bindTopMorePanel"
         >
-          <button
-            type="button"
-            class="appShellMenuItem"
-            role="menuitem"
-            @click="onOpenBookDetail"
-          >
-            <span class="appShellMenuLabel">书籍信息</span>
-          </button>
           <button
             type="button"
             class="appShellMenuItem"
@@ -1961,7 +2139,7 @@ const modalRef = ref<InstanceType<typeof AppModal> | null>(null);
           :can-enter-reader-edit-mode="canEnterReaderEditMode"
           :text-replace-active="textReplaceActive"
           @change-theme="onChangeTheme"
-          @toggle-sidebar="showSidebar = !showSidebar"
+          @toggle-sidebar="onToggleSidebar"
           @toggle-fullscreen="toggleFullscreen"
           @set-monaco-font="readerUi.setMonacoFontFamily"
           @toggle-pin-other-font="readerUi.togglePinnedOtherFont"
@@ -2009,6 +2187,14 @@ const modalRef = ref<InstanceType<typeof AppModal> | null>(null);
             <div class="sidebarHeader">
               <div class="sidebarHeaderStart">
                 <span class="sidebarHeaderTitle">章节</span>
+                <IconButton
+                  v-if="hasChapterTags"
+                  :icon-html="icons.subhead"
+                  :title="showChapterTag ? '隐藏附加信息' : '显示附加信息'"
+                  :aria-label="showChapterTag ? '隐藏附加信息' : '显示附加信息'"
+                  :pressed="showChapterTag"
+                  @click="toggleShowChapterTag"
+                />
                 <IconButton
                   title="重新获取目录"
                   aria-label="重新获取目录"
@@ -2097,7 +2283,7 @@ const modalRef = ref<InstanceType<typeof AppModal> | null>(null);
                     ref="chapterListRef"
                     class="sidebarList sidebarList--itemGap"
                     :item-count="displayChapters.length"
-                    :row-stride="READER_SIDEBAR_ROW_STRIDE"
+                    :row-stride="chapterListRowStride"
                     :overscan="10"
                     :item-key="(i) => i"
                   >
@@ -2133,7 +2319,19 @@ const modalRef = ref<InstanceType<typeof AppModal> | null>(null);
                             displayChapters[index]?.isPay ? '已购买' : 'VIP'
                           "
                         />
-                        <span class="itemName">{{ chapterDisplayTitle(index) }}</span>
+                        <span class="itemName">
+                          <span class="itemNameTitle">{{
+                            chapterDisplayBaseTitle(index)
+                          }}</span>
+                          <span
+                            v-if="
+                              showChapterTag &&
+                              displayChapters[index]?.tag?.trim()
+                            "
+                            class="itemNameTag"
+                            >{{ displayChapters[index].tag.trim() }}</span
+                          >
+                        </span>
                         <LoadingDotsRotate
                           v-if="isChapterLoading(index)"
                           class="findBookReaderChapterLoading"
@@ -2189,7 +2387,11 @@ const modalRef = ref<InstanceType<typeof AppModal> | null>(null);
             v-else-if="chapterError && !readerContentKey"
             class="findBookReaderError"
           >
-            {{ chapterError }}
+            <span class="findBookReaderErrorMain">{{ chapterError }}</span>
+            <span
+              v-if="logs.length"
+              class="findBookReaderErrorLogs"
+            >{{ logs.join("\n\n") }}</span>
           </p>
           <ReaderMain
             ref="readerRef"
@@ -2219,7 +2421,7 @@ const modalRef = ref<InstanceType<typeof AppModal> | null>(null);
             :reader-edit-minimap="readerEditMinimap"
             :monaco-font-family="monacoFontFamily"
             @viewport-top-line-change="readerUi.onViewportTopLineChange"
-            @viewport-end-line-change="readerUi.onViewportEndLineChange"
+            @viewport-end-line-change="onFindBookViewportEndLineChange"
             @viewport-visual-progress-change="readerUi.onViewportVisualProgressChange"
             @reader-edit-dirty-change="onReaderEditDirtyChange"
             @reader-edit-save-request="onSaveReaderChapter"
@@ -2243,18 +2445,52 @@ const modalRef = ref<InstanceType<typeof AppModal> | null>(null);
             @stop="voiceRead.exitVoiceRead"
           />
           <ReaderChapterNavBar
-            v-if="chapterNavUiVisible"
-            :ref="setFullscreenFooterOverlayEl"
+            v-if="chapterNavUiVisible && !isFullscreenView"
             :visible="chapterNavVisible"
             :can-go-prev="canGoPrevChapter"
             :can-go-next="canGoNextChapter"
             :disabled="chapterNavBusy"
-            :fixed="isFullscreenView"
             @prev="goToPrevChapter"
             @next="goToNextChapter"
-            @mouseleave="onFullscreenFooterMouseLeave"
           />
         </div>
+      </div>
+
+      <div
+        :ref="setFullscreenFooterOverlayEl"
+        class="findBookReaderFooterWrap"
+        v-show="!isFullscreenView || showFullscreenFooter"
+        @mouseleave="onFullscreenFooterMouseLeave"
+      >
+        <ReaderChapterNavBar
+          v-if="chapterNavUiVisible && isFullscreenView"
+          :visible="chapterNavVisible"
+          :can-go-prev="canGoPrevChapter"
+          :can-go-next="canGoNextChapter"
+          :disabled="chapterNavBusy"
+          @prev="goToPrevChapter"
+          @next="goToNextChapter"
+        />
+        <FindBookReaderFooter
+          :loading="footerLoading"
+          :has-content="footerHasContent"
+          :reading-progress-percent-part="footerReadingProgress.percentPart"
+          :reading-progress-detail-part="footerReadingProgress.detailPart"
+          :reading-progress-placeholder="footerReadingProgress.placeholder"
+          :reading-progress-complete="footerReadingProgress.complete"
+          :chapter-char-count-text="footerChapterCharCountText"
+          :pomodoro-enabled="pomodoroEnabled"
+          :pomodoro-phase="pomodoroPhase"
+          :pomodoro-display-mode="pomodoroDisplayMode"
+          :pomodoro-progress="pomodoroProgress"
+          :pomodoro-countdown-text="pomodoroCountdownText"
+          :pomodoro-pause-resume-label="pomodoroPauseResumeLabel"
+          :pomodoro-paused="pomodoroPaused"
+          @pomodoro-start="startPomodoro"
+          @pomodoro-toggle-display-mode="togglePomodoroDisplayMode"
+          @pomodoro-toggle-pause="togglePomodoroPause"
+          @pomodoro-stop="stopPomodoro"
+        />
       </div>
 
       <div
@@ -2264,6 +2500,17 @@ const modalRef = ref<InstanceType<typeof AppModal> | null>(null);
       >
         按 ESC 退出全屏
       </div>
+      <FullscreenSystemClock
+        :visible="isFullscreenView && fullscreenShowSystemTime"
+        :pomodoro-visible="isFullscreenView && pomodoroPhase !== 'idle'"
+        :pomodoro-progress="pomodoroProgress"
+        :pomodoro-paused="pomodoroPaused"
+      />
+      <PomodoroBreakOverlay
+        :visible="pomodoroShowBreakOverlay"
+        :countdown-text="pomodoroCountdownText"
+        @finish="finishPomodoroBreakEarly"
+      />
     </div>
 
     <EditBookSourcePanel
@@ -2302,6 +2549,31 @@ const modalRef = ref<InstanceType<typeof AppModal> | null>(null);
 
 .findBookReaderShell.fullscreen .findBookReaderBody {
   background: var(--reader-bg);
+}
+
+.findBookReaderFooterWrap {
+  flex: 0 0 auto;
+}
+
+.findBookReaderShell.fullscreen .findBookReaderFooterWrap {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 3400;
+  background: var(--bg);
+  animation: findBookReaderFullscreenFooterIn 140ms ease-out;
+}
+
+@keyframes findBookReaderFullscreenFooterIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .findBookReaderShell.fullscreen .findBookReaderHeaderWrap {
@@ -2408,12 +2680,22 @@ const modalRef = ref<InstanceType<typeof AppModal> | null>(null);
   user-select: none;
 }
 .findBookReaderBreadcrumbCurrent {
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
   color: var(--fg);
+  font: inherit;
   font-weight: 600;
+  text-align: left;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  cursor: pointer;
+}
+.findBookReaderBreadcrumbCurrent:hover {
+  color: var(--accent);
 }
 .findBookReaderLogBtn {
   flex-shrink: 0;
@@ -2577,6 +2859,20 @@ const modalRef = ref<InstanceType<typeof AppModal> | null>(null);
 .itemName {
   flex: 1;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  overflow: hidden;
+}
+.itemNameTitle {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.itemNameTag {
+  color: var(--secondary);
+  font-size: 12px;
+  line-height: 1.2;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2738,14 +3034,32 @@ const modalRef = ref<InstanceType<typeof AppModal> | null>(null);
   position: absolute;
   inset: 0;
   display: flex;
-  align-items: center;
-  justify-content: center;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 12px;
   margin: 0;
-  padding: 16px;
+  padding: 24px 20px;
+  overflow: auto;
   font-size: 14px;
+  line-height: 1.55;
   color: var(--danger);
-  text-align: center;
+  text-align: left;
+  white-space: pre-wrap;
+  word-break: break-word;
   z-index: 2;
-  pointer-events: none;
+  pointer-events: auto;
+  background: var(--reader-bg, transparent);
+  user-select: text;
+}
+.findBookReaderErrorMain {
+  font-weight: 600;
+}
+.findBookReaderErrorLogs {
+  display: block;
+  font-weight: 400;
+  font-size: 12px;
+  opacity: 0.9;
+  color: var(--muted-fg, var(--danger));
 }
 </style>

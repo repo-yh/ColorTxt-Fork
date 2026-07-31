@@ -18,6 +18,11 @@ import {
   minTimedScrollIntervalMs,
   type TimedScrollRange,
 } from "../constants/timedScroll";
+import {
+  maxPomodoroMinutes,
+  minPomodoroMinutes,
+  pomodoroLongBreakEvery,
+} from "../constants/pomodoro";
 import { computed } from "vue";
 
 const props = defineProps<{
@@ -29,6 +34,11 @@ const props = defineProps<{
   draftCompressBlankKeepOneBlank: boolean;
   draftTxtrDelimitedMatchCrossLine: boolean;
   draftFullscreenReaderWidthPercent: number;
+  draftFullscreenShowSystemTime: boolean;
+  draftPomodoroEnabled: boolean;
+  draftPomodoroFocusMinutes: number;
+  draftPomodoroShortBreakMinutes: number;
+  draftPomodoroLongBreakMinutes: number;
   draftTimedScrollRange: TimedScrollRange;
   draftTimedScrollIntervalMs: number;
   monacoCustomHighlight: boolean;
@@ -43,6 +53,11 @@ defineEmits<{
   "update:draftCompressBlankKeepOneBlank": [v: boolean];
   "update:draftTxtrDelimitedMatchCrossLine": [v: boolean];
   "update:draftFullscreenReaderWidthPercent": [v: number];
+  "update:draftFullscreenShowSystemTime": [v: boolean];
+  "update:draftPomodoroEnabled": [v: boolean];
+  "update:draftPomodoroFocusMinutes": [v: number];
+  "update:draftPomodoroShortBreakMinutes": [v: number];
+  "update:draftPomodoroLongBreakMinutes": [v: number];
   "update:draftTimedScrollRange": [v: TimedScrollRange];
   "update:draftTimedScrollIntervalMs": [v: number];
 }>();
@@ -148,7 +163,7 @@ const draftMaxLineHeightMultiple = computed(() =>
           />
         </div>
         <p class="settingsHint">
-          在阅读区底部显示「上一章 / 下一章」快捷跳转。
+          在阅读区底部显示「上一章 / 下一章」快捷跳转；仅一章或无章节时不显示。
         </p>
       </div>
 
@@ -165,6 +180,10 @@ const draftMaxLineHeightMultiple = computed(() =>
         </div>
         <p class="settingsHint">关闭后，阅读区滚动不再使用平滑动画。</p>
       </div>
+    </div>
+
+    <div class="settingsBody settingsBody--fullscreen">
+      <h3 class="settingsSectionTitle settingsSectionTitle--fullscreen">全屏阅读</h3>
 
       <div class="settingsRow">
         <div class="settingsRowMain">
@@ -185,6 +204,91 @@ const draftMaxLineHeightMultiple = computed(() =>
         </div>
         <p class="settingsHint">仅在全屏模式生效，用于控制阅读区域宽度。</p>
       </div>
+
+      <div class="settingsRow">
+        <div class="settingsRowMain">
+          <span class="settingsLabel">全屏时在左下角显示系统时间</span>
+          <SwitchToggle
+            :model-value="draftFullscreenShowSystemTime"
+            aria-label="全屏时在左下角显示系统时间"
+            @update:model-value="
+              $emit('update:draftFullscreenShowSystemTime', $event)
+            "
+          />
+        </div>
+        <p class="settingsHint">
+          进入全屏后在屏幕左下角显示当前系统时间（时:分）。
+        </p>
+      </div>
+    </div>
+
+    <div class="settingsBody settingsBody--pomodoro">
+      <h3 class="settingsSectionTitle settingsSectionTitle--pomodoro">番茄时钟</h3>
+
+      <div class="settingsRow">
+        <div class="settingsRowMain">
+          <span class="settingsLabel">启用番茄时钟</span>
+          <SwitchToggle
+            :model-value="draftPomodoroEnabled"
+            aria-label="启用番茄时钟"
+            @update:model-value="$emit('update:draftPomodoroEnabled', $event)"
+          />
+        </div>
+        <p class="settingsHint">在底栏左侧显示番茄时钟</p>
+      </div>
+
+      <template v-if="draftPomodoroEnabled">
+        <div class="settingsRow">
+          <div class="settingsRowMain settingsRowMain--baseline">
+            <span class="settingsLabel">阅读时长（分钟）</span>
+            <NumericInput
+              :model-value="draftPomodoroFocusMinutes"
+              :min="minPomodoroMinutes"
+              :max="maxPomodoroMinutes"
+              integer
+              aria-label="番茄时钟阅读时长分钟"
+              @update:model-value="
+                $emit('update:draftPomodoroFocusMinutes', $event)
+              "
+            />
+          </div>
+        </div>
+
+        <div class="settingsRow">
+          <div class="settingsRowMain settingsRowMain--baseline">
+            <span class="settingsLabel">短休息（分钟）</span>
+            <NumericInput
+              :model-value="draftPomodoroShortBreakMinutes"
+              :min="minPomodoroMinutes"
+              :max="maxPomodoroMinutes"
+              integer
+              aria-label="番茄时钟短休息分钟"
+              @update:model-value="
+                $emit('update:draftPomodoroShortBreakMinutes', $event)
+              "
+            />
+          </div>
+        </div>
+
+        <div class="settingsRow">
+          <div class="settingsRowMain settingsRowMain--baseline">
+            <span class="settingsLabel">长休息（分钟）</span>
+            <NumericInput
+              :model-value="draftPomodoroLongBreakMinutes"
+              :min="minPomodoroMinutes"
+              :max="maxPomodoroMinutes"
+              integer
+              aria-label="番茄时钟长休息分钟"
+              @update:model-value="
+                $emit('update:draftPomodoroLongBreakMinutes', $event)
+              "
+            />
+          </div>
+          <p class="settingsHint">
+            每完成 {{ pomodoroLongBreakEvery }} 轮「阅读时长」会进入一次长休息
+          </p>
+        </div>
+      </template>
     </div>
 
     <div class="settingsBody settingsBody--timedScroll">
@@ -281,10 +385,14 @@ const draftMaxLineHeightMultiple = computed(() =>
   color: var(--muted);
 }
 
+.settingsBody--fullscreen,
+.settingsBody--pomodoro,
 .settingsBody--timedScroll {
   gap: 10px;
 }
 
+.settingsSectionTitle--fullscreen,
+.settingsSectionTitle--pomodoro,
 .settingsSectionTitle--timedScroll {
   margin-bottom: 10px;
 }

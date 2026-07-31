@@ -35,7 +35,8 @@ export function formatBookshelfLatestChapter(book: BookshelfDisplayFields): stri
   const chapter = book.lastChapter?.trim();
   if (!chapter) return "暂无";
   const updateTime = resolveBookshelfUpdateTime(book);
-  return updateTime ? `${chapter}（更新时间：${updateTime}）` : chapter;
+  // return updateTime ? `${chapter}（更新时间：${updateTime}）` : chapter;
+  return updateTime ? `${chapter}（${updateTime}）` : chapter;
 }
 
 export function formatBookshelfLastRead(book: BookshelfDisplayFields): string {

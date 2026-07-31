@@ -73,7 +73,10 @@ export type ReaderEditorCreateOptionsInput = {
   fontSize: number;
   lineHeightMultiple: number;
   fontFamily: string;
-  /** 默认 `vs`（与 App 亮色主题一致） */
+  /**
+   * 阅读器 Monaco 主题名（`txtr-reader` / `txtr-reader-dark`）。
+   * 应用壳主题仍用 `vs` / `vs-dark`，须经 `readerMonacoThemeForAppTheme` 映射后再传入。
+   */
   theme?: string;
   /** Monaco `wrappingStrategy`：advanced 换行更优但更重 */
   wrappingStrategyAdvanced?: boolean;
@@ -117,7 +120,7 @@ export function buildReaderEditorSharedCoreOptions(
     fontSize,
     lineHeightMultiple,
     fontFamily,
-    theme = "vs",
+    theme = "txtr-reader",
     wrappingStrategyAdvanced = false,
     smoothScrolling = true,
     stickyChapterTitleEnabled = true,

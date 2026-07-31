@@ -157,7 +157,21 @@ function buildTxtrTokenRules(
 }
 
 /**
- * 注入 vs / vs-dark 的 Monarch token 颜色；编辑器背景透明以透出 var(--reader-bg)。
+ * 阅读器专用 Monaco 主题名（勿覆写内置 `vs` / `vs-dark`，以免污染书源全屏编辑等）。
+ * 应用壳主题仍用 `vs` / `vs-dark`；经 {@link readerMonacoThemeForAppTheme} 映射。
+ */
+export const READER_MONACO_THEME_LIGHT = "txtr-reader";
+export const READER_MONACO_THEME_DARK = "txtr-reader-dark";
+
+/** 应用壳主题（`vs` / `vs-dark`）→ 阅读器 Monaco 主题 */
+export function readerMonacoThemeForAppTheme(themeName: string): string {
+  return themeName === "vs"
+    ? READER_MONACO_THEME_LIGHT
+    : READER_MONACO_THEME_DARK;
+}
+
+/**
+ * 注入阅读器 Monarch token 颜色；编辑器背景透明以透出 var(--reader-bg)。
  * 应在注册 Monarch 之后、setTheme 之前调用一次；调色板变更时可再调用。
  */
 export function ensureReaderSyntaxThemes(
@@ -166,13 +180,13 @@ export function ensureReaderSyntaxThemes(
   darkPalette: ReaderSurfacePalette,
   highlightColors: readonly string[],
 ): void {
-  monacoApi.editor.defineTheme("vs-dark", {
+  monacoApi.editor.defineTheme(READER_MONACO_THEME_DARK, {
     base: "vs-dark",
     inherit: true,
     rules: buildTxtrTokenRules(darkPalette, highlightColors),
     colors: readerThemeEditorColors(darkPalette, "dark"),
   });
-  monacoApi.editor.defineTheme("vs", {
+  monacoApi.editor.defineTheme(READER_MONACO_THEME_LIGHT, {
     base: "vs",
     inherit: true,
     rules: buildTxtrTokenRules(lightPalette, highlightColors),
@@ -182,7 +196,7 @@ export function ensureReaderSyntaxThemes(
 
 /**
  * 开关 Monaco 中 txtr.* 的语法着色（标点/数字/英文/引号内/括号内等）。
- * 关闭时仅继承 vs / vs-dark 默认前景；背景仍透明以透出阅读区底色。
+ * 关闭时仅继承 base 默认前景；背景仍透明以透出阅读区底色。
  */
 export function setReaderSyntaxHighlightEnabled(
   monacoApi: typeof import("monaco-editor"),
@@ -200,13 +214,13 @@ export function setReaderSyntaxHighlightEnabled(
     );
     return;
   }
-  monacoApi.editor.defineTheme("vs-dark", {
+  monacoApi.editor.defineTheme(READER_MONACO_THEME_DARK, {
     base: "vs-dark",
     inherit: true,
     rules: [],
     colors: readerThemeEditorColors(darkPalette, "dark"),
   });
-  monacoApi.editor.defineTheme("vs", {
+  monacoApi.editor.defineTheme(READER_MONACO_THEME_LIGHT, {
     base: "vs",
     inherit: true,
     rules: [],

@@ -5,11 +5,14 @@ import AppCheckbox from "../../components/AppCheckbox.vue";
 import IconButton from "../../components/IconButton.vue";
 import { icons } from "../../icons";
 import EditBookSourcePanel from "./EditBookSourcePanel.vue";
+import BookSourceCenterState from "./BookSourceCenterState.vue";
 import { useBookSourceApi } from "../composables/useBookSource";
+import { useListSelectionHotkeys } from "../../composables/useListSelectionHotkeys";
 import type {
   BookSourceImportPreviewItem,
   BookSourceRecord,
 } from "@shared/bookSource/types";
+import "../bookSourceToolbar.css";
 
 const emit = defineEmits<{
   done: [];
@@ -21,18 +24,49 @@ const items = defineModel<BookSourceImportPreviewItem[]>("items", {
 });
 const { commitImport } = useBookSourceApi();
 
+const filter = ref("");
 const selected = ref<Set<number>>(new Set());
+/** Shift 连选锚点（与侧栏文件列表 / 书架管理一致） */
+const lastSelectedIndex = ref<number | null>(null);
 const showEdit = ref(false);
 const editIndex = ref(0);
+const listFocusRef = ref<HTMLElement | null>(null);
 
-const total = computed(() => items.value.length);
-const selectedCount = computed(() => selected.value.size);
-const allSelected = computed(
-  () => items.value.length > 0 && selected.value.size === items.value.length,
+type FilteredEntry = {
+  item: BookSourceImportPreviewItem;
+  index: number;
+};
+
+const filteredEntries = computed((): FilteredEntry[] => {
+  const q = filter.value.trim().toLowerCase();
+  const list = items.value.map((item, index) => ({ item, index }));
+  if (!q) return list;
+  return list.filter(({ item }) =>
+    item.source.bookSourceName.toLowerCase().includes(q),
+  );
+});
+
+/** 当前列表（筛选后）中勾选的数量；被过滤掉的不计入 */
+const selectedCount = computed(() => {
+  let n = 0;
+  for (const { index } of filteredEntries.value) {
+    if (selected.value.has(index)) n += 1;
+  }
+  return n;
+});
+const allFilteredSelected = computed(
+  () =>
+    filteredEntries.value.length > 0 &&
+    filteredEntries.value.every(({ index }) => selected.value.has(index)),
 );
-const selectAllLabel = computed(() => (allSelected.value ? "取消全选" : "全选"));
+const selectAllLabel = computed(() =>
+  allFilteredSelected.value ? "取消全选" : "全选",
+);
 const selectAllIndeterminate = computed(
-  () => selectedCount.value > 0 && !allSelected.value,
+  () => selectedCount.value > 0 && !allFilteredSelected.value,
+);
+const listEmptyText = computed(() =>
+  items.value.length === 0 ? "暂无书源" : "无匹配的书源",
 );
 
 function defaultSelectedIndices(items: BookSourceImportPreviewItem[]): Set<number> {
@@ -41,6 +75,18 @@ function defaultSelectedIndices(items: BookSourceImportPreviewItem[]): Set<numbe
       .map((item, i) => (item.status === "new" || item.status === "update" ? i : -1))
       .filter((i) => i >= 0),
   );
+}
+
+function applySelection(next: Set<number>, anchor?: number | null) {
+  selected.value = next;
+  if (anchor !== undefined) {
+    lastSelectedIndex.value = anchor;
+    return;
+  }
+  if (lastSelectedIndex.value != null && !next.has(lastSelectedIndex.value)) {
+    lastSelectedIndex.value =
+      next.size > 0 ? Math.max(...next) : null;
+  }
 }
 
 watch(
@@ -53,7 +99,11 @@ watch(
         (it, i) => it.source.bookSourceUrl !== prev[i]?.source.bookSourceUrl,
       );
     if (structuralChange) {
-      selected.value = defaultSelectedIndices(list);
+      const next = defaultSelectedIndices(list);
+      applySelection(
+        next,
+        next.size > 0 ? Math.max(...next) : null,
+      );
     }
   },
   { immediate: true },
@@ -65,23 +115,70 @@ function statusLabel(status: BookSourceImportPreviewItem["status"]) {
   return "已有";
 }
 
-function toggle(idx: number) {
-  const next = new Set(selected.value);
-  if (next.has(idx)) next.delete(idx);
-  else next.add(idx);
-  selected.value = next;
-}
+/** 与资源管理器一致：单击单选、Ctrl 多选、Shift 连选 */
+function onRowClick(originalIndex: number, listIndex: number, ev: MouseEvent) {
+  const list = filteredEntries.value;
+  const toggleMod = ev.ctrlKey || ev.metaKey;
+  const rangeMod = ev.shiftKey;
 
-function onRowClick(index: number) {
-  toggle(index);
+  if (rangeMod) {
+    const anchor = lastSelectedIndex.value;
+    if (anchor == null) {
+      applySelection(new Set([originalIndex]), originalIndex);
+      focusList();
+      return;
+    }
+    const anchorListIdx = list.findIndex((e) => e.index === anchor);
+    if (anchorListIdx < 0 || listIndex < 0) {
+      applySelection(new Set([originalIndex]), originalIndex);
+      focusList();
+      return;
+    }
+    const start = Math.min(anchorListIdx, listIndex);
+    const end = Math.max(anchorListIdx, listIndex);
+    const next = new Set<number>();
+    for (let i = start; i <= end; i++) next.add(list[i]!.index);
+    applySelection(next);
+    focusList();
+    return;
+  }
+
+  if (toggleMod) {
+    const next = new Set(selected.value);
+    if (next.has(originalIndex)) next.delete(originalIndex);
+    else next.add(originalIndex);
+    applySelection(next, originalIndex);
+    focusList();
+    return;
+  }
+
+  applySelection(new Set([originalIndex]), originalIndex);
+  focusList();
 }
 
 function selectAll() {
-  selected.value = new Set(items.value.map((_, i) => i));
+  const indices = filteredEntries.value.map((e) => e.index);
+  applySelection(
+    new Set(indices),
+    indices.length > 0 ? indices[indices.length - 1]! : null,
+  );
 }
 
 function clearSelection() {
-  selected.value = new Set();
+  applySelection(new Set(), null);
+}
+
+function invertSelect() {
+  const visibleKeys = filteredEntries.value.map((e) => e.index);
+  const visible = new Set(visibleKeys);
+  const next = new Set<number>();
+  for (const i of selected.value) {
+    if (!visible.has(i)) next.add(i);
+  }
+  for (const i of visibleKeys) {
+    if (!selected.value.has(i)) next.add(i);
+  }
+  applySelection(next, next.size > 0 ? Math.max(...next) : null);
 }
 
 function onToggleSelectAll(checked: boolean) {
@@ -89,18 +186,35 @@ function onToggleSelectAll(checked: boolean) {
   else clearSelection();
 }
 
+const { onListKeydown, focusList } = useListSelectionHotkeys({
+  listEl: listFocusRef,
+  enabled: () => modelValue.value && !showEdit.value,
+  onSelectAll: selectAll,
+  onInvert: invertSelect,
+});
+
+watch(modelValue, (open) => {
+  if (open) {
+    focusList();
+    return;
+  }
+  filter.value = "";
+});
+
 function selectNew() {
-  selected.value = new Set(
+  const next = new Set(
     items.value.map((item, i) => (item.status === "new" ? i : -1)).filter((i) => i >= 0),
   );
+  applySelection(next, next.size > 0 ? Math.max(...next) : null);
 }
 
 function selectUpdate() {
-  selected.value = new Set(
+  const next = new Set(
     items.value
       .map((item, i) => (item.status === "update" ? i : -1))
       .filter((i) => i >= 0),
   );
+  applySelection(next, next.size > 0 ? Math.max(...next) : null);
 }
 
 function onEdit(idx: number) {
@@ -150,50 +264,73 @@ function onCancel() {
     :esc-closable="true"
     :body-scroll="false"
   >
+    <template #headerSuffix>
+      <p class="impHint">（说明：只显示「文本」类型的书源）</p>
+    </template>
     <div class="bsShell">
-      <p class="impHint">说明：只显示「文本」类型的书源</p>
-      <ul class="bsList">
-        <li
-          v-for="(item, index) in items"
-          :key="item.source.bookSourceUrl"
-          class="bsRow"
-          @click="onRowClick(index)"
-        >
-          <AppCheckbox
-            class="bsRowCheckbox"
-            passive
-            :model-value="selected.has(index)"
-            :aria-label="`选择 ${item.source.bookSourceName}`"
+      <header class="bookSourceToolbarHeader">
+        <div class="bsFilterField">
+          <span class="bsFilterIcon" aria-hidden="true" v-html="icons.filter" />
+          <input
+            v-model="filter"
+            class="bookSourceToolbarSearch bsFilterInput"
+            type="search"
+            placeholder="过滤书源"
           />
-          <div class="bsRowMain">
-            <div class="bsRowName">{{ item.source.bookSourceName }}</div>
-          </div>
-          <div class="bsRowActions" @click.stop>
-            <span class="impTag" :data-status="item.status">
-              {{ statusLabel(item.status) }}
-            </span>
-            <IconButton
-              :icon-html="icons.edit"
-              title="编辑"
-              aria-label="编辑"
-              @click="onEdit(index)"
+        </div>
+      </header>
+      <div
+        ref="listFocusRef"
+        class="bsListArea"
+        tabindex="0"
+        @keydown="onListKeydown"
+      >
+        <BookSourceCenterState v-if="!filteredEntries.length">
+          {{ listEmptyText }}
+        </BookSourceCenterState>
+        <ul v-else class="bsList">
+          <li
+            v-for="(entry, listIndex) in filteredEntries"
+            :key="entry.item.source.bookSourceUrl"
+            class="bsRow"
+            @click="onRowClick(entry.index, listIndex, $event)"
+          >
+            <AppCheckbox
+              class="bsRowCheckbox"
+              passive
+              :model-value="selected.has(entry.index)"
+              :aria-label="`选择 ${entry.item.source.bookSourceName}`"
             />
-          </div>
-        </li>
-      </ul>
+            <div class="bsRowMain">
+              <div class="bsRowName">{{ entry.item.source.bookSourceName }}</div>
+            </div>
+            <div class="bsRowActions" @click.stop>
+              <span class="impTag" :data-status="entry.item.status">
+                {{ statusLabel(entry.item.status) }}
+              </span>
+              <IconButton
+                :icon-html="icons.edit"
+                title="编辑"
+                aria-label="编辑"
+                @click="onEdit(entry.index)"
+              />
+            </div>
+          </li>
+        </ul>
+      </div>
     </div>
 
     <template #footer>
       <div class="bsFooter">
         <AppCheckbox
           class="bsFooterSelectAll"
-          :model-value="allSelected"
+          :model-value="allFilteredSelected"
           :indeterminate="selectAllIndeterminate"
           :aria-label="selectAllLabel"
           @update:model-value="onToggleSelectAll"
         >
           <template #label>
-            {{ selectAllLabel }}（{{ selectedCount }}/{{ total }}）
+            {{ selectAllLabel }}（{{ selectedCount }}/{{ filteredEntries.length }}）
           </template>
         </AppCheckbox>
         <div class="bsFooterActions">
@@ -237,12 +374,45 @@ function onCancel() {
 }
 .impHint {
   margin: 0;
-  padding: 0 16px 10px;
   font-size: 12px;
   line-height: 1.4;
   color: var(--muted);
   flex-shrink: 0;
-  border-bottom: 1px solid var(--border, rgba(0, 0, 0, 0.08));
+  align-self: flex-end;
+}
+.bsFilterField {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+.bsFilterIcon {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  z-index: 1;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  color: var(--secondary);
+  pointer-events: none;
+}
+.bsFilterIcon :deep(svg) {
+  width: 16px;
+  height: 16px;
+  display: block;
+}
+.bsFilterIcon :deep(svg path) {
+  fill: currentColor;
+}
+.bsListArea {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  outline: none;
 }
 .bsList {
   flex: 1;

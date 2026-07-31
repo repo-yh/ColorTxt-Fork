@@ -2,6 +2,7 @@
 import { computed, ref, watch } from "vue";
 import AppModal from "../../components/AppModal.vue";
 import AppShellMenuTeleport from "../../components/AppShellMenuTeleport.vue";
+import CategoryPickerMenu from "../../components/CategoryPickerMenu.vue";
 import IconButton from "../../components/IconButton.vue";
 import RefreshIcon from "../../components/RefreshIcon.vue";
 import VirtualList from "../../components/VirtualList.vue";
@@ -11,6 +12,7 @@ import DefaultBookCover from "./DefaultBookCover.vue";
 import BookSourceCenterState from "./BookSourceCenterState.vue";
 import EditBookSourcePanel from "./EditBookSourcePanel.vue";
 import BookSourceLoginPanel from "./BookSourceLoginPanel.vue";
+import ReaderImageLightbox from "../../components/ReaderImageLightbox.vue";
 import { icons } from "../../icons";
 import {
   useBookSourceDetail,
@@ -25,6 +27,7 @@ import type {
 import { appLog, appPrompt } from "../../services/appDialog";
 import { appToast } from "../../services/appToast";
 import { useFindBookBookshelf } from "../composables/useFindBookBookshelf";
+import { useFindBookSettings } from "../composables/useFindBookSettings";
 import { useChapterCacheMarks } from "../composables/useChapterCacheMarks";
 import { confirmClearBookChapterCache } from "../services/clearBookChapterCache";
 import { sortContentChaptersDisplay } from "../sortContentChaptersDisplay";
@@ -41,15 +44,26 @@ import {
 import { resolveFirstChapterContentIndex } from "../chapterReadingOrder";
 import { resolveLatestChapterTitleFromToc } from "../findBookshelfDisplay";
 import type { BookSourceEditTab } from "../editBookSourceFields";
+import type { FileCategoryDefinition } from "../../constants/fileCategories";
+import { loadBookshelfCategoryCatalog } from "../findBookshelfCategory";
 
 /** 与 .bookDetailChapterItem 固定行高一致（外层滚动虚拟列表） */
 const CHAPTER_ROW_STRIDE = 40;
+/** 章名下有 tag（updateTime）时两行展示的行距 */
+const CHAPTER_ROW_STRIDE_WITH_TAG = 56;
 
-const props = defineProps<{
-  item: SearchBookItem | null;
-  downloadDir: string;
-  cacheDir: string;
-}>();
+const props = withDefaults(
+  defineProps<{
+    item: SearchBookItem | null;
+    downloadDir: string;
+    cacheDir: string;
+    /** 与书架分类目录共用；不传则从书架分类存储读取 */
+    categoryCatalog?: FileCategoryDefinition[];
+  }>(),
+  {
+    categoryCatalog: undefined,
+  },
+);
 
 const emit = defineEmits<{
   fileDownloaded: [filePath: string, size: number];
@@ -62,7 +76,10 @@ const emit = defineEmits<{
 const modelValue = defineModel<boolean>({ default: false });
 
 const coverFailed = ref(false);
+const coverLightboxSrc = ref("");
 const chapterSortDesc = ref(false);
+const findBookSettings = useFindBookSettings();
+const showChapterTag = findBookSettings.showChapterTag;
 const showEdit = ref(false);
 const editingUrl = ref<string | null>(null);
 const showLogin = ref(false);
@@ -218,6 +235,14 @@ const showUpdateTimeLine = computed(() => {
 const displayChapters = computed(() =>
   sortContentChaptersDisplay(contentChapterList.value, chapterSortDesc.value),
 );
+const hasChapterTags = computed(() =>
+  displayChapters.value.some((ch) => Boolean(ch.tag?.trim())),
+);
+const chapterRowStride = computed(() =>
+  showChapterTag.value && hasChapterTags.value
+    ? CHAPTER_ROW_STRIDE_WITH_TAG
+    : CHAPTER_ROW_STRIDE,
+);
 const chapterCount = computed(() => displayChapters.value.length);
 const breadcrumbSourceName = computed(
   () => displayItem.value?.originName?.trim() ?? "",
@@ -228,6 +253,7 @@ const {
   toggle: toggleBookshelf,
   updateReadProgress,
   applyBooks,
+  setCategory,
 } = useFindBookBookshelf();
 
 const inBookshelf = computed(() => {
@@ -248,6 +274,58 @@ const bookshelfEntry = computed(() => {
     null
   );
 });
+
+const resolvedCategoryCatalog = computed(() =>
+  props.categoryCatalog ?? loadBookshelfCategoryCatalog(),
+);
+
+const categoryMenuCounts = computed(() => {
+  const files = books.value;
+  let uncategorized = 0;
+  const byName: Record<string, number> = {};
+  for (const c of resolvedCategoryCatalog.value) {
+    byName[c.name] = 0;
+  }
+  for (const f of files) {
+    const n = (f.category ?? "").trim();
+    if (!n) {
+      uncategorized++;
+      continue;
+    }
+    if (Object.prototype.hasOwnProperty.call(byName, n)) {
+      byName[n] = (byName[n] ?? 0) + 1;
+    }
+  }
+  return { uncategorized, byName };
+});
+
+const categoryBtnRef = ref<HTMLElement | null>(null);
+const categoryPickerOpen = ref(false);
+const categoryPickX = ref(0);
+const categoryPickY = ref(0);
+
+const bookshelfCategoryLabel = computed(() => {
+  const name = (bookshelfEntry.value?.category ?? "").trim();
+  return name || "未分类";
+});
+
+function onCategoryBtnClick(ev: MouseEvent) {
+  ev.preventDefault();
+  if (!inBookshelf.value) return;
+  const btn = categoryBtnRef.value;
+  if (!btn) return;
+  const r = btn.getBoundingClientRect();
+  categoryPickX.value = r.left;
+  categoryPickY.value = r.top;
+  categoryPickerOpen.value = true;
+}
+
+function onCategoryPicked(name: string) {
+  const item = props.item;
+  if (!item) return;
+  setCategory(item.bookUrl, item.origin, name);
+  categoryPickerOpen.value = false;
+}
 
 
 const hasBookshelfReadProgress = computed(() => {
@@ -294,6 +372,10 @@ function buildShelfItem(): SearchBookItem | null {
   if (!item) return null;
   // 有目录时用最新章标题入库（对齐 Legado）
   const tocLatest = resolveLatestChapterTitleFromToc(chapters.value);
+  const variable = {
+    ...(item.variable ?? {}),
+    ...(detail.value?.variable ?? {}),
+  };
   return {
     ...item,
     name: displayName.value,
@@ -304,6 +386,7 @@ function buildShelfItem(): SearchBookItem | null {
     lastChapter: tocLatest || displayLastChapter.value || item.lastChapter,
     kind: detail.value?.kind ?? item.kind,
     wordCount: detail.value?.wordCount ?? item.wordCount,
+    ...(Object.keys(variable).length ? { variable } : {}),
   };
 }
 
@@ -319,10 +402,11 @@ function onToggleBookshelf() {
       tocUrl: detail.value?.tocUrl,
       chapters: chapters.value,
       lastChapter: item.lastChapter,
+      variable: detail.value?.variable,
     });
     if (next) applyBooks(next);
   }
-  appToast(added ? "已放入书架" : "已从书架移除");
+  appToast(added ? "已放入书架" : "已从书架移除", { kind: added ? "success" : "info" });
 }
 
 const displayBookUrl = computed(
@@ -543,10 +627,18 @@ watch(
 watch(modelValue, (open) => {
   if (!open) {
     coverFailed.value = false;
+    coverLightboxSrc.value = "";
     return;
   }
   void refreshChapterCacheStatus();
 });
+
+function openCoverLightbox() {
+  if (showDefaultCover.value) return;
+  const url = displayCover.value.trim();
+  if (!url) return;
+  coverLightboxSrc.value = url;
+}
 
 function onBack() {
   modelValue.value = false;
@@ -554,6 +646,11 @@ function onBack() {
 
 function toggleChapterSort() {
   chapterSortDesc.value = !chapterSortDesc.value;
+}
+
+function toggleShowChapterTag() {
+  showChapterTag.value = !showChapterTag.value;
+  findBookSettings.persistAll();
 }
 
 async function onShowLogs() {
@@ -722,7 +819,7 @@ async function onDownloadOrStop() {
         </IconButton>
         <IconButton
           v-if="sourceNeedsLogin"
-          :icon-html="icons.login"
+          :icon-html="icons.user"
           title="登录"
           aria-label="登录"
           @click="onLogin"
@@ -810,6 +907,7 @@ async function onDownloadOrStop() {
     />
 
     <BookSourceLoginPanel v-model="showLogin" :source="loginSource" />
+    <ReaderImageLightbox v-model="coverLightboxSrc" />
     <div class="bookDetailShell">
       <BookSourceCenterState v-if="loading">
         <span class="bookDetailLoadingHint" aria-live="polite">
@@ -830,10 +928,12 @@ async function onDownloadOrStop() {
             />
             <img
               v-else
-              class="bookDetailCover"
+              class="bookDetailCover bookDetailCover--zoomable"
               :src="displayCover"
               alt=""
               referrerpolicy="no-referrer"
+              title="点击查看大图"
+              @click="openCoverLightbox"
               @error="coverFailed = true"
             />
             <div class="bookDetailMeta">
@@ -869,6 +969,14 @@ async function onDownloadOrStop() {
           <div class="bookDetailSectionHead">
             <div class="bookDetailSectionHeadLeft">
               <h3 class="bookDetailSectionTitle">目录</h3>
+              <IconButton
+                v-if="hasChapterTags"
+                :icon-html="icons.subhead"
+                :title="showChapterTag ? '隐藏附加信息' : '显示附加信息'"
+                :aria-label="showChapterTag ? '隐藏附加信息' : '显示附加信息'"
+                :pressed="showChapterTag"
+                @click="toggleShowChapterTag"
+              />
               <span
                 v-if="lastReadChapterTitleLabel"
                 class="bookDetailLastRead"
@@ -899,7 +1007,7 @@ async function onDownloadOrStop() {
             v-else
             class="bookDetailChapterList"
             :item-count="chapterCount"
-            :row-stride="CHAPTER_ROW_STRIDE"
+            :row-stride="chapterRowStride"
             :overscan="12"
             :external-scroll-el="detailScrollEl"
             :item-key="(i) => displayChapters[i]?.url ?? i"
@@ -926,7 +1034,16 @@ async function onDownloadOrStop() {
                   "
                   :aria-label="displayChapters[index].isPay ? '已购买' : 'VIP'"
                 />
-                <span class="bookDetailChapterTitle">{{ displayChapters[index].title }}</span>
+                <span class="bookDetailChapterText">
+                  <span class="bookDetailChapterTitle">{{
+                    displayChapters[index].title
+                  }}</span>
+                  <span
+                    v-if="showChapterTag && displayChapters[index].tag?.trim()"
+                    class="bookDetailChapterTitleTag"
+                    >{{ displayChapters[index].tag.trim() }}</span
+                  >
+                </span>
                 <span
                   v-if="isLastReadChapter(displayChapters[index])"
                   class="bookDetailChapterLastRead"
@@ -973,17 +1090,34 @@ async function onDownloadOrStop() {
       </div>
       <footer v-if="displayItem && !loading" class="bookDetailFooter">
         <div class="bookDetailFooterActions">
-          <button
-            type="button"
-            class="btn bookDetailBookshelfBtn"
-            :class="{ 'bookDetailBookshelfBtn--remove': inBookshelf }"
-            size="large"
-            :disabled="!inBookshelf && !canStartReading"
-            @click="onToggleBookshelf"
-          >
-            <span class="bookDetailFooterBtnIcon" aria-hidden="true" v-html="icons.bookshelf" />
-            {{ inBookshelf ? "从书架移除" : "放入书架" }}
-          </button>
+          <div class="bookDetailFooterLeft">
+            <button
+              type="button"
+              class="btn bookDetailBookshelfBtn"
+              :class="{ 'bookDetailBookshelfBtn--remove': inBookshelf }"
+              size="large"
+              :disabled="!inBookshelf && !canStartReading"
+              @click="onToggleBookshelf"
+            >
+              <span class="bookDetailFooterBtnIcon" aria-hidden="true" v-html="icons.bookshelf" />
+              {{ inBookshelf ? "从书架移除" : "放入书架" }}
+            </button>
+            <button
+              v-if="inBookshelf"
+              ref="categoryBtnRef"
+              type="button"
+              class="btn bookDetailCategoryBtn"
+              size="large"
+              @click="onCategoryBtnClick"
+            >
+              <span
+                class="bookDetailFooterBtnIcon"
+                aria-hidden="true"
+                v-html="icons.folderOpen"
+              />
+              {{ bookshelfCategoryLabel }}
+            </button>
+          </div>
           <div class="bookDetailFooterRight">
             <button
               type="button"
@@ -1015,6 +1149,18 @@ async function onDownloadOrStop() {
       </footer>
     </div>
   </AppModal>
+
+  <CategoryPickerMenu
+    :open="categoryPickerOpen"
+    :x="categoryPickX"
+    :y="categoryPickY"
+    align-above
+    :catalog="resolvedCategoryCatalog"
+    :menu-counts="categoryMenuCounts"
+    :min-width="140"
+    @close="categoryPickerOpen = false"
+    @pick="onCategoryPicked"
+  />
 </template>
 
 <style>
@@ -1110,6 +1256,7 @@ async function onDownloadOrStop() {
 .bookDetailCover {
   width: 96px;
   height: 128px;
+  --book-cover-height: 128px;
   border-radius: 6px;
   flex-shrink: 0;
   box-shadow: 0 4px 12px color-mix(in srgb, var(--fg) 12%, transparent);
@@ -1117,6 +1264,9 @@ async function onDownloadOrStop() {
 img.bookDetailCover {
   object-fit: cover;
   background: var(--scrollbar-track);
+}
+img.bookDetailCover--zoomable {
+  cursor: zoom-in;
 }
 .bookDetailMeta {
   flex: 1;
@@ -1152,6 +1302,7 @@ img.bookDetailCover {
   background: var(--book-source-tag);
   color: white;
   user-select: none;
+  white-space: nowrap;
 }
 
 .bookDetailUpdateTime,
@@ -1264,9 +1415,23 @@ img.bookDetailCover {
   gap: 8px;
   min-width: 0;
 }
-.bookDetailChapterTitle {
+.bookDetailChapterText {
   flex: 1;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  overflow: hidden;
+}
+.bookDetailChapterTitle {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bookDetailChapterTitleTag {
+  color: var(--secondary);
+  font-size: 12px;
+  line-height: 1.2;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1366,6 +1531,13 @@ img.bookDetailCover {
   justify-content: space-between;
   align-items: center;
   gap: 10px;
+}
+.bookDetailFooterLeft {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex-wrap: wrap;
 }
 .bookDetailFooterRight {
   display: flex;
