@@ -1,7 +1,7 @@
 {
   "name": "colortxt",
   "private": true,
-  "version": "2.8.4",
+  "version": "3.2.1",
   "description": "一款会给内容上色的本地 TXT 小说阅读器，带给你不一样的阅读体验！",
   "type": "module",
   "main": "dist/main/index.js",
@@ -9,17 +9,18 @@
   "homepage": "https://github.com/laz-yh/ColorTxt-Fork",
   "scripts": {
     "dev": "electron-vite dev",
+    "dev:find": "electron-vite dev -- --find-book",
     "build": "electron-vite build && electron-rebuild -f -w better-sqlite3,opencc && node scripts/prune-pack-deps.mjs && electron-builder --publish never",
     "preview": "electron-vite preview",
     "typecheck": "vue-tsc --noEmit",
     "lint": "echo \"(no lint configured)\"",
     "release": "electron-vite build && electron-rebuild -f -w better-sqlite3,opencc && node scripts/prune-pack-deps.mjs && electron-builder --publish always",
-    "postinstall": "electron-rebuild -f -w better-sqlite3,opencc && node scripts/patch-nested-sharp-stub.mjs && node scripts/patch-monaco-hover-pointer-below.mjs"
+    "postinstall": "electron-rebuild -f -w better-sqlite3,opencc && node scripts/patch-nested-sharp-stub.mjs && node scripts/patch-monaco-hover-pointer-below.mjs && node scripts/patch-vite-plugin-monaco-rmdir.mjs && node scripts/patch-xpath-following.mjs"
   },
   "dependencies": {
     "@huggingface/transformers": "^3.8.1",
     "@node-rs/jieba": "^2.0.1",
-    "better-sqlite3": "^11.7.0",
+    "better-sqlite3": "^12.0.0",
     "electron-updater": "^6.8.3",
     "font-list": "^2.0.2",
     "iconv-lite": "^0.7.2",
@@ -39,17 +40,23 @@
     "@types/better-sqlite3": "^7.6.13",
     "@types/d3-cloud": "^1.2.9",
     "@types/d3-scale": "^4.0.9",
+    "@types/js-beautify": "^1.14.3",
     "@types/node": "^22.13.10",
     "@types/pako": "^2.0.4",
     "@types/sortablejs": "^1.15.9",
     "@types/ws": "^8.5.14",
     "@vitejs/plugin-vue": "^5.2.3",
+    "@xmldom/xmldom": "^0.9.10",
+    "cheerio": "^1.2.0",
     "d3-cloud": "^1.2.7",
     "d3-scale": "^4.0.2",
     "electron": "^35.1.4",
     "electron-builder": "^26.0.12",
     "electron-vite": "^3.0.0",
+    "heic-convert": "^2.1.0",
+    "js-beautify": "^2.0.3",
     "jschardet": "^3.1.4",
+    "jsonpath-plus": "^10.4.0",
     "jszip": "^3.10.1",
     "katex": "^0.16.22",
     "marked": "^14.1.3",
@@ -59,18 +66,25 @@
     "monaco-editor": "^0.55.1",
     "pako": "^2.1.0",
     "pdfjs-dist": "^5.6.205",
+    "socks-proxy-agent": "^10.1.0",
     "sortablejs": "^1.15.7",
+    "tldts": "^7.4.4",
+    "tough-cookie": "^6.0.1",
     "typescript": "^5.8.2",
     "vite": "^6.2.3",
     "vite-plugin-monaco-editor": "^1.1.0",
     "vue": "^3.5.31",
-    "vue-tsc": "^2.2.8"
+    "vue-tsc": "^2.2.8",
+    "xpath": "^0.0.34"
   },
   "build": {
-    "appId": "com.laz-yh.colortxt-fork",
+    "appId": "com.ssnangua.colortxt",
     "productName": "彩读",
     "beforePack": "scripts/electron-before-pack.mjs",
     "onNodeModuleFile": "scripts/electron-on-node-module-file.mjs",
+    "toolsets": {
+      "appimage": "1.0.2"
+    },
     "directories": {
       "output": "release"
     },
@@ -92,6 +106,22 @@
       {
         "from": "resources/icon.ico",
         "to": "icon.ico"
+      },
+      {
+        "from": "resources/icon_find.png",
+        "to": "icon_find.png"
+      },
+      {
+        "from": "resources/icon_find.ico",
+        "to": "icon_find.ico"
+      },
+      {
+        "from": "resources/user.png",
+        "to": "user.png"
+      },
+      {
+        "from": "resources/user.ico",
+        "to": "user.ico"
       }
     ],
     "files": [
@@ -106,11 +136,20 @@
     ],
     "fileAssociations": [
       {
-        "ext": "txt",
-        "name": "Text Document",
-        "description": "纯文本文件",
-        "mimeType": "text/plain",
-        "role": "Editor"
+        "ext": "ctz",
+        "name": "ColorTxt.BookPack",
+        "description": "彩读书包",
+        "mimeType": "application/x-colortxt-book",
+        "role": "Viewer",
+        "rank": "Owner"
+      },
+      {
+        "ext": "ctzx",
+        "name": "ColorTxt.BookPackEncrypted",
+        "description": "加密彩读书包",
+        "mimeType": "application/x-colortxt-book-encrypted",
+        "role": "Viewer",
+        "rank": "Owner"
       }
     ],
     "mac": {
@@ -118,6 +157,36 @@
       "entitlements": "resources/entitlements.mac.plist",
       "entitlementsInherit": "resources/entitlements.mac.plist",
       "artifactName": "${name}-${version}-${arch}.${ext}",
+      "fileAssociations": [
+        {
+          "ext": "ctz",
+          "name": "ColorTxt.BookPack",
+          "description": "彩读书包",
+          "role": "Viewer",
+          "rank": "Owner"
+        },
+        {
+          "ext": "ctzx",
+          "name": "ColorTxt.BookPackEncrypted",
+          "description": "加密彩读书包",
+          "role": "Viewer",
+          "rank": "Owner"
+        },
+        {
+          "ext": "txt",
+          "name": "ColorTxt.Text",
+          "description": "纯文本文件",
+          "role": "Viewer",
+          "rank": "Alternate"
+        },
+        {
+          "ext": "md",
+          "name": "ColorTxt.Markdown",
+          "description": "Markdown 文件",
+          "role": "Viewer",
+          "rank": "Alternate"
+        }
+      ],
       "publish": {
         "provider": "github",
         "owner": "laz-yh",
@@ -137,16 +206,60 @@
     "win": {
       "icon": "resources/icon.ico",
       "artifactName": "${name}-${version}.${ext}",
+      "fileAssociations": [
+        {
+          "ext": "ctz",
+          "name": "ColorTxt.BookPack",
+          "description": "彩读书包",
+          "mimeType": "application/x-colortxt-book",
+          "role": "Viewer"
+        },
+        {
+          "ext": "ctzx",
+          "name": "ColorTxt.BookPackEncrypted",
+          "description": "加密彩读书包",
+          "mimeType": "application/x-colortxt-book-encrypted",
+          "role": "Viewer"
+        }
+      ],
       "target": [
+        "nsis",
         "portable"
       ]
     },
     "portable": {
       "artifactName": "${name}-${version}-Portable.${ext}"
     },
+    "nsis": {
+      "artifactName": "${name}-${version}-Setup.${ext}",
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "include": "resources/nsis/openWithOnly.nsh"
+    },
     "linux": {
       "icon": "resources/icon.png",
       "artifactName": "${name}-${version}-${arch}.${ext}",
+      "category": "Office",
+      "fileAssociations": [
+        {
+          "ext": "ctz",
+          "name": "ColorTxt.BookPack",
+          "description": "彩读书包",
+          "mimeType": "application/x-colortxt-book",
+          "role": "Viewer"
+        },
+        {
+          "ext": "ctzx",
+          "name": "ColorTxt.BookPackEncrypted",
+          "description": "加密彩读书包",
+          "mimeType": "application/x-colortxt-book-encrypted",
+          "role": "Viewer"
+        }
+      ],
+      "mimeTypes": [
+        "text/plain",
+        "text/markdown"
+      ],
       "publish": {
         "provider": "github",
         "owner": "laz-yh",
