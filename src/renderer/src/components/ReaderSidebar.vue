@@ -972,6 +972,7 @@ defineExpose({
         :highlight-preview-bg="highlightPreviewBg"
         :monaco-font-family="monacoFontFamily"
         :menu-anchor-el="highlightsHeaderMoreBtnRef"
+        @add-highlight-term="toggleAddHighlightInput"
         @find-highlight-term="(text, isRegex) => emit('findHighlightTerm', text, isRegex)"
         @remove-highlight-term="emit('removeHighlightTerm', $event)"
         @favorite-highlight-term="emit('favoriteHighlightTerm', $event)"

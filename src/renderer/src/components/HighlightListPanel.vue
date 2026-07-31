@@ -43,6 +43,7 @@ const props = withDefaults(
 );
 
 const emit = defineEmits<{
+  addHighlightTerm: [];
   findHighlightTerm: [text: string, isRegex: boolean];
   removeHighlightTerm: [payload: { text: string; scope: "global" | "book" }];
   favoriteHighlightTerm: [payload: { text: string; colorIndex: number }];
@@ -113,7 +114,8 @@ function onFavoriteClick(ev: MouseEvent, item: HighlightListTerm) {
 
 function onMoreSelect(action: string) {
   closeMoreMenu();
-  if (action === "exportBook") emit("exportBookHighlightsJson");
+  if (action === "add") emit("addHighlightTerm");
+  else if (action === "exportBook") emit("exportBookHighlightsJson");
   else if (action === "importBook") emit("importBookHighlightsJson");
   else if (action === "exportFavorite") emit("exportFavoriteHighlightsJson");
   else if (action === "importFavorite") emit("importFavoriteHighlightsJson");
@@ -235,6 +237,16 @@ const emptyMessage = computed(() => {
       :on-panel-mount="bindMorePanel"
       aria-label="高亮词更多"
     >
+      <button
+        type="button"
+        class="appShellMenuItem"
+        role="menuitem"
+        :disabled="!currentFilePath"
+        @click="onMoreSelect('add')"
+      >
+        添加高亮词
+      </button>
+      <div class="appShellMenuDivider" role="separator" />
       <button
         type="button"
         class="appShellMenuItem"
