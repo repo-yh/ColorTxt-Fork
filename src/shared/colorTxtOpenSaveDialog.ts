@@ -61,3 +61,6 @@ export const COLOR_TXT_OPEN_BOOK_EXTENSIONS = [
   "fbz",
   "pdf",
 ] as const;
+
+/** 彩读书包建议扩展（完整后缀） */
+export const COLOR_TXT_BOOK_PACK_FILE_EXT = "colortxt-book.zip";

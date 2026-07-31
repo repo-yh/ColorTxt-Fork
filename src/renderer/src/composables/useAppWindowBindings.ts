@@ -7,6 +7,7 @@ import {
   DROP_ZONE_READER_SIDEBAR,
   isDragOverDropZone,
 } from "../utils/dragDropFsPaths";
+import { looksLikeZipBookPackCandidate } from "../utils/readerBookPack";
 import { formatTextEncodingLabel } from "@shared/textEncodingDisplay";
 import { appAlert } from "../services/appDialog";
 import {
@@ -538,13 +539,15 @@ export function useAppWindowBindings(deps: {
       }),
     );
 
-    /** 非文件列表区域 drop：仅打开拖入列表中最外层第一个支持的文件 */
+    /** 非文件列表区域 drop：仅打开拖入列表中最外层第一个支持的文件（含彩读书包，同「打开文件」） */
     async function openFirstSupportedTopLevelPath(paths: string[]) {
       for (const p of paths) {
         try {
           const st = await window.colorTxt.stat(p);
           if (!st.isFile) continue;
-          if (!isSupportedBookPath(p)) continue;
+          if (!isSupportedBookPath(p) && !looksLikeZipBookPackCandidate(p)) {
+            continue;
+          }
           await deps.fileSession.openFilePath(p);
           return;
         } catch {

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed } from "vue";
 import NumericInput from "./NumericInput.vue";
 import SwitchToggle from "./SwitchToggle.vue";
 import PathPickerInput from "./PathPickerInput.vue";
@@ -7,6 +8,7 @@ import {
   maxRecentFilesHistoryLimit,
   minChapterMinCharCount,
 } from "../constants/appUi";
+import { resolveDefaultUnpackedBooksDirSync } from "../utils/defaultCacheDirs";
 
 defineProps<{
   draftRestore: boolean;
@@ -15,6 +17,7 @@ defineProps<{
   draftChapterMinCharCount: number;
   draftChapterCharCountExact: boolean;
   draftEbookConvertOutputDir: string;
+  draftBookPackUnpackDir: string;
 }>();
 
 defineEmits<{
@@ -24,10 +27,17 @@ defineEmits<{
   "update:draftChapterMinCharCount": [v: number];
   "update:draftChapterCharCountExact": [v: boolean];
   "update:draftEbookConvertOutputDir": [v: string];
+  "update:draftBookPackUnpackDir": [v: string];
   clearCache: [];
   exportConfig: [];
   importConfig: [];
 }>();
+
+/** 留空时实际使用的绝对路径，用作输入框 placeholder */
+const bookPackUnpackDirPlaceholder = computed(() => {
+  const p = resolveDefaultUnpackedBooksDirSync().trim();
+  return p || "";
+});
 </script>
 
 <template>
@@ -95,6 +105,27 @@ defineEmits<{
       </div>
       <p class="settingsHint">
         打开其他格式的电子书时，会自动转换为 <code>.md</code> 格式并缓存到该目录下；<br />如果放空，将缓存到源文件同目录下。
+      </p>
+    </div>
+
+    <div class="settingsRow">
+      <div class="settingsRowMain settingsRowMain--baseline">
+        <span class="settingsLabel short">书包解压目录</span>
+        <div class="settingsEbookDirActions">
+          <PathPickerInput
+            :model-value="draftBookPackUnpackDir"
+            is-directory
+            :placeholder="bookPackUnpackDirPlaceholder"
+            aria-label="书包解压目录"
+            class="settingsEbookPathPicker"
+            @update:model-value="
+              $emit('update:draftBookPackUnpackDir', $event)
+            "
+          />
+        </div>
+      </div>
+      <p class="settingsHint">
+        导入书包时，如果「当前打开」「最近的文件」「文件列表」都没有同名书，将解压到该目录，并添加到「文件列表」。
       </p>
     </div>
 

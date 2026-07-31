@@ -5,7 +5,7 @@ import type { HighlightListTerm } from "../utils/highlightWords";
 import { useAnchoredAppShellMenu } from "../composables/useAnchoredAppShellMenu";
 import AppShellMenuTeleport from "./AppShellMenuTeleport.vue";
 
-const HIGHLIGHTS_HEADER_MORE_MENU_W = 228;
+const HIGHLIGHTS_HEADER_MORE_MENU_W = 160;
 
 type HighlightListRow = HighlightListTerm & { listKey: string };
 
@@ -254,7 +254,8 @@ const emptyMessage = computed(() => {
         :disabled="!currentFilePath || bookTermCount <= 0"
         @click="onMoreSelect('exportBook')"
       >
-        导出本书高亮词（JSON）
+        <span class="appShellMenuIconSlot" v-html="icons.export" />
+        <span class="appShellMenuLabel">导出本书高亮词</span>
       </button>
       <button
         type="button"
@@ -263,7 +264,8 @@ const emptyMessage = computed(() => {
         :disabled="!currentFilePath"
         @click="onMoreSelect('importBook')"
       >
-        导入本书高亮词（JSON）
+        <span class="appShellMenuIconSlot" v-html="icons.import" />
+        <span class="appShellMenuLabel">导入本书高亮词</span>
       </button>
       <div class="appShellMenuDivider" role="separator" />
       <button
@@ -273,7 +275,8 @@ const emptyMessage = computed(() => {
         :disabled="favoriteTermCount <= 0"
         @click="onMoreSelect('exportFavorite')"
       >
-        导出收藏高亮词（JSON）
+        <span class="appShellMenuIconSlot" v-html="icons.export" />
+        <span class="appShellMenuLabel">导出收藏高亮词</span>
       </button>
       <button
         type="button"
@@ -281,7 +284,8 @@ const emptyMessage = computed(() => {
         role="menuitem"
         @click="onMoreSelect('importFavorite')"
       >
-        导入收藏高亮词（JSON）
+        <span class="appShellMenuIconSlot" v-html="icons.import" />
+        <span class="appShellMenuLabel">导入收藏高亮词</span>
       </button>
     </AppShellMenuTeleport>
   </div>

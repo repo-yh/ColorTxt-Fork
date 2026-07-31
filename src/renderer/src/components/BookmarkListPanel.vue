@@ -1,6 +1,11 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { icons } from "../icons";
+import { useAnchoredAppShellMenu } from "../composables/useAnchoredAppShellMenu";
+import AppShellMenuTeleport from "./AppShellMenuTeleport.vue";
 import AppContextMenu from "./AppContextMenu.vue";
+
+const BOOKMARKS_HEADER_MORE_MENU_W = 120;
 
 type BookmarkListItem = {
   line: number;
@@ -14,13 +19,21 @@ export type BookmarkListPanelExpose = {
     line: number,
     opts?: { align?: "auto" | "center"; behavior?: ScrollBehavior },
   ) => void;
+  openMoreMenu: () => void;
 };
 
-const props = defineProps<{
-  currentFilePath: string | null;
-  bookmarks: BookmarkListItem[];
-  activeBookmarkLine: number | null;
-}>();
+const props = withDefaults(
+  defineProps<{
+    currentFilePath: string | null;
+    bookmarks: BookmarkListItem[];
+    activeBookmarkLine: number | null;
+    menuAnchorEl?: HTMLButtonElement | null;
+  }>(),
+  {
+    currentFilePath: null,
+    menuAnchorEl: null,
+  },
+);
 
 const emit = defineEmits<{
   jumpToBookmark: [line: number];
@@ -28,6 +41,8 @@ const emit = defineEmits<{
   editBookmark: [line: number];
   removeBookmark: [line: number];
   bindListRef: [value: BookmarkListPanelExpose | null];
+  exportBookmarksJson: [];
+  importBookmarksJson: [];
 }>();
 
 const itemRefs = new Map<number, HTMLElement>();
@@ -49,10 +64,41 @@ function scrollToLine(
   });
 }
 
-defineExpose({ scrollToLine });
+const moreBtnRef = ref<HTMLButtonElement | null>(null);
+const anchorRef = ref<HTMLButtonElement | null>(null);
+watch(
+  () => props.menuAnchorEl ?? moreBtnRef.value,
+  (el) => {
+    anchorRef.value = el;
+  },
+  { immediate: true },
+);
+const moreMenu = useAnchoredAppShellMenu({
+  anchor: anchorRef,
+  placement: "below-end",
+  widthPx: BOOKMARKS_HEADER_MORE_MENU_W,
+  disabled: computed(() => !props.currentFilePath),
+});
+const {
+  open: moreOpen,
+  left: moreLeft,
+  top: moreTop,
+  panelRef: morePanelRef,
+  toggleMenu: toggleMoreMenu,
+  closeMenu: closeMoreMenu,
+} = moreMenu;
+
+function bindMorePanel(el: HTMLElement | null) {
+  morePanelRef.value = el;
+}
+
+defineExpose({
+  scrollToLine,
+  openMoreMenu: toggleMoreMenu,
+});
 
 onMounted(() => {
-  emit("bindListRef", { scrollToLine });
+  emit("bindListRef", { scrollToLine, openMoreMenu: toggleMoreMenu });
 });
 
 onBeforeUnmount(() => {
@@ -94,6 +140,12 @@ function onContextMenuSelect(actionId: string) {
   if (actionId === "edit") emit("editBookmark", line);
   if (actionId === "remove") emit("removeBookmark", line);
   closeContextMenu();
+}
+
+function onMoreSelect(action: string) {
+  closeMoreMenu();
+  if (action === "export") emit("exportBookmarksJson");
+  else if (action === "import") emit("importBookmarksJson");
 }
 </script>
 
@@ -164,6 +216,35 @@ function onContextMenuSelect(actionId: string) {
         清空
       </button>
     </div>
+    <AppShellMenuTeleport
+      v-model:open="moreOpen"
+      :left="moreLeft"
+      :top="moreTop"
+      :width="BOOKMARKS_HEADER_MORE_MENU_W"
+      :on-panel-mount="bindMorePanel"
+      aria-label="书签更多"
+    >
+      <button
+        type="button"
+        class="appShellMenuItem"
+        role="menuitem"
+        :disabled="!currentFilePath || sortedBookmarks.length <= 0"
+        @click="onMoreSelect('export')"
+      >
+        <span class="appShellMenuIconSlot" v-html="icons.export" />
+        <span class="appShellMenuLabel">导出书签</span>
+      </button>
+      <button
+        type="button"
+        class="appShellMenuItem"
+        role="menuitem"
+        :disabled="!currentFilePath"
+        @click="onMoreSelect('import')"
+      >
+        <span class="appShellMenuIconSlot" v-html="icons.import" />
+        <span class="appShellMenuLabel">导入书签</span>
+      </button>
+    </AppShellMenuTeleport>
     <Teleport to="body">
       <AppContextMenu
         data-fullscreen-sidebar-float

@@ -32,6 +32,11 @@ import {
 } from "../constants/appUi";
 import { COLOR_TXT_OPEN_BOOK_EXTENSIONS } from "@shared/colorTxtOpenSaveDialog";
 import { fileHistoryKey } from "../stores/recentHistoryStore";
+import { looksLikeZipBookPackCandidate } from "../utils/readerBookPack";
+import { importReaderBookPack } from "../utils/readerBookPackImport";
+import { appConfirm } from "../services/appDialog";
+import type { FileMetaRecord } from "../stores/fileMetaStore";
+import { appToast } from "../services/appToast";
 
 /** 等浏览器下一帧再续，让 Monaco 在空文档上完成绘制，避免黏性章节标题滞留 */
 function waitNextPaintFrame(): Promise<void> {
@@ -98,10 +103,16 @@ export function useAppFileSession(deps: {
   readingProgressSynced: Ref<boolean>;
   ebookConvertOutputDir: Ref<string>;
   ebookParsing: Ref<boolean>;
+  /** 彩读书包解包蒙层 */
+  bookPackUnpacking: Ref<boolean>;
   /** 正在转换的电子书源路径（用于底栏在 resetSession 之前显示「转换中…」） */
   ebookConversionSourcePath: Ref<string | null>;
   readerEditMode: Ref<boolean>;
   readerEditorDirty: Ref<boolean>;
+  fileMetaRecords: Ref<FileMetaRecord[]>;
+  /** 彩读书包无同名书时的解压目录（空串回退 UnpackedBooks） */
+  bookPackUnpackDir: Ref<string>;
+  characterPortraitCacheDir: Ref<string>;
   /**
    * 在合并进 `txtFiles` **之后**调用：传入本次新加入的路径；
    * 若当前筛选为具体分类则写入列表项 `category`；为「全部 / 未分类」时不改。
@@ -457,6 +468,14 @@ export function useAppFileSession(deps: {
           1,
           Math.floor(anchorRaw),
         );
+      } else if (hasAnchor) {
+        // 彩读书包等仅持久化视口物理行、无 Monaco viewState
+        deps.pendingRestoreEditorViewState.value = null;
+        deps.pendingRestoreViewportTopPhysicalLine.value = null;
+        deps.pendingRestorePhysicalLine.value = Math.max(
+          1,
+          Math.floor(anchorRaw!),
+        );
       } else {
         deps.pendingRestoreEditorViewState.value = null;
         deps.pendingRestoreViewportTopPhysicalLine.value = null;
@@ -496,6 +515,10 @@ export function useAppFileSession(deps: {
           name: "电子书",
           extensions: [...COLOR_TXT_OPEN_BOOK_EXTENSIONS],
         },
+        {
+          name: "彩读书包",
+          extensions: ["zip"],
+        },
         { name: "所有文件", extensions: ["*"] },
       ],
     });
@@ -503,6 +526,54 @@ export function useAppFileSession(deps: {
       r.canceled || r.filePaths.length === 0 ? null : r.filePaths[0];
     if (!filePath) return;
     await openFilePath(filePath);
+  }
+
+  async function tryImportReaderBookPack(filePath: string): Promise<boolean> {
+    if (!looksLikeZipBookPackCandidate(filePath)) return false;
+    deps.bookPackUnpacking.value = true;
+    try {
+      const result = await importReaderBookPack({
+        packFilePath: filePath,
+        txtFiles: deps.txtFiles.value,
+        fileMetaRecords: deps.fileMetaRecords.value,
+        ebookConvertOutputDir: deps.ebookConvertOutputDir.value,
+        portraitCacheDir: deps.characterPortraitCacheDir.value,
+        bookPackUnpackDir: deps.bookPackUnpackDir.value,
+        currentFilePath: deps.currentFile.value,
+        physicalReaderPath: deps.physicalReaderPath.value,
+        recentFiles: deps.recentFiles.value,
+        confirmOverwrite: async (message, detail) => {
+          // 确认框需盖过解包蒙层，先关掉再弹
+          deps.bookPackUnpacking.value = false;
+          try {
+            const full = detail ? `${message}\n\n${detail}` : message;
+            return await appConfirm(full);
+          } finally {
+            deps.bookPackUnpacking.value = true;
+          }
+        },
+      });
+      if (!result.ok) {
+        deps.bookPackUnpacking.value = false;
+        if ("cancelled" in result && result.cancelled) return true;
+        await appAlert("error" in result ? result.error : "导入书包失败");
+        return true;
+      }
+      deps.txtFiles.value = result.txtFiles;
+      deps.fileMetaRecords.value = result.fileMetaRecords;
+      persistFileListCache();
+      persistFileMeta();
+      deps.bookPackUnpacking.value = false;
+      appToast(result.message, { kind: "success" });
+      await openFilePath(result.openPath, {
+        restorePhysicalLine: result.restorePhysicalLine,
+        skipRememberCurrent: true,
+        skipReaderEditGuard: true,
+      });
+      return true;
+    } finally {
+      deps.bookPackUnpacking.value = false;
+    }
   }
 
   function openFileFromSidebar(item: TxtFileItem) {
@@ -654,6 +725,10 @@ export function useAppFileSession(deps: {
       }
     }
 
+    if (await tryImportReaderBookPack(filePath)) {
+      return true;
+    }
+
     if (!options?.skipRememberCurrent) {
       rememberCurrentFileLine();
     }
@@ -727,6 +802,15 @@ export function useAppFileSession(deps: {
       deps.pendingRestoreViewportTopPhysicalLine.value = Math.max(
         1,
         Math.floor(anchorRaw),
+      );
+    } else if (hasAnchor) {
+      // 彩读书包等仅持久化视口物理行、无 Monaco viewState
+      deps.pendingRestoreEditorViewState.value = null;
+      deps.pendingRestoreViewportTopPhysicalLine.value = null;
+      deps.pendingRestoreViewportAnchor.value = null;
+      deps.pendingRestorePhysicalLine.value = Math.max(
+        1,
+        Math.floor(anchorRaw!),
       );
     } else {
       deps.pendingRestoreEditorViewState.value = null;

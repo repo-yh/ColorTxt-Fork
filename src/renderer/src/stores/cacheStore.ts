@@ -136,6 +136,12 @@ export type PersistedSettingsData = {
    * 非空时为绝对路径。若设置 JSON 中无此键，应用默认使用 `userData/ConvertedTxt`。
    */
   ebookConvertOutputDir?: string;
+  /**
+   * 彩读书包解压目录（绝对路径）。
+   * 空串或运行时未配置时使用 `userData/UnpackedBooks`。
+   * 若设置 JSON 中无此键，首次启动写入默认路径。
+   */
+  bookPackUnpackDir?: string;
   /** 文件列表分类筛选：`__all__` | `__uncategorized__` | 分类名 */
   fileCategory?: string;
   /** 文件列表排序方式 */
@@ -193,6 +199,8 @@ export type PersistedSettingsLoadResult = {
   data: PersistedSettingsData;
   /** 持久化 JSON 是否包含 `ebookConvertOutputDir` 且为 string（含空串）；否则用 userData/ConvertedTxt 作为首次默认 */
   ebookConvertOutputDirKeyPresent: boolean;
+  /** 是否包含 `bookPackUnpackDir` 键（含空串） */
+  bookPackUnpackDirKeyPresent: boolean;
   /** 是否包含 `characterPortraitCacheDir` 键（含空串） */
   characterPortraitCacheDirKeyPresent: boolean;
 };
@@ -240,6 +248,9 @@ export function loadPersistedSettingsData(
   const ebookConvertOutputDirKeyPresent =
     Object.prototype.hasOwnProperty.call(obj, "ebookConvertOutputDir") &&
     typeof obj.ebookConvertOutputDir === "string";
+  const bookPackUnpackDirKeyPresent =
+    Object.prototype.hasOwnProperty.call(obj, "bookPackUnpackDir") &&
+    typeof obj.bookPackUnpackDir === "string";
   const characterPortraitCacheDirKeyPresent =
     Object.prototype.hasOwnProperty.call(obj, "characterPortraitCacheDir") &&
     typeof obj.characterPortraitCacheDir === "string";
@@ -432,6 +443,9 @@ export function loadPersistedSettingsData(
   if (typeof obj.ebookConvertOutputDir === "string") {
     data.ebookConvertOutputDir = obj.ebookConvertOutputDir;
   }
+  if (typeof obj.bookPackUnpackDir === "string") {
+    data.bookPackUnpackDir = obj.bookPackUnpackDir.trim();
+  }
   if (typeof obj.fileCategory === "string" && obj.fileCategory.trim()) {
     data.fileCategory = obj.fileCategory.trim();
   }
@@ -555,6 +569,7 @@ export function loadPersistedSettingsData(
   return {
     data,
     ebookConvertOutputDirKeyPresent,
+    bookPackUnpackDirKeyPresent,
     characterPortraitCacheDirKeyPresent,
   };
 }

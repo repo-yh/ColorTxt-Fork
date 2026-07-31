@@ -233,6 +233,8 @@ const emit = defineEmits<{
   removeBookmarks: [lines: number[]];
   editBookmark: [line: number];
   removeBookmark: [line: number];
+  exportBookmarksJson: [];
+  importBookmarksJson: [];
   persistUi: [];
   applyCategoryCatalog: [
     payload: {
@@ -333,9 +335,19 @@ async function onOpenCharacterPortraitBookDir() {
   }
 }
 
+async function onExportCharacterRosterPack() {
+  closeCharacterMoreMenu();
+  await characterPanelRef.value?.exportCharacterRosterPack();
+}
+
+async function onImportCharacterRosterPack() {
+  closeCharacterMoreMenu();
+  await characterPanelRef.value?.importCharacterRosterPack();
+}
+
 /** 侧栏「角色卡」标题行「更多」菜单 */
-const CHARACTER_HEADER_MORE_MENU_W = 168;
-const CHARACTER_TEXTURE_FLYOUT_MIN_W = 168;
+const CHARACTER_HEADER_MORE_MENU_W = 150;
+const CHARACTER_TEXTURE_FLYOUT_MIN_W = 120;
 const characterHeaderMoreBtnRef = ref<HTMLButtonElement | null>(null);
 const characterTextureSubTriggerRef = ref<HTMLElement | null>(null);
 const characterTextureSubOpen = ref(false);
@@ -472,7 +484,7 @@ const activePanelTitle = computed(() => {
 });
 
 /** 侧栏「AI 阅读助手」标题行「更多」菜单 */
-const AI_ASSISTANT_HEADER_MORE_MENU_W = 168;
+const AI_ASSISTANT_HEADER_MORE_MENU_W = 120;
 const aiAssistantPanelRef = ref<{
   requestRebuildVectorIndex: () => Promise<void>;
   requestClearAiBookCache: () => Promise<void>;
@@ -484,7 +496,14 @@ const annotationPanelRef = ref<InstanceType<typeof AnnotationListPanel> | null>(
 const highlightPanelRef = ref<InstanceType<typeof HighlightListPanel> | null>(
   null,
 );
+const bookmarkPanelRef = ref<InstanceType<typeof BookmarkListPanel> | null>(
+  null,
+);
+const characterPanelRef = ref<InstanceType<
+  typeof CharacterSidebarPanel
+> | null>(null);
 const highlightsHeaderMoreBtnRef = ref<HTMLButtonElement | null>(null);
+const bookmarksHeaderMoreBtnRef = ref<HTMLButtonElement | null>(null);
 const notesHeaderMoreBtnRef = ref<HTMLButtonElement | null>(null);
 const aiAssistantHeaderMoreBtnRef = ref<HTMLButtonElement | null>(null);
 const addHighlightInputRef = ref<HTMLInputElement | null>(null);
@@ -815,6 +834,18 @@ defineExpose({
             @update:model-value="emit('update:showChapterCounts', $event)"
           />
         </div>
+        <div v-else-if="activeTab === 'bookmarks'" class="sidebarHeaderEnd">
+          <button
+            ref="bookmarksHeaderMoreBtnRef"
+            type="button"
+            class="aiReaderSidebarHeaderIconBtn"
+            title="更多"
+            aria-label="更多"
+            @click="bookmarkPanelRef?.openMoreMenu()"
+          >
+            <span class="svg" v-html="icons.more" />
+          </button>
+        </div>
         <div v-else-if="activeTab === 'character'" class="sidebarHeaderEnd">
           <button
             ref="characterHeaderMoreBtnRef"
@@ -953,14 +984,18 @@ defineExpose({
         @update:file-list-editing="emit('update:fileListEditing', $event)"
       />
       <BookmarkListPanel
+        ref="bookmarkPanelRef"
         v-show="activeTab === 'bookmarks'"
         :current-file-path="currentFilePath"
         :bookmarks="bookmarksVisible"
         :active-bookmark-line="activeBookmarkLine ?? null"
+        :menu-anchor-el="bookmarksHeaderMoreBtnRef"
         @jump-to-bookmark="emit('jumpToBookmark', $event)"
         @clear-bookmarks="emit('clearBookmarks')"
         @edit-bookmark="emit('editBookmark', $event)"
         @remove-bookmark="emit('removeBookmark', $event)"
+        @export-bookmarks-json="emit('exportBookmarksJson')"
+        @import-bookmarks-json="emit('importBookmarksJson')"
         @bind-list-ref="bindBookmarkListRef"
       />
       <HighlightListPanel
@@ -1026,6 +1061,7 @@ defineExpose({
       </div>
       <div v-show="activeTab === 'character'" class="sidebarAiHost">
         <CharacterSidebarPanel
+          ref="characterPanelRef"
           :session-file-path="currentFilePath"
           :physical-reader-path="physicalReaderPath ?? null"
           :chapters="chapters"
@@ -1122,6 +1158,7 @@ defineExpose({
           aria-haspopup="menu"
           :aria-expanded="characterTextureSubOpen"
         >
+          <span class="appShellMenuIconSlot" v-html="icons.effect" />
           <span class="appShellMenuLabel">卡片效果</span>
           <span class="appShellMenuSubChevron">›</span>
         </button>
@@ -1134,7 +1171,29 @@ defineExpose({
         :disabled="characterPortraitOpenDirDisabled"
         @click="onOpenCharacterPortraitBookDir"
       >
-        打开立绘目录
+        <span class="appShellMenuIconSlot" v-html="icons.folderOpen" />
+        <span class="appShellMenuLabel">打开立绘目录</span>
+      </button>
+      <div class="appShellMenuDivider" role="separator" />
+      <button
+        type="button"
+        class="appShellMenuItem"
+        role="menuitem"
+        :disabled="characterPortraitOpenDirDisabled"
+        @click="onExportCharacterRosterPack"
+      >
+        <span class="appShellMenuIconSlot" v-html="icons.export" />
+        <span class="appShellMenuLabel">导出角色卡包</span>
+      </button>
+      <button
+        type="button"
+        class="appShellMenuItem"
+        role="menuitem"
+        :disabled="characterPortraitOpenDirDisabled"
+        @click="onImportCharacterRosterPack"
+      >
+        <span class="appShellMenuIconSlot" v-html="icons.import" />
+        <span class="appShellMenuLabel">导入角色卡包</span>
       </button>
     </AppShellMenuTeleport>
     <AppShellMenuTeleport

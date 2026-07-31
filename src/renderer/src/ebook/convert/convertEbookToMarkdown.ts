@@ -153,7 +153,7 @@ function joinUnderDir(dirAbs: string, relativePosix: string): string {
 }
 
 /** `{basename}.md` 旁为 `{basename}.Images/` */
-function imagesDirAbsBesideConvertedMd(convertedMdPath: string): string {
+export function imagesDirAbsBesideConvertedMd(convertedMdPath: string): string {
   const mdNorm = convertedMdPath.replace(/\\/g, "/").trim();
   const dir = dirnameFs(mdNorm);
   const file =

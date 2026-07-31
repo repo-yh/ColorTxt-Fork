@@ -43,6 +43,8 @@ export const emptyFileHintText = "文件已打开，但没有内容";
 
 /** 阅读区居中：电子书转 `{原名}.txt` 阶段 */
 export const readerEbookConvertingHintText = "转换中…";
+/** 彩读书包 ZIP 解析 / 解压阶段 */
+export const readerBookPackUnpackingHintText = "解包中…";
 /** 阅读区居中：正文流式读入且尚未写入任何行时 */
 export const readerTxtLoadingHintText = "加载中…";
 

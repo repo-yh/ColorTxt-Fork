@@ -93,7 +93,7 @@
 - **MiniMax**（`minimax_images`）：专用 **`ai/txt2img/minimax.ts`**，`POST {baseUrl}/image_generation`（默认 Base 含 `/v1`，与对话一致），按宽高推导 **`aspect_ratio`**；默认模型 **`image-01`**；测试连接走 **`GET {baseUrl}/models`**（不出图）。
 - **Agnes AI**（`agnes_images`）：专用 **`ai/txt2img/agnes.ts`**，仍走 `POST …/images/generations`，但文生图 Base64 用顶层 **`return_base64: true`**（**勿**发顶层 `response_format`，与 OpenAI 官方不同）；默认模型 **`agnes-image-2.1-flash`**；固定尺寸档含 **1024×768** 等（见 **`txt2ImgCloudSizePresets`**）。API Key 控制台：**`AGNES_API_KEY_CONSOLE_URL`**。
 - **测试连接**：**`ai:txt2img`** 的 **`testConnection`** 走 **`ai/txt2img/testConnection.ts`**，仅校验地址/密钥（如 OpenAI `/models`、万相 models、MiniMax models、Stability 账户等），**不出图、不消耗图像额度**；设置页由 **`AppConnectionTestButton`** + **`useConnectionTest`** 展示 pending/成功/失败（成功不弹框）。
-- **侧栏「角色立绘生成」**：**画风（本书）** + **角色形象** + **负面描述**（仅 **SD 系** backend 显示输入框；云端不展示，负面由设置内通用项与 prompt 整理承担）。字段仍持久化为 `characterBookStyle.stylePrefixZh` 与角色的 `promptZh` / `negativeZh`。关闭弹窗（应用 / 取消 / 关闭按钮）时同步草稿并 **`characterFileMetaPatch`**；打开弹窗或设置 **确定** 后递增的 **`aiConfigSyncNonce`** 会刷新侧栏对当前 **`txt2img.backend`** 的判断（实际出图 IPC 每次 **`configGet`** 读最新配置）。
+- **侧栏「角色立绘生成」**（**`CharacterPortraitGenerateModal`**，经 **`CharacterEditDrawer`**）：**画风（本书）** + **角色形象** + **负面描述**（仅 **SD 系** backend 显示输入框；云端不展示，负面由设置内通用项与 prompt 整理承担）。字段仍持久化为 `characterBookStyle.stylePrefixZh` 与角色的 `promptZh` / `negativeZh`。关闭弹窗（应用 / 取消 / 关闭按钮）时同步草稿并 **`characterFileMetaPatch`**；打开弹窗或设置 **确定** 后递增的 **`aiConfigSyncNonce`** 会刷新侧栏对当前 **`txt2img.backend`** 的判断（实际出图 IPC 每次 **`configGet`** 读最新配置）。
 - 切换服务商会**覆盖**当前 `apiBaseUrl`（及云端默认模型/尺寸）；兼容代理可选手填地址；手改地址**不**反推服务商。
 
 ### 角色卡 3D 倾斜与闪卡纹理
@@ -359,12 +359,14 @@ cardShellWrap（悬停抬高 z-index）
 | `SettingsSkillEditModal.vue` | 自定义技能新建/编辑弹窗 |
 | `AppPullFlashButton.vue` | 设置面板内刷新模型/采样器列表等，完成态闪光反馈 |
 | `PathPickerInput.vue` | 目录选择（含 **角色立绘缓存根目录** 等） |
-| `AiAssistantPanel.vue` | 侧栏 AI 阅读助手主面板：会话、输入、`onAgentEvent`（流式增量、工具、`token_usage_*`、`done`/`error`）；历史列表会话名 **`title`** 悬停提示；**`findLiveAgentAssistant`**；受 **`showTokenUsage`** 控制 Token 条。<br>**`prefillQuotedText(text)`**：阅读器 **「问 AI」** 填入 blockquote 引用并 autosize / 滚至光标 |
+| `AiAssistantPanel.vue` | 侧栏 AI 阅读助手主面板：会话、输入、`onAgentEvent`（流式增量、工具、`token_usage_*`、`done`/`error`）；历史列表会话名 **`title`** 悬停提示；**`findLiveAgentAssistant`**；受 **`showTokenUsage`** 控制 Token 条。<br>**导出**默认名 **`{书名}-{日期}-{对话标题}[（带思考过程）].colortxt-chat.{md\|json}`**（`aiAssistantExport.buildChatExportDefaultName`）。<br>**`prefillQuotedText(text)`**：阅读器 **「问 AI」** 填入 blockquote 引用并 autosize / 滚至光标 |
 | `AiAssistantChatMessages.vue` | 消息列表：用户/助手气泡、思考块、工具折叠、**`AiMindmapView`** / **`AiWordcloudView`**（传入 `chapters`）；**`AiMarkdown`** 章节跳转；**`AiTokenUsageBanner`** |
 | `AiAssistantDetailsFold.vue` | 助手详情折叠（与 `directives/aiStickScroll`、`useAiFoldContentSelectAll` 配合） |
 | `AiToolFoldBody.vue` | 工具折叠正文；超长章压缩进度中 **`当前进度：M/N`** 高亮（`utils/aiToolFoldBody.ts`） |
 | `AiMarkdown.vue` | 助手回复 Markdown（`aiMarkdownMarkedSetup` / `Prep`、`aiMarkdownChapterRef`） |
-| `CharacterSidebarPanel.vue` | 侧栏「角色」：角色卡网格、**拖动排序**、**`popoverCardId`** 原位放大、**AI 检索**、**立绘生成**弹窗；**多音色朗读** 下角色 **`voiceReadVoiceId`**；下发 **`characterCardTextureEffect`**；**`aiConfigSyncNonce`** 同步文生图 UI |
+| `CharacterSidebarPanel.vue` | 侧栏「角色」编排根：角色卡网格、**拖动排序**、**`popoverCardId`** 原位放大、导入/导出包；立绘 FS 经 **`useCharacterPortraitFs`**；编辑经 **`CharacterEditDrawer`**；下发 **`characterCardTextureEffect`** / **`aiConfigSyncNonce`** |
+| `CharacterEditDrawer.vue` | 角色编辑/新建抽屉：草稿保存删除、语音试听、立绘上传；挂载 **`useCharacterPortraitRetrieve`** 与 **`CharacterPortraitGenerateModal`** |
+| `CharacterPortraitGenerateModal.vue` | 立绘 txt2img：预览、生成/中止/应用、提示词持久化 |
 | `CharacterRosterCard.vue` | 角色卡（2:3、3D 翻转、全息层、倾斜、原位放大）；背面滚动边界不带动外层列表 |
 | `SettingsEditPanel.vue` | 「编辑」：**显示行号**、**启用小地图**、**自动刷新章节列表**；**AI 智能排版**开关组（`aiSmartFormat`） |
 | `AppHeader.vue` | 编辑态顶栏 **AI 智能排版** 按钮（`canUseAiSmartFormat`）；排版进行中或 Diff 预览时禁用 |
@@ -375,4 +377,4 @@ cardShellWrap（悬停抬高 z-index）
 
 主进程 **`registerAiIpc.ts`** 集中注册 `ai:*` IPC（含 **`ai:embedding:builtin:*`**、**`ai:text-format:*`** 智能排版、**`ai:migrateDataCacheRoot`** / **`ai:migrateBuiltinModelCacheRoot`**、**`ai:messageUpdateToolContent`** 等）；实现见 **`src/main/ai/`**（**`infra/`**、**`chat/`**、**`rag/embedding/`**、**`txt2img/`**、**`tools/`**）。渲染侧智能排版：**`useAiSmartFormat.ts`**、**`aiSmartFormat/*`**、**`AiSmartFormatProgressModal.vue`**；向量索引：**`ai/buildBookVectorIndex.ts`**、**`ai/embeddingReady.ts`**。预加载 **`window.colorTxt.ai.*`** 见 **「`src/preload/index.ts`（预加载）」**。
 
-角色卡倾斜/放大/纹理/排序（无独立 IPC）：**`@shared/characterCardTextureEffects`**、**`composables/useCharacterCardTilt.ts`**、**`composables/useCharacterCardPopoverZoom.ts`**、**`composables/useCharacterRosterReorder.ts`**、**`composables/useSortableReorder.ts`**、**`utils/characterCardSpring.ts`**、**`utils/characterCardTiltDom.ts`**、**`styles/characterCardHolo*.css`**、**`components/CharacterRosterCard.vue`**；见 **「角色卡 3D 倾斜与闪卡纹理」** 与 **「列表拖动排序（SortableJS）」**。
+角色卡倾斜/放大/纹理/排序（无独立 IPC）：**`@shared/characterCardTextureEffects`**、**`composables/useCharacterCardTilt.ts`**、**`composables/useCharacterCardPopoverZoom.ts`**、**`composables/useCharacterRosterReorder.ts`**、**`composables/useCharacterPortraitFs.ts`**、**`composables/useCharacterPortraitRetrieve.ts`**、**`composables/useSortableReorder.ts`**、**`utils/characterCardSpring.ts`**、**`utils/characterCardTiltDom.ts`**、**`styles/characterCardHolo*.css`**、**`components/CharacterRosterCard.vue`** / **`CharacterEditDrawer.vue`** / **`CharacterPortraitGenerateModal.vue`**；见 **「角色卡 3D 倾斜与闪卡纹理」** 与 **「列表拖动排序（SortableJS）」**。

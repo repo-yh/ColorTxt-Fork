@@ -75,7 +75,7 @@ import { appToast } from "../services/appToast";
 import { APP_DISPLAY_NAME } from "../constants/appUi";
 
 /** 导出对话下拉菜单固定宽度（与内容版式一致，不作视口/触发器推算） */
-const AI_EXPORT_MENU_WIDTH_PX = 210;
+const AI_EXPORT_MENU_WIDTH_PX = 240;
 
 const selectListsEmpty: CustomSelectItem[] = [];
 
@@ -1541,6 +1541,28 @@ function resolveExportSaveDefaultPath(fileName: string): string | undefined {
   return joinFs(dir, fileName);
 }
 
+/** 导出默认文件名中的「书名」：优先会话路径 basename（与书签/笔记等一致） */
+function resolveExportBookName(): string {
+  const p = (props.sessionFilePath || props.physicalReaderPath || "").trim();
+  if (!p) return "对话";
+  const norm = p.replace(/\\/g, "/");
+  const base = norm.slice(norm.lastIndexOf("/") + 1).trim();
+  return base || "对话";
+}
+
+function chatExportDefaultName(
+  exportTitle: string,
+  ext: "md" | "json",
+  withReasoning: boolean,
+): string {
+  return buildChatExportDefaultName(
+    resolveExportBookName(),
+    exportTitle,
+    ext,
+    withReasoning,
+  );
+}
+
 async function exportMd() {
   const tid = threadId.value;
   if (!tid || messages.value.length === 0) return;
@@ -1550,7 +1572,7 @@ async function exportMd() {
     threads.value,
     messages.value,
   );
-  const name = buildChatExportDefaultName(exportTitle, "md", false);
+  const name = chatExportDefaultName(exportTitle, "md", false);
   const r = await window.colorTxt.ai.exportSave({
     defaultName: name,
     defaultPath: resolveExportSaveDefaultPath(name),
@@ -1561,7 +1583,7 @@ async function exportMd() {
       skillToolDisplayLabels.value,
       props.chapters,
     ),
-    filters: [{ name: "Markdown", extensions: ["md"] }],
+    filters: [{ name: "彩读对话", extensions: ["md"] }],
   });
   if (!r.ok && "error" in r) await appAlert(r.error);
 }
@@ -1575,7 +1597,7 @@ async function exportMdWithReasoning() {
     threads.value,
     messages.value,
   );
-  const name = buildChatExportDefaultName(exportTitle, "md", true);
+  const name = chatExportDefaultName(exportTitle, "md", true);
   const r = await window.colorTxt.ai.exportSave({
     defaultName: name,
     defaultPath: resolveExportSaveDefaultPath(name),
@@ -1586,7 +1608,7 @@ async function exportMdWithReasoning() {
       skillToolDisplayLabels.value,
       props.chapters,
     ),
-    filters: [{ name: "Markdown", extensions: ["md"] }],
+    filters: [{ name: "彩读对话", extensions: ["md"] }],
   });
   if (!r.ok && "error" in r) await appAlert(r.error);
 }
@@ -1600,7 +1622,7 @@ async function exportJson() {
     threads.value,
     messages.value,
   );
-  const name = buildChatExportDefaultName(exportTitle, "json", false);
+  const name = chatExportDefaultName(exportTitle, "json", false);
   const r = await window.colorTxt.ai.exportSave({
     defaultName: name,
     defaultPath: resolveExportSaveDefaultPath(name),
@@ -1611,7 +1633,7 @@ async function exportJson() {
       skillToolDisplayLabels.value,
       props.chapters,
     ),
-    filters: [{ name: "JSON", extensions: ["json"] }],
+    filters: [{ name: "彩读对话", extensions: ["json"] }],
   });
   if (!r.ok && "error" in r) await appAlert(r.error);
 }
@@ -1625,7 +1647,7 @@ async function exportJsonWithReasoning() {
     threads.value,
     messages.value,
   );
-  const name = buildChatExportDefaultName(exportTitle, "json", true);
+  const name = chatExportDefaultName(exportTitle, "json", true);
   const r = await window.colorTxt.ai.exportSave({
     defaultName: name,
     defaultPath: resolveExportSaveDefaultPath(name),
@@ -1636,7 +1658,7 @@ async function exportJsonWithReasoning() {
       skillToolDisplayLabels.value,
       props.chapters,
     ),
-    filters: [{ name: "JSON", extensions: ["json"] }],
+    filters: [{ name: "彩读对话", extensions: ["json"] }],
   });
   if (!r.ok && "error" in r) await appAlert(r.error);
 }
@@ -1947,7 +1969,8 @@ defineExpose({
             role="menuitem"
             @click="exportMd"
           >
-            导出 Markdown
+            <span class="appShellMenuIconSlot" v-html="icons.export" />
+            <span class="appShellMenuLabel">导出 Markdown</span>
           </button>
           <button
             type="button"
@@ -1955,7 +1978,8 @@ defineExpose({
             role="menuitem"
             @click="exportMdWithReasoning"
           >
-            导出 Markdown（带思考过程）
+            <span class="appShellMenuIconSlot" v-html="icons.export" />
+            <span class="appShellMenuLabel">导出 Markdown（带思考过程）</span>
           </button>
           <div class="appShellMenuDivider" role="presentation" />
           <button
@@ -1964,7 +1988,8 @@ defineExpose({
             role="menuitem"
             @click="exportJson"
           >
-            导出 JSON
+            <span class="appShellMenuIconSlot" v-html="icons.export" />
+            <span class="appShellMenuLabel">导出 JSON</span>
           </button>
           <button
             type="button"
@@ -1972,7 +1997,8 @@ defineExpose({
             role="menuitem"
             @click="exportJsonWithReasoning"
           >
-            导出 JSON（带思考过程）
+            <span class="appShellMenuIconSlot" v-html="icons.export" />
+            <span class="appShellMenuLabel">导出 JSON（带思考过程）</span>
           </button>
           <div class="appShellMenuDivider" role="presentation" />
           <button
@@ -1981,7 +2007,8 @@ defineExpose({
             role="menuitem"
             @click="copyAllMarkdown"
           >
-            复制全部
+            <span class="appShellMenuIconSlot" v-html="icons.copy" />
+            <span class="appShellMenuLabel">复制全部</span>
           </button>
           <button
             type="button"
@@ -1989,7 +2016,8 @@ defineExpose({
             role="menuitem"
             @click="copyAllMarkdownWithReasoning"
           >
-            复制全部（带思考过程）
+            <span class="appShellMenuIconSlot" v-html="icons.copy" />
+            <span class="appShellMenuLabel">复制全部（带思考过程）</span>
           </button>
         </div>
       </Teleport>

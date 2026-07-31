@@ -11,7 +11,7 @@ import { useAnchoredAppShellMenu } from "../composables/useAnchoredAppShellMenu"
 import AppShellMenuTeleport from "./AppShellMenuTeleport.vue";
 import AppContextMenu from "./AppContextMenu.vue";
 
-const NOTES_HEADER_MORE_MENU_W = 196;
+const NOTES_HEADER_MORE_MENU_W = 200;
 
 const props = withDefaults(
   defineProps<{
@@ -311,7 +311,8 @@ function chapterHeaderPadding(
         :disabled="rowCount <= 0"
         @click="onMoreSelect('exportMd')"
       >
-        导出笔记（Markdown）
+        <span class="appShellMenuIconSlot" v-html="icons.export" />
+        <span class="appShellMenuLabel">导出笔记（Markdown）</span>
       </button>
       <div class="appShellMenuDivider" role="separator" />
       <button
@@ -321,7 +322,8 @@ function chapterHeaderPadding(
         :disabled="rowCount <= 0"
         @click="onMoreSelect('exportJson')"
       >
-        导出笔记（JSON）
+        <span class="appShellMenuIconSlot" v-html="icons.export" />
+        <span class="appShellMenuLabel">导出笔记（JSON）</span>
       </button>
       <button
         type="button"
@@ -329,7 +331,8 @@ function chapterHeaderPadding(
         role="menuitem"
         @click="onMoreSelect('importJson')"
       >
-        导入笔记（JSON）
+        <span class="appShellMenuIconSlot" v-html="icons.import" />
+        <span class="appShellMenuLabel">导入笔记（JSON）</span>
       </button>
       <div class="appShellMenuDivider" role="separator" />
       <button
@@ -339,7 +342,8 @@ function chapterHeaderPadding(
         :disabled="staleCount <= 0"
         @click="onMoreSelect('clearStale')"
       >
-        清除失效笔记
+        <span class="appShellMenuIconSlot" v-html="icons.unknow" />
+        <span class="appShellMenuLabel">清除失效笔记</span>
       </button>
     </AppShellMenuTeleport>
     <Teleport to="body">

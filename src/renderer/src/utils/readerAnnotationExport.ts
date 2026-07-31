@@ -31,7 +31,7 @@ export function buildAnnotationExportDefaultName(
   const titlePart = sanitizeChatExportTitleForFilename(
     bookTitleForExport(bookName || "笔记"),
   );
-  return `notes-${slug}-${titlePart}.${ext}`;
+  return `${titlePart}-${slug}.colortxt-notes.${ext}`;
 }
 
 export function buildReaderAnnotationsExportJson(
@@ -147,12 +147,16 @@ export async function saveAnnotationExportFile(
   return window.colorTxt.ai.exportSave({
     defaultName,
     data,
-    filters: [{ name: ext === "md" ? "Markdown" : "JSON", extensions: [ext] }],
+    filters:
+      ext === "md"
+        ? [{ name: "彩读笔记", extensions: ["md"] }]
+        : [{ name: "彩读笔记", extensions: ["json"] }],
   });
 }
 
 export async function pickAndReadJsonFile(
   title = "导入笔记（JSON）",
+  filterName = "彩读笔记",
 ): Promise<
   | { ok: true; text: string; path: string }
   | { ok: false; cancelled: true }
@@ -160,7 +164,7 @@ export async function pickAndReadJsonFile(
 > {
   const r = await window.colorTxt.showOpenDialog({
     title,
-    filters: [{ name: "JSON", extensions: ["json"] }],
+    filters: [{ name: filterName, extensions: ["json"] }],
     properties: ["openFile"],
   });
   if (r.canceled || !r.filePaths?.[0]) {

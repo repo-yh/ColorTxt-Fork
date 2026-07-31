@@ -45,16 +45,20 @@ export function sanitizeChatExportTitleForFilename(raw: string): string {
   return cleaned || "对话";
 }
 
-/** `chat-{日期}-{对话名}.md`；带思考过程时在扩展名前加 `（带思考过程）` */
+/** `{书名}-{日期}-{对话名}.colortxt-chat.{ext}`；带思考过程时在扩展名前加 `（带思考过程）` */
 export function buildChatExportDefaultName(
+  bookName: string,
   title: string,
   ext: "md" | "json",
   withReasoning: boolean,
 ): string {
   const slug = chatExportDateSlug();
+  const bookRaw = bookName.trim();
+  const bookStem = bookRaw.replace(/\.(txt|md)$/i, "").trim() || bookRaw;
+  const bookPart = sanitizeChatExportTitleForFilename(bookStem || "对话");
   const titlePart = sanitizeChatExportTitleForFilename(title);
   const reasoning = withReasoning ? "（带思考过程）" : "";
-  return `chat-${slug}-${titlePart}${reasoning}.${ext}`;
+  return `${bookPart}-${slug}-${titlePart}${reasoning}.colortxt-chat.${ext}`;
 }
 
 /**

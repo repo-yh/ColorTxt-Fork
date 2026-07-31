@@ -320,6 +320,11 @@ const api = {
     ipcRenderer.invoke("fs:removePath", targetPath) as Promise<{ ok: true }>,
   mkdir: (dirPath: string) =>
     ipcRenderer.invoke("fs:mkdir", dirPath) as Promise<{ ok: true }>,
+  listFilesRecursive: (dirPath: string) =>
+    ipcRenderer.invoke("fs:listFilesRecursive", dirPath) as Promise<{
+      ok: true;
+      files: string[];
+    }>,
   renamePath: (fromPath: string, toPath: string) =>
     ipcRenderer.invoke("fs:renamePath", fromPath, toPath) as Promise<
       | { ok: true; path: string; size: number }

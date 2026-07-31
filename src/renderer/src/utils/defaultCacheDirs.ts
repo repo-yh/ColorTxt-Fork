@@ -1,4 +1,4 @@
-import { EBOOK_CONVERT_DEFAULT_SUBDIR } from "@shared/ebookConvertPaths";
+import { EBOOK_CONVERT_DEFAULT_SUBDIR, UNPACKED_BOOKS_DEFAULT_SUBDIR } from "@shared/ebookConvertPaths";
 import { BOOK_SOURCE_DOWNLOAD_DEFAULT_SUBDIR, BOOK_SOURCE_CHAPTER_CACHE_SUBDIR } from "@shared/bookSource/paths";
 import { defaultAiDataCacheRoot, defaultBuiltinModelCacheRoot } from "@shared/aiDataPaths";
 import { defaultCharacterPortraitCacheRoot } from "@shared/characterPortraitPaths";
@@ -28,6 +28,31 @@ export function resolveDefaultEbookConvertOutputDirSync(): string {
     /* ignore */
   }
   return "";
+}
+
+/** 彩读书包默认解压目录：userData/UnpackedBooks */
+export function resolveDefaultUnpackedBooksDirSync(): string {
+  try {
+    const ud = window.colorTxt?.getUserDataPath?.();
+    if (typeof ud === "string") {
+      const t = ud.trim();
+      if (t) return joinFs(t, UNPACKED_BOOKS_DEFAULT_SUBDIR);
+    }
+  } catch {
+    /* ignore */
+  }
+  return "";
+}
+
+/**
+ * 有效解压目录：设置非空则用之，否则 `userData/UnpackedBooks`。
+ */
+export function resolveBookPackUnpackDir(
+  configured: string | null | undefined,
+): string {
+  const t = configured?.trim() ?? "";
+  if (t) return t;
+  return resolveDefaultUnpackedBooksDirSync();
 }
 
 /**

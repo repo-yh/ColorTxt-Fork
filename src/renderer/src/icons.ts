@@ -58,6 +58,8 @@ import aiComposeIcon from "./assets/AI_compose.svg?raw";
 import brainIcon from "./assets/brain.svg?raw";
 import copyIcon from "./assets/copy.svg?raw";
 import downloadIcon from "./assets/download.svg?raw";
+import exportIcon from "./assets/export.svg?raw";
+import importIcon from "./assets/import.svg?raw";
 import readIcon from "./assets/read.svg?raw";
 import historyIcon from "./assets/history.svg?raw";
 import newChatIcon from "./assets/new_chat.svg?raw";
@@ -110,6 +112,8 @@ import disclaimerIcon from "./assets/disclaimer.svg?raw";
 import desktopShortcutIcon from "./assets/desktop_shortcut.svg?raw";
 import cacheIcon from "./assets/cache.svg?raw";
 import subheadIcon from "./assets/subhead.svg?raw";
+import effectIcon from "./assets/effect.svg?raw";
+import markdownIcon from "./assets/Markdown.svg?raw";
 
 /** 角色卡「语音」播放动画帧：speak_0 → speak_1 → speak */
 export const speakIconAnimFrames = [
@@ -193,6 +197,10 @@ export const icons = {
   brain: brainIcon,
   copy: copyIcon,
   download: downloadIcon,
+  /** 导出（菜单） */
+  export: exportIcon,
+  /** 导入（菜单） */
+  import: importIcon,
   /** 开始/继续阅读 */
   read: readIcon,
   history: historyIcon,
@@ -271,4 +279,8 @@ export const icons = {
   cache: cacheIcon,
   /** 目录附加信息（章名下 tag） */
   subhead: subheadIcon,
+  /** 卡片效果 */
+  effect: effectIcon,
+  /** Markdown */
+  markdown: markdownIcon,
 } as const;

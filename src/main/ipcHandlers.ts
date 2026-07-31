@@ -640,6 +640,37 @@ export function registerMainIpcHandlers(
     return { ok: true as const };
   });
 
+  /** 递归列出目录下所有文件（相对路径，posix `/`）；目录不存在则返回空列表 */
+  ipcMain.handle("fs:listFilesRecursive", async (_evt, dirPath: string) => {
+    const root = path.resolve(String(dirPath ?? ""));
+    const files: string[] = [];
+    async function walk(abs: string, relPosix: string) {
+      let entries: import("node:fs").Dirent[];
+      try {
+        entries = await readdir(abs, { withFileTypes: true });
+      } catch {
+        return;
+      }
+      for (const e of entries) {
+        const childAbs = path.join(abs, e.name);
+        const childRel = relPosix ? `${relPosix}/${e.name}` : e.name;
+        if (e.isDirectory()) {
+          await walk(childAbs, childRel);
+        } else if (e.isFile()) {
+          files.push(childRel.replace(/\\/g, "/"));
+        }
+      }
+    }
+    try {
+      const st = await stat(root);
+      if (!st.isDirectory()) return { ok: true as const, files: [] as string[] };
+    } catch {
+      return { ok: true as const, files: [] as string[] };
+    }
+    await walk(root, "");
+    return { ok: true as const, files };
+  });
+
   ipcMain.handle(
     "fs:renamePath",
     async (_evt, fromPath: string, toPath: string) => {

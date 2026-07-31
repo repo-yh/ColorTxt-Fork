@@ -6,6 +6,7 @@ import type {
   PomodoroDisplayMode,
   PomodoroPhase,
 } from "../composables/usePomodoroTimer";
+import { icons } from "../icons";
 
 const props = withDefaults(
   defineProps<{
@@ -66,6 +67,9 @@ const emit = defineEmits<{
   pathReload: [];
   pathReconvert: [];
   pathClose: [];
+  pathExportBookPack: [];
+  pathExportBookPackWithProgress: [];
+  pathClearReadingData: [];
   saveFileAsEncoding: [encoding: "utf8" | "gb2312"];
   pomodoroStart: [];
   pomodoroToggleDisplayMode: [];
@@ -90,20 +94,46 @@ const encodingMenuItems = [
 ] as const;
 
 const pathMenuItems = computed(() => {
+  const exportDisabled = !props.pathMenuCloseEnabled;
   const items: {
     id: string;
-    label: string;
+    label?: string;
     type?: "warning" | "danger";
     disabled?: boolean;
+    iconHtml?: string;
+    separator?: boolean;
   }[] = [
+    {
+      id: "exportBookPack",
+      label: "导出书包",
+      iconHtml: icons.export,
+      disabled: exportDisabled,
+    },
+    {
+      id: "exportBookPackWithProgress",
+      label: "导出书包（带阅读进度）",
+      iconHtml: icons.export,
+      disabled: exportDisabled,
+    },
+    { id: "exportBookPackSep", separator: true },
+    {
+      id: "clearReadingData",
+      label: "清除阅读数据",
+      iconHtml: icons.clear,
+      type: "danger",
+      disabled: exportDisabled,
+    },
+    { id: "clearReadingDataSep", separator: true },
     {
       id: "reveal",
       label: "在文件管理器中显示",
+      iconHtml: icons.folderOpen,
       disabled: !props.pathMenuRevealEnabled,
     },
     {
       id: "reload",
       label: "重新加载",
+      iconHtml: icons.refresh,
       disabled: !props.pathMenuReloadEnabled,
     },
   ];
@@ -111,12 +141,14 @@ const pathMenuItems = computed(() => {
     items.push({
       id: "reconvert",
       label: "重新转换",
+      iconHtml: icons.refresh,
       type: "warning",
     });
   }
   items.push({
     id: "close",
     label: "关闭文件",
+    iconHtml: icons.close,
     type: "danger",
     disabled: !props.pathMenuCloseEnabled,
   });
@@ -179,6 +211,10 @@ function onPathMenuSelect(id: string) {
   if (id === "reveal") emit("pathRevealInFolder");
   else if (id === "reload") emit("pathReload");
   else if (id === "reconvert") emit("pathReconvert");
+  else if (id === "exportBookPack") emit("pathExportBookPack");
+  else if (id === "exportBookPackWithProgress")
+    emit("pathExportBookPackWithProgress");
+  else if (id === "clearReadingData") emit("pathClearReadingData");
   else if (id === "close") emit("pathClose");
 }
 </script>

@@ -12,9 +12,7 @@ import {
 import AppModal from "../../components/AppModal.vue";
 import IconButton from "../../components/IconButton.vue";
 import LoadingDotsBounce from "../../components/LoadingDotsBounce.vue";
-import LoadingDotsRotate from "../../components/LoadingDotsRotate.vue";
 import RefreshIcon from "../../components/RefreshIcon.vue";
-import VirtualList from "../../components/VirtualList.vue";
 import ReaderMain from "../../components/ReaderMain.vue";
 import VoiceReadToolbar from "../../components/VoiceReadToolbar.vue";
 import ReaderChapterNavBar from "../../components/ReaderChapterNavBar.vue";
@@ -22,6 +20,7 @@ import FullscreenSystemClock from "../../components/FullscreenSystemClock.vue";
 import PomodoroBreakOverlay from "../../components/PomodoroBreakOverlay.vue";
 import FindBookReaderFooter from "./FindBookReaderFooter.vue";
 import FindBookReaderHeader from "./FindBookReaderHeader.vue";
+import FindBookReaderChapterSidebar from "./FindBookReaderChapterSidebar.vue";
 import {
   countCharsForLine,
   floorReadingProgressPercentByLines,
@@ -38,10 +37,7 @@ import type {
   BookSourceRecord,
   SearchBookItem,
 } from "@shared/bookSource/types";
-import {
-  useBookSourceChapterContent,
-  useBookSourceDownload,
-} from "../composables/useBookSource";
+import { useBookSourceDownload } from "../composables/useBookSource";
 import { useFindBookBookshelf } from "../composables/useFindBookBookshelf";
 import {
   updateFindBookBookshelfBookInfo,
@@ -49,6 +45,7 @@ import {
 import { useFindBookReaderSettings } from "../composables/useFindBookReaderSettings";
 import { useFindBookSettings } from "../composables/useFindBookSettings";
 import { useFindBookReaderShortcuts } from "../composables/useFindBookReaderShortcuts";
+import { useFindBookChapterSession } from "../composables/useFindBookChapterSession";
 import { useAnchoredAppShellMenu } from "../../composables/useAnchoredAppShellMenu";
 import { acceleratorToDisplayText } from "../../services/shortcutUtils";
 import { useAppReaderUiPrefs } from "../../composables/useAppReaderUiPrefs";
@@ -57,7 +54,6 @@ import { useAppFullscreenReaderLayout } from "../../composables/useAppFullscreen
 import { useAppTimedScroll } from "../../composables/useAppTimedScroll";
 import { useAppVoiceRead } from "../../composables/useAppVoiceRead";
 import { hasEscBeforeModalLayers } from "../../utils/modalStack";
-import { formatPhysicalPlainTextForReader } from "../../reader/readerDisplayPipeline";
 import { applyTextDisplayConverts } from "../../services/textConvertApply";
 import { applyAppShellTheme, type AppShellTheme } from "../../utils/appShellThemeSync";
 import { appConfirm, appLog } from "../../services/appDialog";
@@ -70,12 +66,6 @@ import {
   findBookReplaceRulesChangedEvent,
   type ReplaceRule,
 } from "@shared/bookSource/replaceRule";
-import {
-  applyContentReplaceWithRules,
-  applyTitleReplaceWithRules,
-  filterEnabledReplaceRules,
-} from "@shared/bookSource/replaceRuleApply";
-import { listReplaceRulesLocal } from "../replaceRuleLocalStore";
 import type { BookSourceEditTab } from "../editBookSourceFields";
 import { useChapterCacheMarks } from "../composables/useChapterCacheMarks";
 import { confirmClearBookChapterCache } from "../services/clearBookChapterCache";
@@ -96,7 +86,6 @@ import { READER_SIDEBAR_ROW_STRIDE } from "../../composables/useReaderSidebarLis
 /** 章名下有 tag（updateTime）时两行展示的行距 */
 const READER_SIDEBAR_ROW_STRIDE_WITH_TAG = 56;
 import {
-  contentChaptersInReadingOrder,
   displayIndexForReadingOrder,
   readingOrderIndexFromDisplay,
 } from "../chapterReadingOrder";
@@ -133,7 +122,9 @@ const emit = defineEmits<{
 }>();
 
 const readerRef = ref<InstanceType<typeof ReaderMain> | null>(null);
-const chapterListRef = ref<InstanceType<typeof VirtualList> | null>(null);
+const chapterListRef = ref<InstanceType<
+  typeof FindBookReaderChapterSidebar
+> | null>(null);
 
 const showEditSource = ref(false);
 const editingSourceUrl = ref<string | null>(null);
@@ -168,20 +159,10 @@ function bindTopMorePanel(el: HTMLElement | null) {
 }
 const chapterSortDesc = ref(false);
 const currentDisplayIndex = ref(0);
-const readerContentKey = ref<string | null>(null);
-const lastChapterTitle = ref("");
-const lastChapterBody = ref("");
 const viewportTopLine = ref(1);
 const viewportEndLine = ref(1);
 const viewportVisualProgressPercent = ref(0);
 const viewportAtBottom = ref(false);
-/** 当前章节在阅读器中的展示总行数 */
-const totalLineCount = ref(0);
-const readerEditMode = ref(false);
-const readerEditorDirty = ref(false);
-const loading = ref(false);
-/** 仅切到未缓存章节时为 true，控制侧栏 loading 图标与「加载中」提示 */
-const showChapterLoadingUi = ref(false);
 
 const settings = useFindBookReaderSettings();
 const findBookSettings = useFindBookSettings();
@@ -254,8 +235,6 @@ const {
   syncSharedSettingsFromMain,
 } = settings;
 
-const { loading: chapterLoading, error: chapterError, logs, load: loadChapterContent, cancel: cancelChapterLoad } =
-  useBookSourceChapterContent();
 const {
   downloading: offlineCaching,
   downloadProgress: offlineCacheProgress,
@@ -320,63 +299,6 @@ watch(offlineCaching, (v, was) => {
 const inBookshelf = computed(() =>
   isInBookshelf(props.detail.bookUrl, props.item.origin),
 );
-
-/** 展示管线用规则缓存（原文在 lastChapter*；规则变更时刷新） */
-const cachedReplaceRules = ref<ReplaceRule[]>([]);
-const replaceRulesLoaded = ref(false);
-
-async function refreshReplaceRulesCache() {
-  try {
-    cachedReplaceRules.value = listReplaceRulesLocal("findBook");
-  } catch {
-    cachedReplaceRules.value = [];
-  } finally {
-    replaceRulesLoaded.value = true;
-  }
-}
-
-async function ensureReplaceRulesCache() {
-  if (!replaceRulesLoaded.value) await refreshReplaceRulesCache();
-}
-
-async function onReplaceRulesChanged() {
-  await refreshReplaceRulesCache();
-  if (!modelValue.value || readerEditMode.value) return;
-  void refreshCurrentChapterDisplay();
-  void refreshConvertedChapterTitles();
-}
-
-function applyDisplayReplaceTitle(title: string): string {
-  if (!title) return title;
-  const rules = filterEnabledReplaceRules(
-    cachedReplaceRules.value,
-    props.detail.name || "",
-    props.item.origin || "",
-    "title",
-  );
-  return applyTitleReplaceWithRules(title, rules);
-}
-
-function applyDisplayReplaceBody(body: string): string {
-  const rules = filterEnabledReplaceRules(
-    cachedReplaceRules.value,
-    props.detail.name || "",
-    props.item.origin || "",
-    "content",
-  );
-  return applyContentReplaceWithRules(body, rules);
-}
-
-/** 有已启用的规则 → 工具栏按钮激活（无总开关） */
-const textReplaceActive = computed(() => {
-  const name = props.detail.name || "";
-  const origin = props.item.origin || "";
-  const rules = cachedReplaceRules.value;
-  return (
-    filterEnabledReplaceRules(rules, name, origin, "content").length > 0 ||
-    filterEnabledReplaceRules(rules, name, origin, "title").length > 0
-  );
-});
 
 function onOpenTextReplace() {
   emit("openTextReplace");
@@ -487,11 +409,6 @@ function onLayoutMouseDown(ev: MouseEvent) {
 }
 
 const breadcrumbSourceName = computed(() => props.item.originName?.trim() ?? "");
-const hasReaderLogs = computed(() => logs.value.length > 0);
-const showReaderLogBtn = computed(
-  () => Boolean(chapterError.value) || hasReaderLogs.value,
-);
-const readerLogHasError = computed(() => Boolean(chapterError.value));
 /** 顶栏/正文加载遮罩：目录拉取中（不含侧栏「重新获取目录」） */
 const readerBootLoading = computed(() => props.tocLoading);
 
@@ -539,30 +456,6 @@ const showChapterPayBtn = computed(() => {
 
 const convertedChapterTitlesByIndex = ref(new Map<number, string>());
 let convertedChapterTitlesGen = 0;
-
-function textConvertOptions() {
-  return {
-    zh: textConvertZh.value,
-    letter: textConvertLetter.value,
-    digit: textConvertDigit.value,
-  };
-}
-
-async function refreshConvertedChapterTitles() {
-  const gen = ++convertedChapterTitlesGen;
-  await ensureReplaceRulesCache();
-  if (gen !== convertedChapterTitlesGen) return;
-  const opts = textConvertOptions();
-  const next = new Map<number, string>();
-  const list = displayChapters.value;
-  for (let i = 0; i < list.length; i++) {
-    if (gen !== convertedChapterTitlesGen) return;
-    const titled = applyDisplayReplaceTitle(list[i]!.title);
-    next.set(i, await applyTextDisplayConverts(titled, opts));
-  }
-  if (gen !== convertedChapterTitlesGen) return;
-  convertedChapterTitlesByIndex.value = next;
-}
 
 function chapterDisplayBaseTitle(index: number): string {
   const ch = displayChapters.value[index];
@@ -631,6 +524,100 @@ async function scrollChapterListToCurrent(options?: {
     force,
     behavior: smooth ? "smooth" : "auto",
   });
+}
+
+/** 进入编辑前退出朗读 / 停止定时滚动（voice/timed 创建后回填） */
+let exitVoiceRead = () => {};
+let stopTimedScroll = () => {};
+
+const {
+  readerContentKey,
+  lastChapterBody,
+  totalLineCount,
+  readerEditMode,
+  loading,
+  showChapterLoadingUi,
+  chapterLoading,
+  chapterError,
+  logs,
+  cancelChapterLoad,
+  chapterContentBusy,
+  textReplaceActive,
+  refreshReplaceRulesCache,
+  ensureReplaceRulesCache,
+  applyDisplayReplaceTitle,
+  canEnterReaderEditMode,
+  confirmIfReaderEditDiscard,
+  onReaderEditDirtyChange,
+  onToggleReaderEdit,
+  onSaveReaderChapter,
+  loadChapterAtDisplayIndex,
+  isChapterLoading,
+  refreshCurrentChapterDisplay,
+  resetChapterSessionUi,
+  clearReaderEditFlags,
+  contentIndexFor,
+} = useFindBookChapterSession({
+  readerRef,
+  detail: () => props.detail,
+  item: () => props.item,
+  displayChapters,
+  contentChapters,
+  chapterSortDesc,
+  currentDisplayIndex,
+  readerBootLoading,
+  textConvertZh,
+  textConvertLetter,
+  textConvertDigit,
+  compressBlankLines,
+  compressBlankKeepOneBlank,
+  leadIndentFullWidth,
+  chapterMinCharCount,
+  effectiveCacheDir,
+  isChapterCached,
+  markChapterCached,
+  isInBookshelf,
+  updateReadProgress,
+  scrollChapterListToCurrent,
+  exitVoiceRead: () => exitVoiceRead(),
+  stopTimedScroll: () => stopTimedScroll(),
+});
+
+async function onReplaceRulesChanged() {
+  await refreshReplaceRulesCache();
+  if (!modelValue.value || readerEditMode.value) return;
+  void refreshCurrentChapterDisplay();
+  void refreshConvertedChapterTitles();
+}
+
+const hasReaderLogs = computed(() => logs.value.length > 0);
+const showReaderLogBtn = computed(
+  () => Boolean(chapterError.value) || hasReaderLogs.value,
+);
+const readerLogHasError = computed(() => Boolean(chapterError.value));
+
+function textConvertOptions() {
+  return {
+    zh: textConvertZh.value,
+    letter: textConvertLetter.value,
+    digit: textConvertDigit.value,
+  };
+}
+
+async function refreshConvertedChapterTitles() {
+  const gen = ++convertedChapterTitlesGen;
+  await ensureReplaceRulesCache();
+  if (gen !== convertedChapterTitlesGen) return;
+  const opts = textConvertOptions();
+  const next = new Map<number, string>();
+  const list = displayChapters.value;
+  for (let i = 0; i < list.length; i++) {
+    if (gen !== convertedChapterTitlesGen) return;
+    const titled = applyDisplayReplaceTitle(list[i]!.title);
+    next.set(i, await applyTextDisplayConverts(titled, opts));
+  }
+  if (gen !== convertedChapterTitlesGen) return;
+  convertedChapterTitlesByIndex.value = next;
 }
 
 const MAX_CHAPTER_LIST_LAYOUT_RETRIES = 48;
@@ -777,77 +764,6 @@ function onPersistedSettingsChanged() {
   applySharedSettingsFromMain();
 }
 
-function contentIndexFor(ch: BookChapter): number {
-  return contentChapters.value.findIndex((c) => c.url === ch.url);
-}
-
-async function ensureChapterScrollAtTop() {
-  for (let i = 0; i < 30 && !readerRef.value; i++) {
-    await nextTick();
-  }
-  const reader = readerRef.value;
-  if (!reader) return;
-  reader.scrollToDocumentStart(false);
-  await nextTick();
-  await new Promise<void>((resolve) => {
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        reader.scrollToDocumentStart(false);
-        reader.refreshChapterStickyScroll?.();
-        resolve();
-      });
-    });
-  });
-}
-
-async function renderChapterText(
-  heading: string,
-  body: string,
-  opts?: { resetScroll?: boolean },
-) {
-  await ensureReplaceRulesCache();
-  const convertOpts = textConvertOptions();
-  const rawTitle = heading.trim();
-  // 正文若已带章节名（旧缓存 / ##{{title}} 未生效），先剥离再拼回一行，
-  // 避免「橙色章节装饰行 + 正文里又一行黑字标题」
-  let bodyText = stripLeadingChapterTitleFromBody(body, rawTitle);
-  // 文本替换与「转换」同属展示管线：先替换，再简繁/全半角
-  const titleText = applyDisplayReplaceTitle(rawTitle);
-  bodyText = applyDisplayReplaceBody(bodyText);
-  let text = titleText ? `${titleText}\n${bodyText}` : bodyText;
-  text = await applyTextDisplayConverts(text, convertOpts);
-  const formatted = formatPhysicalPlainTextForReader(text, {
-    compressBlankLines: compressBlankLines.value,
-    compressBlankKeepOneBlank: compressBlankKeepOneBlank.value,
-    leadIndentFullWidth: leadIndentFullWidth.value,
-    minCharCount: chapterMinCharCount.value,
-    skipBlanksBeforeFirstChapterTitle: true,
-  });
-  for (let i = 0; i < 30 && !readerRef.value; i++) {
-    await nextTick();
-  }
-  const reader = readerRef.value;
-  if (!reader) return;
-  await reader.setFullText(formatted.text, {
-    heavy: false,
-    resetScroll: opts?.resetScroll ?? true,
-  });
-  totalLineCount.value = reader.getModelLineCount?.() ?? formatted.lineCount;
-  if (rawTitle) {
-    const lineNumber =
-      formatted.chapterTitleDisplayLineByPhysical.get(1) ?? 1;
-    reader.setChapters([
-      {
-        title: rawTitle,
-        lineNumber,
-        headingLevel: 1,
-      },
-    ]);
-  } else {
-    reader.setChapters([]);
-  }
-}
-
 function syncFooterLineCountFromReader() {
   const n = readerRef.value?.getModelLineCount?.();
   if (typeof n === "number" && Number.isFinite(n) && n >= 0) {
@@ -858,237 +774,6 @@ function syncFooterLineCountFromReader() {
 function onFindBookViewportEndLineChange(line: number) {
   readerUi.onViewportEndLineChange(line);
   syncFooterLineCountFromReader();
-}
-
-function stripLeadingChapterTitleFromBody(body: string, title: string): string {
-  const rawTitle = title.trim();
-  if (!rawTitle) return body;
-  try {
-    const titlePat = rawTitle
-      .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-      .replace(/\s+/g, "\\s*");
-    return body.replace(
-      new RegExp(`^(?:\\s|\\p{P})*${titlePat}\\s*`, "u"),
-      "",
-    );
-  } catch {
-    return body;
-  }
-}
-
-/** 编辑态展示：缓存原文（章节名 + 正文），不经压缩空行等阅读管线 */
-function buildEditSourceText(): string {
-  const rawTitle = lastChapterTitle.value.trim();
-  const body = lastChapterBody.value;
-  return rawTitle ? `${rawTitle}\n${body}` : body;
-}
-
-const canEnterReaderEditMode = computed(
-  () =>
-    Boolean(readerContentKey.value) &&
-    !chapterContentBusy.value &&
-    !readerBootLoading.value,
-);
-
-async function confirmIfReaderEditDiscard(): Promise<boolean> {
-  if (!readerEditMode.value || !readerEditorDirty.value) return true;
-  return appConfirm(
-    "当前章节已修改但尚未保存，确定要放弃这些改动吗？",
-    "修改未保存",
-  );
-}
-
-function onReaderEditDirtyChange(dirty: boolean) {
-  readerEditorDirty.value = dirty;
-}
-
-async function onToggleReaderEdit() {
-  if (readerEditMode.value) {
-    if (!(await confirmIfReaderEditDiscard())) return;
-    readerEditorDirty.value = false;
-    readerEditMode.value = false;
-    // 退出编辑：lastChapter* 仍为原文，重跑展示管线（文本替换 → 转换 → …）
-    if (lastChapterBody.value || lastChapterTitle.value) {
-      await renderChapterText(lastChapterTitle.value, lastChapterBody.value, {
-        resetScroll: false,
-      });
-    }
-    return;
-  }
-  if (!canEnterReaderEditMode.value) {
-    appToast("请等待当前章节加载完成后再进入编辑模式。", { kind: "info" });
-    return;
-  }
-  voiceRead.exitVoiceRead();
-  timedScroll.stopTimedScroll();
-  // 先进入编辑态再 setChapters，避免阅读态标题装饰残留（与主界面一致：编辑不渲标题样式）
-  readerEditMode.value = true;
-  await nextTick();
-  // 进入编辑：直接编辑原文（文本替换只在阅读展示管线，不改 lastChapter*）
-  const editText = buildEditSourceText();
-  const reader = readerRef.value;
-  if (reader) {
-    await reader.setFullText(editText, { heavy: false, resetScroll: false });
-    totalLineCount.value = reader.getModelLineCount?.() ?? 0;
-    if (lastChapterTitle.value.trim()) {
-      reader.setChapters([
-        {
-          title: lastChapterTitle.value.trim(),
-          lineNumber: 1,
-          headingLevel: 1,
-        },
-      ]);
-    } else {
-      reader.setChapters([]);
-    }
-  }
-  readerRef.value?.markReaderEditSaved?.();
-  readerEditorDirty.value = false;
-}
-
-async function onSaveReaderChapter() {
-  if (!readerEditMode.value) return;
-  const ch = displayChapters.value[currentDisplayIndex.value];
-  const bookUrl = props.detail.bookUrl?.trim() || props.item.bookUrl?.trim();
-  if (!ch?.url?.trim() || !bookUrl) {
-    appToast("无法保存：缺少章节信息", { kind: "warning" });
-    return;
-  }
-  const text = readerRef.value?.getAllText() ?? "";
-  const body = stripLeadingChapterTitleFromBody(text, lastChapterTitle.value);
-  const r = await window.colorTxt.bookSourceSaveChapterCache({
-    name: props.detail.name || "",
-    bookUrl,
-    chapterUrl: ch.url,
-    content: body,
-    cacheDir: effectiveCacheDir.value.trim() || undefined,
-  });
-  if (!r.ok) {
-    appToast(r.message || "保存到缓存失败", { kind: "warning" });
-    return;
-  }
-  lastChapterBody.value = body;
-  markChapterCached(ch.url);
-  readerRef.value?.markReaderEditSaved?.();
-  readerEditorDirty.value = false;
-  appToast("已保存到缓存", { kind: "success", duration: 1200 });
-}
-
-async function loadChapterAtDisplayIndex(
-  index: number,
-  options?: { smoothScroll?: boolean; preferCache?: boolean },
-) {
-  const ch = displayChapters.value[index];
-  if (!ch) return;
-  if (!(await confirmIfReaderEditDiscard())) return;
-  if (readerEditMode.value) {
-    readerEditMode.value = false;
-    readerEditorDirty.value = false;
-  }
-  const contentIndex = contentIndexFor(ch);
-  if (contentIndex < 0) {
-    // 分卷标题：不拉正文规则（对齐 Legado），仅展示卷名
-    if (ch.isVolume) {
-      if (!(await confirmIfReaderEditDiscard())) return;
-      if (readerEditMode.value) {
-        readerEditMode.value = false;
-        readerEditorDirty.value = false;
-      }
-      currentDisplayIndex.value = index;
-      cancelChapterLoad();
-      readerContentKey.value = `findbook://volume#${encodeURIComponent(ch.url)}`;
-      lastChapterTitle.value = ch.title;
-      lastChapterBody.value = "";
-      totalLineCount.value = 0;
-      await renderChapterText(ch.title, "");
-      void scrollChapterListToCurrent({ smooth: options?.smoothScroll ?? true });
-    }
-    return;
-  }
-  const preferCache = options?.preferCache !== false;
-  const fromCache = preferCache && isChapterCached(ch);
-  const wantSmooth = options?.smoothScroll ?? true;
-  currentDisplayIndex.value = index;
-  loading.value = true;
-  showChapterLoadingUi.value = !fromCache;
-  cancelChapterLoad();
-  // 先启动侧栏居中动画，避免与 Monaco 正文写入抢主线程导致卡顿
-  const scrollDone = scrollChapterListToCurrent({ smooth: wantSmooth });
-  if (!fromCache) {
-    // 未缓存 / 强制刷新：遮罩盖住旧正文，切章期间不做 Monaco 清空（避免卡列表动画）
-    readerContentKey.value = null;
-    lastChapterTitle.value = "";
-    lastChapterBody.value = "";
-    totalLineCount.value = 0;
-  }
-  const listLen = displayChapters.value.length;
-  const readingIdx = readingOrderIndexFromDisplay(
-    index,
-    listLen,
-    chapterSortDesc.value,
-  );
-  const nextDisplayIdx = displayIndexForReadingOrder(
-    readingIdx + 1,
-    listLen,
-    chapterSortDesc.value,
-  );
-  const nextInReadingOrder =
-    readingIdx + 1 < listLen
-      ? displayChapters.value[nextDisplayIdx]
-      : undefined;
-  const chapterUrlsInReadingOrder = contentChaptersInReadingOrder(
-    contentChapters.value,
-  ).map((c) => c.url);
-  try {
-    const loaded = await loadChapterContent({
-      bookSourceUrl: props.item.origin,
-      book: {
-        ...props.detail,
-        kind: props.detail.kind || props.item.kind || "",
-        origin: props.item.origin,
-        originName: props.item.originName,
-      },
-      chapterUrl: ch.url,
-      chapterTitle: ch.title,
-      chapterIndex: contentIndex,
-      isVolume: ch.isVolume,
-      nextChapterUrl: nextInReadingOrder?.url,
-      chapterUrls: chapterUrlsInReadingOrder,
-      cacheDir: effectiveCacheDir.value.trim() || undefined,
-      preferCache,
-    });
-    if (loaded == null) {
-      readerContentKey.value = null;
-      lastChapterTitle.value = ch.title;
-      lastChapterBody.value = "";
-      return;
-    }
-    const { content: body, displayTitle } = loaded;
-    // 缓存命中往往立刻返回：等列表动画结束再写正文，避免与 rAF 平滑滚动抢帧
-    if (wantSmooth) await scrollDone;
-    markChapterCached(ch.url);
-    readerContentKey.value = `findbook://${props.detail.bookUrl}#${ch.url}`;
-    // IPC 返回缓存/联网原文；文本替换在 renderChapterText 中与「转换」一并套用
-    lastChapterTitle.value = displayTitle || ch.title;
-    lastChapterBody.value = body;
-    await renderChapterText(lastChapterTitle.value, body);
-    if (isInBookshelf(props.detail.bookUrl, props.item.origin)) {
-      updateReadProgress(
-        props.detail.bookUrl,
-        props.item.origin,
-        contentIndex,
-        ch.title,
-      );
-    }
-  } finally {
-    loading.value = false;
-    showChapterLoadingUi.value = false;
-    await ensureChapterScrollAtTop();
-  }
-}
-
-function isChapterLoading(index: number): boolean {
-  return showChapterLoadingUi.value && index === currentDisplayIndex.value;
 }
 
 function onChapterClick(index: number) {
@@ -1187,11 +872,6 @@ function advanceToNextChapterForAutoRead() {
   );
 }
 
-/** 切章清空正文到新章写入完成（含网络拉取）期间为 true */
-const chapterContentBusy = computed(
-  () => loading.value || chapterLoading.value,
-);
-
 const voiceRead = useAppVoiceRead({
   readerRef,
   voiceReadSettings,
@@ -1210,6 +890,7 @@ const voiceRead = useAppVoiceRead({
     advanceToNextChapterForAutoRead();
   },
 });
+exitVoiceRead = () => voiceRead.exitVoiceRead();
 
 const isVoiceReadActive = voiceRead.isVoiceReadActive;
 const isVoiceReadScrollLocked = voiceRead.isVoiceReadScrollLocked;
@@ -1277,17 +958,10 @@ const timedScroll = useAppTimedScroll({
     advanceToNextChapterForAutoRead();
   },
 });
+stopTimedScroll = () => timedScroll.stopTimedScroll();
 
 const isTimedScrollActive = timedScroll.isTimedScrollActive;
 const canStartTimedScroll = timedScroll.canStartTimedScroll;
-
-async function refreshCurrentChapterDisplay() {
-  if (readerEditMode.value) return;
-  if (!lastChapterBody.value) return;
-  await renderChapterText(lastChapterTitle.value, lastChapterBody.value, {
-    resetScroll: false,
-  });
-}
 
 async function toggleCompressBlankLines() {
   if (readerEditMode.value) {
@@ -1360,8 +1034,7 @@ function onApplyTextConvertDigitEdit(
 
 async function onBack() {
   if (!(await confirmIfReaderEditDiscard())) return;
-  readerEditMode.value = false;
-  readerEditorDirty.value = false;
+  clearReaderEditFlags();
   voiceRead.exitVoiceRead();
   timedScroll.stopTimedScroll();
   cancelChapterLoad();
@@ -1859,14 +1532,7 @@ watch(
       stopPomodoro();
       cancelChapterLoad();
       if (offlineCaching.value) void cancelOfflineCache();
-      loading.value = false;
-      showChapterLoadingUi.value = false;
-      readerEditMode.value = false;
-      readerEditorDirty.value = false;
-      readerContentKey.value = null;
-      lastChapterBody.value = "";
-      lastChapterTitle.value = "";
-      totalLineCount.value = 0;
+      resetChapterSessionUi();
       sidebarOpenPolicyApplied = false;
       sidebarUserToggledThisOpen = false;
       if (isFullscreenView.value) {
@@ -2240,128 +1906,25 @@ const modalRef = ref<InstanceType<typeof AppModal> | null>(null);
                 />
               </div>
             </div>
-            <div
-              v-if="offlineCaching"
-              class="sidebarCacheBar"
-              role="progressbar"
-              :aria-valuenow="offlineCacheProgress.current"
-              aria-valuemin="0"
-              :aria-valuemax="offlineCacheProgress.total"
-              :aria-label="offlineCacheProgressLabel"
-            >
-              <span class="sidebarCacheBarLabel">{{
-                offlineCacheProgressLabel
-              }}</span>
-              <button
-                type="button"
-                class="link danger sidebarCacheBarStop"
-                @click="onStopOfflineCache"
-              >
-                停止
-              </button>
-              <div class="sidebarCacheBarTrack" aria-hidden="true">
-                <div
-                  class="sidebarCacheBarFill"
-                  :style="{ width: `${offlineCacheProgressPercent}%` }"
-                />
-              </div>
-            </div>
-            <div class="sidebarListWrap">
-              <div class="sidebarTabBody">
-                <div v-if="!displayChapters.length" class="empty">
-                  <span
-                    v-if="readerBootLoading"
-                    class="findBookReaderLoadingHint"
-                    aria-live="polite"
-                  >
-                    加载中<LoadingDotsBounce />
-                  </span>
-                  <template v-else>暂无章节</template>
-                </div>
-                <div v-else class="sidebarListViewportPad">
-                  <VirtualList
-                    ref="chapterListRef"
-                    class="sidebarList sidebarList--itemGap"
-                    :item-count="displayChapters.length"
-                    :row-stride="chapterListRowStride"
-                    :overscan="10"
-                    :item-key="(i) => i"
-                  >
-                    <template #default="{ index }">
-                      <button
-                        type="button"
-                        class="sidebarItem"
-                        :class="{
-                          active: index === currentDisplayIndex,
-                          'sidebarItem--vip':
-                            displayChapters[index]?.isVip ||
-                            displayChapters[index]?.isPay,
-                        }"
-                        :title="chapterDisplayTitle(index)"
-                        @click="onChapterClick(index)"
-                      >
-                        <span
-                          v-if="
-                            displayChapters[index]?.isVip ||
-                            displayChapters[index]?.isPay
-                          "
-                          class="findBookReaderChapterLock"
-                          :class="{
-                            'findBookReaderChapterLock--unlocked':
-                              displayChapters[index]?.isPay,
-                          }"
-                          v-html="
-                            displayChapters[index]?.isPay
-                              ? icons.unlock
-                              : icons.lock
-                          "
-                          :aria-label="
-                            displayChapters[index]?.isPay ? '已购买' : 'VIP'
-                          "
-                        />
-                        <span class="itemName">
-                          <span class="itemNameTitle">{{
-                            chapterDisplayBaseTitle(index)
-                          }}</span>
-                          <span
-                            v-if="
-                              showChapterTag &&
-                              displayChapters[index]?.tag?.trim()
-                            "
-                            class="itemNameTag"
-                            >{{ displayChapters[index].tag.trim() }}</span
-                          >
-                        </span>
-                        <LoadingDotsRotate
-                          v-if="isChapterLoading(index)"
-                          class="findBookReaderChapterLoading"
-                          title="加载中"
-                          aria-label="加载中"
-                        />
-                        <LoadingDotsRotate
-                          v-else-if="isChapterOfflineCaching(displayChapters[index])"
-                          class="findBookReaderChapterLoading"
-                          title="正在缓存"
-                          aria-label="正在缓存"
-                        />
-                        <span
-                          v-else-if="isChapterCached(displayChapters[index])"
-                          class="findBookReaderChapterCached"
-                          v-html="icons.ok"
-                          title="已离线缓存"
-                          aria-label="已离线缓存"
-                        />
-                      </button>
-                    </template>
-                  </VirtualList>
-                </div>
-              </div>
-              <div v-if="displayChapters.length" class="sidebarTabFooter">
-                <span class="sidebarTabFooterStat"
-                  >共 {{ displayChapters.length }} 章</span
-                >
-              </div>
-            </div>
+            <FindBookReaderChapterSidebar
+              ref="chapterListRef"
+              :chapters="displayChapters"
+              :current-display-index="currentDisplayIndex"
+              :row-stride="chapterListRowStride"
+              :reader-boot-loading="readerBootLoading"
+              :offline-caching="offlineCaching"
+              :offline-cache-progress="offlineCacheProgress"
+              :offline-cache-progress-percent="offlineCacheProgressPercent"
+              :offline-cache-progress-label="offlineCacheProgressLabel"
+              :show-chapter-tag="showChapterTag"
+              :chapter-display-base-title="chapterDisplayBaseTitle"
+              :chapter-display-title="chapterDisplayTitle"
+              :is-chapter-loading="isChapterLoading"
+              :is-chapter-offline-caching="isChapterOfflineCaching"
+              :is-chapter-cached="isChapterCached"
+              @chapter-click="onChapterClick"
+              @stop-offline-cache="onStopOfflineCache"
+            />
           </div>
           <div
             class="resizer findBookReaderResizer"
@@ -2802,198 +2365,6 @@ const modalRef = ref<InstanceType<typeof AppModal> | null>(null);
   display: inline-flex;
   align-items: center;
   gap: 6px;
-}
-.sidebarListWrap {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-}
-.sidebarTabBody {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  background: var(--bg);
-}
-.sidebarListViewportPad {
-  flex: 1;
-  min-height: 0;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  padding: 0;
-  background: var(--bg);
-}
-.sidebarList {
-  flex: 1 1 auto;
-  min-height: 0;
-  min-width: 0;
-}
-.sidebarList--itemGap :deep(.virtualList-row) {
-  padding-bottom: 5px;
-}
-.findBookReaderSidebar :deep(.virtualList-scroll.sidebarList) {
-  box-sizing: border-box;
-  padding: 6px 6px 1px;
-}
-.findBookReaderSidebar :deep(.virtualList-scroll.sidebarList::-webkit-scrollbar-thumb) {
-  border-right-width: 0;
-}
-.sidebarItem {
-  width: 100%;
-  text-align: left;
-  background: transparent;
-  border: none;
-  color: var(--list-item-fg);
-  padding: 8px 10px;
-  border-radius: 4px;
-  cursor: pointer;
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-.sidebarItem--vip {
-  color: var(--muted);
-}
-.itemName {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  overflow: hidden;
-}
-.itemNameTitle {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.itemNameTag {
-  color: var(--secondary);
-  font-size: 12px;
-  line-height: 1.2;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.findBookReaderChapterCached,
-.findBookReaderChapterLoading {
-  flex-shrink: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 16px;
-  height: 16px;
-  color: var(--muted);
-}
-.findBookReaderChapterLoading {
-  color: var(--accent);
-}
-.findBookReaderChapterCached :deep(svg) {
-  width: 14px;
-  height: 14px;
-  display: block;
-}
-.findBookReaderChapterCached :deep(svg path) {
-  fill: currentColor;
-}
-.sidebarItem:hover {
-  color: var(--list-item-fg);
-  background: var(--list-item-bg-hover);
-}
-.sidebarItem.active {
-  color: var(--list-item-fg-active);
-  background: var(--list-item-bg-active);
-}
-.empty {
-  box-sizing: border-box;
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  text-align: center;
-  padding: 10px 16px;
-  font-size: 12px;
-  color: var(--secondary);
-}
-.sidebarCacheBar {
-  position: relative;
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  min-height: 28px;
-  padding: 10px;
-  font-size: 12px;
-  color: var(--muted);
-  border-bottom: 1px solid var(--border);
-  background: var(--bg);
-  user-select: none;
-}
-.sidebarCacheBarLabel {
-  min-width: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.sidebarCacheBarStop {
-  flex-shrink: 0;
-}
-.sidebarCacheBarTrack {
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 0;
-  height: 3px;
-  z-index: 1;
-  pointer-events: none;
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
-  overflow: hidden;
-}
-.sidebarCacheBarFill {
-  height: 100%;
-  background: var(--accent);
-  transition: width 0.2s ease;
-}
-.sidebarTabFooter {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 6px 10px;
-  font-size: 12px;
-  color: var(--muted);
-  border-top: 1px solid var(--border);
-  background: var(--bg);
-  user-select: none;
-}
-.sidebarTabFooterStat {
-  flex: 1;
-  min-width: 0;
-  text-align: left;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.findBookReaderChapterLock {
-  display: inline-flex;
-  width: 14px;
-  flex-shrink: 0;
-  color: var(--warning);
-}
-.findBookReaderChapterLock--unlocked {
-  color: var(--accent);
-}
-.findBookReaderChapterLock :deep(svg) {
-  width: 14px;
-  height: 14px;
-}
-.findBookReaderChapterLock :deep(svg path) {
-  fill: currentColor;
 }
 .findBookReaderMainWrap {
   flex: 1;

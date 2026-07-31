@@ -4,7 +4,6 @@ import { mergeHighlightWordsByIndex } from "./highlightWords";
 import {
   bookTitleForExport,
   pickAndReadJsonFile,
-  saveAnnotationExportFile,
 } from "./readerAnnotationExport";
 import {
   chatExportDateSlug,
@@ -23,11 +22,7 @@ export function buildHighlightExportDefaultName(bookName: string): string {
   const titlePart = sanitizeChatExportTitleForFilename(
     bookTitleForExport(bookName || "高亮词"),
   );
-  return `highlights-${slug}-${titlePart}.json`;
-}
-
-export function buildFavoriteHighlightExportDefaultName(): string {
-  return `highlights-favorites-${chatExportDateSlug()}.json`;
+  return `${titlePart}-${slug}.colortxt-highlights.json`;
 }
 
 export function countHighlightWordsInMap(
@@ -99,7 +94,11 @@ export async function saveHighlightExportFile(
   | { ok: false; cancelled: true }
   | { ok: false; error: string }
 > {
-  return saveAnnotationExportFile(defaultName, data, "json");
+  return window.colorTxt.ai.exportSave({
+    defaultName,
+    data,
+    filters: [{ name: "彩读高亮词", extensions: ["json"] }],
+  });
 }
 
 export async function pickAndReadHighlightJsonFile(
@@ -109,5 +108,5 @@ export async function pickAndReadHighlightJsonFile(
   | { ok: false; cancelled: true }
   | { ok: false; error: string }
 > {
-  return pickAndReadJsonFile(title);
+  return pickAndReadJsonFile(title, "彩读高亮词");
 }

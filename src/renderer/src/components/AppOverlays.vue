@@ -28,7 +28,7 @@ import ShortcutPanel from "./ShortcutPanel.vue";
 import type { ShortcutBindingMap } from "../services/shortcutRegistry";
 import type { ReaderSurfacePalette } from "../constants/appUi";
 import type { ReaderSurfaceColorEnabled } from "../constants/readerPalette";
-import { readerEbookConvertingHintText } from "../constants/appUi";
+import { readerEbookConvertingHintText, readerBookPackUnpackingHintText } from "../constants/appUi";
 
 const bookmarkNoteInputRef = inject(bookmarkNoteInputRefKey)!;
 
@@ -70,6 +70,8 @@ const props = defineProps<{
   dirListScanning: boolean;
   dirListCurrentName: string;
   ebookParsing: boolean;
+  /** 彩读书包解包 / 解析中 */
+  bookPackUnpacking?: boolean;
   shortcutBindings: ShortcutBindingMap;
   defaultShortcutBindings: ShortcutBindingMap;
   currentTheme: string;
@@ -83,6 +85,7 @@ const props = defineProps<{
   lineationColorsLight: string[];
   lineationColorsDark: string[];
   ebookConvertOutputDir: string;
+  bookPackUnpackDir: string;
   characterPortraitCacheDir: string;
   aiSkillsEnabled: Record<string, boolean>;
   aiSkillOverrides: Record<string, AiSkillUserOverride>;
@@ -168,10 +171,28 @@ const convertingHintText = computed(() => {
   return `${baseText}${".".repeat(convertingDotCount.value)}`;
 });
 
+const unpackingHintText = computed(() => {
+  const baseText = readerBookPackUnpackingHintText.replace(/[.…]+$/u, "");
+  return `${baseText}${".".repeat(convertingDotCount.value)}`;
+});
+
+const showBusyOverlay = computed(
+  () =>
+    props.dirListScanning ||
+    props.ebookParsing ||
+    Boolean(props.bookPackUnpacking),
+);
+
+const busyOverlayText = computed(() => {
+  if (props.ebookParsing) return convertingHintText.value;
+  if (props.bookPackUnpacking) return unpackingHintText.value;
+  return props.dirListCurrentName || "准备中…";
+});
+
 watch(
-  () => props.ebookParsing,
-  (parsing) => {
-    if (parsing) {
+  () => props.ebookParsing || Boolean(props.bookPackUnpacking),
+  (busy) => {
+    if (busy) {
       convertingDotCount.value = 0;
       if (convertingDotTimer == null) {
         convertingDotTimer = window.setInterval(() => {
@@ -231,6 +252,7 @@ onBeforeUnmount(() => {
     :timed-scroll-settings="timedScrollSettings"
     :pomodoro-settings="pomodoroSettings"
     :ebook-convert-output-dir="ebookConvertOutputDir"
+    :book-pack-unpack-dir="bookPackUnpackDir"
     :character-portrait-cache-dir="characterPortraitCacheDir"
     :ai-skills-enabled="aiSkillsEnabled"
     :ai-skill-overrides="aiSkillOverrides"
@@ -360,15 +382,13 @@ onBeforeUnmount(() => {
 
   <Transition name="dirScanOverlay">
     <div
-      v-if="dirListScanning || ebookParsing"
+      v-if="showBusyOverlay"
       class="dirScanOverlay"
       aria-live="polite"
       aria-busy="true"
     >
       <p class="dirScanLine" :title="dirListCurrentName">
-        {{
-          ebookParsing ? convertingHintText : dirListCurrentName || "准备中…"
-        }}
+        {{ busyOverlayText }}
       </p>
     </div>
   </Transition>

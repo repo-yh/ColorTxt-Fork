@@ -240,7 +240,7 @@ function normalizeCharacterGender(raw: unknown): CharacterGender {
   return "unknown";
 }
 
-function normalizeCharacterBookStyle(
+export function normalizeCharacterBookStyle(
   raw: unknown,
 ): CharacterBookStylePersisted | undefined {
   if (raw == null || typeof raw !== "object" || Array.isArray(raw)) {
@@ -351,7 +351,9 @@ function normalizeCharacterRosterEntry(
   };
 }
 
-function normalizeCharacterRoster(raw: unknown): CharacterRosterEntry[] | undefined {
+export function normalizeCharacterRoster(
+  raw: unknown,
+): CharacterRosterEntry[] | undefined {
   if (!Array.isArray(raw)) return undefined;
   const byId = new Map<string, CharacterRosterEntry>();
   for (const row of raw.slice(0, MAX_ROSTER_ENTRIES + 50)) {
