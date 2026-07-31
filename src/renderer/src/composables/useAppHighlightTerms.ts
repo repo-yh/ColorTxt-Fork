@@ -11,11 +11,13 @@ import {
   removeHighlightTermFromFile,
   upsertFileMetaRecord,
   type FileMetaRecord,
+  type HighlightWord,
   type HighlightWordsByIndex,
 } from "../stores/fileMetaStore";
 import {
   assignHighlightTermToColorMap,
   buildHighlightListTerms,
+  findHighlightWordWithDefault,
   mergeHighlightWordsByIndex,
   removeHighlightTermFromMap,
   termExistsInHighlightMap,
@@ -52,6 +54,7 @@ export function useAppHighlightTerms(deps: {
   isVoiceReadNavigationBlocked: Ref<boolean>;
   ensurePinBeforeRevealFindWidget: () => void;
   hasInlineSearchHighlight: Ref<boolean>;
+  editorContentChangeEpoch: Ref<number>;
 }) {
   const currentFileHighlightWords = computed(
     () => {
@@ -110,12 +113,14 @@ export function useAppHighlightTerms(deps: {
       readerDisplayHighlightWordsByIndex.value =
         mergedHighlightWordsForReader.value;
       readerDisplayHighlightWordsBookOnly.value = book;
-      currentFileHighlightTerms.value = buildHighlightListTerms(
+      const raw = buildHighlightListTerms(
         global,
         book,
         colors,
         bodyText,
       );
+      currentFileHighlightTerms.value =
+        deps.readerRef.value?.countHighlightTermMatches(raw) ?? raw;
       return;
     }
 
@@ -127,15 +132,15 @@ export function useAppHighlightTerms(deps: {
       if (!map) return undefined;
       const out: HighlightWordsByIndex = {};
       for (const [key, words] of Object.entries(map)) {
-        const converted: string[] = [];
+        const converted: HighlightWord[] = [];
         for (const stored of words) {
           if (!stored) continue;
-          let display = displayByStored.get(stored);
+          let display = displayByStored.get(stored.text);
           if (display == null) {
-            display = await applyTextDisplayConverts(stored, convertOpts);
-            displayByStored.set(stored, display);
+            display = await applyTextDisplayConverts(stored.text, convertOpts);
+            displayByStored.set(stored.text, display);
           }
-          converted.push(display);
+          converted.push({ text: display, isRegex: stored.isRegex });
         }
         if (converted.length > 0) out[key] = converted;
       }
@@ -153,13 +158,15 @@ export function useAppHighlightTerms(deps: {
       bookDisplay,
     );
     readerDisplayHighlightWordsBookOnly.value = bookDisplay;
-    currentFileHighlightTerms.value = buildHighlightListTerms(
+    const raw = buildHighlightListTerms(
       global,
       book,
       colors,
       bodyText,
-      (stored) => displayByStored.get(stored) ?? stored,
+      (stored) => displayByStored.get(stored.text) ?? stored.text,
     );
+    currentFileHighlightTerms.value =
+      deps.readerRef.value?.countHighlightTermMatches(raw) ?? raw;
   }
 
   watch(
@@ -171,6 +178,8 @@ export function useAppHighlightTerms(deps: {
       deps.readerEditMode,
       deps.highlightColorsForReader,
       deps.currentTheme,
+      deps.editorContentChangeEpoch,
+      deps.loading,
     ],
     () => {
       void refreshReaderHighlightDisplayLayer();
@@ -185,7 +194,7 @@ export function useAppHighlightTerms(deps: {
       deps.fileMetaRecords.value,
       path,
       payload.colorIndex,
-      payload.text,
+      { text: payload.text },
     );
     deps.persistFileMeta();
   }
@@ -194,7 +203,7 @@ export function useAppHighlightTerms(deps: {
     text: string;
     scope?: "global" | "book";
   }) {
-    const term = payload.text;
+    const term = { text: payload.text.trim() };
     if (payload.scope === "global") {
       deps.highlightWordsByIndexGlobal.value = removeHighlightTermFromMap(
         deps.highlightWordsByIndexGlobal.value,
@@ -219,15 +228,23 @@ export function useAppHighlightTerms(deps: {
   }) {
     const path = deps.currentFile.value;
     if (!path) return;
+    const term = { text: payload.text.trim() };
+    // 从全局词或本书词中查找 isRegex 属性，保留正则标记
+    const sourceWord = findHighlightWordWithDefault(
+      deps.highlightWordsByIndexGlobal.value,
+      currentFileHighlightWords.value,
+      term.text,
+      term,
+    );
     deps.fileMetaRecords.value = removeHighlightTermFromFile(
       deps.fileMetaRecords.value,
       path,
-      payload.text,
+      term,
     );
     deps.highlightWordsByIndexGlobal.value = assignHighlightTermToColorMap(
       deps.highlightWordsByIndexGlobal.value,
       payload.colorIndex,
-      payload.text,
+      sourceWord,
     );
     deps.persistFileMeta();
     deps.persistSettings();
@@ -237,7 +254,15 @@ export function useAppHighlightTerms(deps: {
     text: string;
     colorIndex: number;
   }) {
-    const term = payload.text.trim();
+    const term = { text: payload.text.trim() };
+    // 取消收藏前从全局词或本书词中查找 isRegex 属性（此时全局词中还有该词）
+    const sourceWord = findHighlightWordWithDefault(
+      deps.highlightWordsByIndexGlobal.value,
+      currentFileHighlightWords.value,
+      term.text,
+      term,
+    );
+    // 现在再删除全局词
     deps.highlightWordsByIndexGlobal.value = removeHighlightTermFromMap(
       deps.highlightWordsByIndexGlobal.value,
       term,
@@ -252,7 +277,7 @@ export function useAppHighlightTerms(deps: {
         deps.fileMetaRecords.value,
         path,
         payload.colorIndex,
-        term,
+        sourceWord,
       );
       deps.persistFileMeta();
     }
@@ -380,7 +405,7 @@ export function useAppHighlightTerms(deps: {
     });
   }
 
-  function onFindHighlightTermFromSidebar(text: string) {
+  function onFindHighlightTermFromSidebar(text: string, isRegex?: boolean) {
     if (
       !deps.currentFile.value ||
       deps.loading.value ||
@@ -389,13 +414,29 @@ export function useAppHighlightTerms(deps: {
       return;
     if (deps.isVoiceReadNavigationBlocked.value) return;
     deps.ensurePinBeforeRevealFindWidget();
+    const useRegex = isRegex === true;
     const found = deps.readerRef.value?.jumpToNextInlineSearchMatch?.(text, {
       caseSensitive: false,
       wholeWord: false,
-      useRegex: false,
+      useRegex,
       smooth: true,
     });
     deps.hasInlineSearchHighlight.value = found === true;
+  }
+
+  /** 从侧栏手动录入添加高亮词（随机颜色） */
+  function onAddHighlightTermFromSidebar(text: string, isRegex?: boolean) {
+    const path = deps.currentFile.value;
+    if (!path) return;
+    const colors = deps.highlightColorsForReader.value;
+    const colorIndex = Math.floor(Math.random() * colors.length);
+    deps.fileMetaRecords.value = assignHighlightTermToColorForFile(
+      deps.fileMetaRecords.value,
+      path,
+      colorIndex,
+      { text, isRegex: isRegex === true },
+    );
+    deps.persistFileMeta();
   }
 
   return {
@@ -406,6 +447,7 @@ export function useAppHighlightTerms(deps: {
     currentFileHighlightTerms,
     refreshReaderHighlightDisplayLayer,
     onAddHighlightTerm,
+    onAddHighlightTermFromSidebar,
     onRemoveHighlightTerm,
     onFavoriteHighlightTerm,
     onUnfavoriteHighlightTerm,
