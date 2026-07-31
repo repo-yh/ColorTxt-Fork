@@ -2,6 +2,7 @@ import {
   clampLineHeightMultipleForFontSize,
   defaultCompressBlankKeepOneBlank,
   defaultCompressBlankLines,
+  defaultChapterNavToolbarEnabled,
   defaultFullscreenReaderWidthPercent,
   defaultFullscreenShowSystemTime,
   defaultShowSidebar,
@@ -9,9 +10,14 @@ import {
   defaultMonacoAdvancedWrapping,
   defaultMonacoCustomHighlight,
   defaultMonacoSmoothScrolling,
+  defaultMouseWheelScrollSensitivity,
+  defaultFastScrollSensitivity,
+  clampMouseWheelScrollSensitivity,
+  clampFastScrollSensitivity,
   defaultReaderEditMinimap,
   defaultReaderEditShowLineNumbers,
   defaultReaderFontSize,
+  defaultReaderLineHeightMultiple,
   defaultStickyChapterTitleEnabled,
   defaultTxtrDelimitedMatchCrossLine,
   FIND_BOOK_SIDEBAR_MIN_WIDTH,
@@ -30,8 +36,10 @@ import {
   type PomodoroSettings,
 } from "../../constants/pomodoro";
 import { READER_EDITOR_DEFAULT_FONT_FAMILY } from "../../monaco/readerEditorOptions";
-import { loadPersistedSettingsData } from "../../stores/cacheStore";
-import { resolveDefaultBookSourceDownloadDirSync, resolveDefaultBookSourceChapterCacheDirSync } from "../../utils/defaultCacheDirs";
+import {
+  resolveDefaultBookSourceDownloadDirSync,
+  resolveDefaultBookSourceChapterCacheDirSync,
+} from "../../utils/defaultCacheDirs";
 import type {
   TextConvertWidthMode,
   TextConvertZhMode,
@@ -40,7 +48,6 @@ import {
   DEFAULT_FIND_BOOK_DOWNLOAD_AFTER_ACTION,
   DEFAULT_FIND_BOOK_DOWNLOAD_CATEGORY,
   DEFAULT_FIND_BOOK_PROXY_SETTINGS,
-  defaultFindBookChapterNavToolbarEnabled,
   defaultFindBookShowChapterTag,
   findBookSettingsKey,
   isFindBookDownloadAfterAction,
@@ -49,6 +56,12 @@ import {
   type FindBookProxySettings,
   type PersistedFindBookSettings,
 } from "../constants/findBookSettings";
+import {
+  loadPersistedSettingsData,
+  type PersistedSettingsData,
+} from "../../stores/cacheStore";
+
+export { patchPersistedMainSettings } from "../../stores/cacheStore";
 
 function safeParseFindBookSettings(raw: string | null): PersistedFindBookSettings {
   if (!raw) return {};
@@ -69,84 +82,48 @@ function loadRawFindBookSettings(): PersistedFindBookSettings {
   }
 }
 
-function seedFromMainSettings(
-  data: PersistedFindBookSettings,
-): PersistedFindBookSettings {
-  const main = loadPersistedSettingsData(localStorage, persistKey)?.data ?? {};
-  const out: PersistedFindBookSettings = { ...data };
-
-  const copyIfUndef = <K extends keyof PersistedFindBookSettings>(
-    key: K,
-    value: PersistedFindBookSettings[K] | undefined,
-  ) => {
-    if (out[key] === undefined && value !== undefined) {
-      out[key] = value;
-    }
-  };
-
-  copyIfUndef("fontSize", main.fontSize);
-  copyIfUndef("lineHeightMultiple", main.lineHeightMultiple);
-  copyIfUndef("fontFamily", main.fontFamily);
-  copyIfUndef("pinnedOtherFonts", main.pinnedOtherFonts);
-  copyIfUndef("monacoCustomHighlight", main.monacoCustomHighlight);
-  copyIfUndef("txtrDelimitedMatchCrossLine", main.txtrDelimitedMatchCrossLine);
-  copyIfUndef("compressBlankLines", main.compressBlankLines);
-  copyIfUndef("compressBlankKeepOneBlank", main.compressBlankKeepOneBlank);
-  copyIfUndef("leadIndentFullWidth", main.leadIndentFullWidth);
-  copyIfUndef("textConvertZh", main.textConvertZh as TextConvertZhMode | undefined);
-  copyIfUndef(
-    "textConvertLetter",
-    main.textConvertLetter as TextConvertWidthMode | undefined,
-  );
-  copyIfUndef(
-    "textConvertDigit",
-    main.textConvertDigit as TextConvertWidthMode | undefined,
-  );
-  copyIfUndef("monacoAdvancedWrapping", main.monacoAdvancedWrapping);
-  copyIfUndef("monacoSmoothScrolling", main.monacoSmoothScrolling);
-  copyIfUndef("stickyChapterTitleEnabled", main.stickyChapterTitleEnabled);
-  copyIfUndef("readerEditShowLineNumbers", main.readerEditShowLineNumbers);
-  copyIfUndef("readerEditMinimap", main.readerEditMinimap);
-  copyIfUndef("fullscreenReaderWidthPercent", main.fullscreenReaderWidthPercent);
-  copyIfUndef("fullscreenShowSystemTime", main.fullscreenShowSystemTime);
-  copyIfUndef("showSidebar", main.showSidebar);
-  if (out.sidebarWidth === undefined && typeof main.sidebarWidth === "number") {
-    out.sidebarWidth = Math.max(
-      FIND_BOOK_SIDEBAR_MIN_WIDTH,
-      Math.floor(main.sidebarWidth) - SIDEBAR_ACTIVITY_BAR_WIDTH,
-    );
-  }
-  copyIfUndef("timedScroll", main.timedScroll);
-  if (out.pomodoro === undefined && main.pomodoro) {
-    out.pomodoro = main.pomodoro;
-  }
-
-  return out;
-}
-
 export function loadPersistedFindBookSettings(): PersistedFindBookSettings {
-  return seedFromMainSettings(loadRawFindBookSettings());
+  return loadRawFindBookSettings();
 }
 
-export function persistFindBookSettings(patch: PersistedFindBookSettings) {
-  const current = loadRawFindBookSettings();
+/** 整份替换找书专属设置（去掉旧版阅读/编辑孤儿键） */
+export function persistFindBookSettings(data: PersistedFindBookSettings) {
   try {
-    localStorage.setItem(
-      findBookSettingsKey,
-      JSON.stringify({ ...current, ...patch }),
-    );
+    localStorage.setItem(findBookSettingsKey, JSON.stringify(data));
   } catch {
     // ignore
   }
 }
 
-export function snapshotFindBookSettingsFromStore(state: {
+export function loadMainSettingsData(): PersistedSettingsData {
+  return loadPersistedSettingsData(localStorage, persistKey)?.data ?? {};
+}
+
+export function snapshotFindBookOnlySettingsFromStore(state: {
   cacheDir: string;
   downloadDir: string;
   downloadAfterAction: FindBookDownloadAfterAction;
   downloadAddToMainFileList: boolean;
   downloadDefaultCategory: string;
   proxy: FindBookProxySettings;
+  showSidebar: boolean;
+  sidebarWidth: number;
+  showChapterTag: boolean;
+}): PersistedFindBookSettings {
+  return {
+    cacheDir: state.cacheDir.trim(),
+    downloadDir: state.downloadDir.trim(),
+    downloadAfterAction: state.downloadAfterAction,
+    downloadAddToMainFileList: state.downloadAddToMainFileList,
+    downloadDefaultCategory: state.downloadDefaultCategory.trim(),
+    proxy: normalizeFindBookProxySettings(state.proxy),
+    showSidebar: state.showSidebar,
+    sidebarWidth: state.sidebarWidth,
+    showChapterTag: state.showChapterTag,
+  };
+}
+
+export type SharedReaderSettingsSnapshot = {
   readerFontSize: number;
   readerLineHeightMultiple: number;
   monacoFontFamily: string;
@@ -161,83 +138,30 @@ export function snapshotFindBookSettingsFromStore(state: {
   textConvertDigit: TextConvertWidthMode;
   monacoAdvancedWrapping: boolean;
   monacoSmoothScrolling: boolean;
+  mouseWheelScrollSensitivity: number;
+  fastScrollSensitivity: number;
   stickyChapterTitleEnabled: boolean;
   chapterNavToolbarEnabled: boolean;
   readerEditShowLineNumbers: boolean;
   readerEditMinimap: boolean;
   fullscreenReaderWidthPercent: number;
   fullscreenShowSystemTime: boolean;
-  showSidebar: boolean;
-  sidebarWidth: number;
-  showChapterTag: boolean;
   timedScrollSettings: TimedScrollSettings;
   pomodoroSettings: PomodoroSettings;
-}): PersistedFindBookSettings {
-  return {
-    cacheDir: state.cacheDir.trim(),
-    downloadDir: state.downloadDir.trim(),
-    downloadAfterAction: state.downloadAfterAction,
-    downloadAddToMainFileList: state.downloadAddToMainFileList,
-    downloadDefaultCategory: state.downloadDefaultCategory.trim(),
-    proxy: normalizeFindBookProxySettings(state.proxy),
-    fontSize: state.readerFontSize,
-    lineHeightMultiple: state.readerLineHeightMultiple,
-    fontFamily: state.monacoFontFamily,
-    pinnedOtherFonts: state.pinnedOtherFonts,
-    monacoCustomHighlight: state.monacoCustomHighlight,
-    txtrDelimitedMatchCrossLine: state.txtrDelimitedMatchCrossLine,
-    compressBlankLines: state.compressBlankLines,
-    compressBlankKeepOneBlank: state.compressBlankKeepOneBlank,
-    leadIndentFullWidth: state.leadIndentFullWidth,
-    textConvertZh: state.textConvertZh,
-    textConvertLetter: state.textConvertLetter,
-    textConvertDigit: state.textConvertDigit,
-    monacoAdvancedWrapping: state.monacoAdvancedWrapping,
-    monacoSmoothScrolling: state.monacoSmoothScrolling,
-    stickyChapterTitleEnabled: state.stickyChapterTitleEnabled,
-    chapterNavToolbarEnabled: state.chapterNavToolbarEnabled,
-    readerEditShowLineNumbers: state.readerEditShowLineNumbers,
-    readerEditMinimap: state.readerEditMinimap,
-    fullscreenReaderWidthPercent: state.fullscreenReaderWidthPercent,
-    fullscreenShowSystemTime: state.fullscreenShowSystemTime,
-    showSidebar: state.showSidebar,
-    sidebarWidth: state.sidebarWidth,
-    showChapterTag: state.showChapterTag,
-    timedScroll: state.timedScrollSettings,
-    pomodoro: state.pomodoroSettings,
-  };
-}
+};
 
-export function createInitialFindBookSettingsState() {
-  const data = loadPersistedFindBookSettings();
+export function sharedReaderSettingsFromMainData(
+  data: PersistedSettingsData,
+): SharedReaderSettingsSnapshot {
   return {
-    cacheDir:
-      typeof data.cacheDir === "string" && data.cacheDir.trim()
-        ? data.cacheDir.trim()
-        : resolveDefaultBookSourceChapterCacheDirSync(),
-    downloadDir:
-      typeof data.downloadDir === "string" && data.downloadDir.trim()
-        ? data.downloadDir.trim()
-        : resolveDefaultBookSourceDownloadDirSync(),
-    downloadAfterAction: isFindBookDownloadAfterAction(data.downloadAfterAction)
-      ? data.downloadAfterAction
-      : DEFAULT_FIND_BOOK_DOWNLOAD_AFTER_ACTION,
-    downloadAddToMainFileList: data.downloadAddToMainFileList !== false,
-    downloadDefaultCategory:
-      data.downloadDefaultCategory === undefined
-        ? DEFAULT_FIND_BOOK_DOWNLOAD_CATEGORY
-        : typeof data.downloadDefaultCategory === "string"
-          ? data.downloadDefaultCategory.trim()
-          : "",
-    proxy: normalizeFindBookProxySettings(
-      data.proxy ?? DEFAULT_FIND_BOOK_PROXY_SETTINGS,
-    ),
     readerFontSize:
-      typeof data.fontSize === "number" ? data.fontSize : defaultReaderFontSize,
+      typeof data.fontSize === "number" && Number.isFinite(data.fontSize)
+        ? data.fontSize
+        : defaultReaderFontSize,
     readerLineHeightMultiple:
       typeof data.lineHeightMultiple === "number"
         ? normalizeLineHeightMultiple(data.lineHeightMultiple)
-        : normalizeLineHeightMultiple(1.6),
+        : normalizeLineHeightMultiple(defaultReaderLineHeightMultiple),
     monacoFontFamily:
       typeof data.fontFamily === "string" && data.fontFamily.trim()
         ? data.fontFamily.trim()
@@ -278,6 +202,16 @@ export function createInitialFindBookSettingsState() {
       typeof data.monacoSmoothScrolling === "boolean"
         ? data.monacoSmoothScrolling
         : defaultMonacoSmoothScrolling,
+    mouseWheelScrollSensitivity: clampMouseWheelScrollSensitivity(
+      typeof data.mouseWheelScrollSensitivity === "number"
+        ? data.mouseWheelScrollSensitivity
+        : defaultMouseWheelScrollSensitivity,
+    ),
+    fastScrollSensitivity: clampFastScrollSensitivity(
+      typeof data.fastScrollSensitivity === "number"
+        ? data.fastScrollSensitivity
+        : defaultFastScrollSensitivity,
+    ),
     stickyChapterTitleEnabled:
       typeof data.stickyChapterTitleEnabled === "boolean"
         ? data.stickyChapterTitleEnabled
@@ -285,7 +219,7 @@ export function createInitialFindBookSettingsState() {
     chapterNavToolbarEnabled:
       typeof data.chapterNavToolbarEnabled === "boolean"
         ? data.chapterNavToolbarEnabled
-        : defaultFindBookChapterNavToolbarEnabled,
+        : defaultChapterNavToolbarEnabled,
     readerEditShowLineNumbers:
       typeof data.readerEditShowLineNumbers === "boolean"
         ? data.readerEditShowLineNumbers
@@ -302,6 +236,67 @@ export function createInitialFindBookSettingsState() {
       typeof data.fullscreenShowSystemTime === "boolean"
         ? data.fullscreenShowSystemTime
         : defaultFullscreenShowSystemTime,
+    timedScrollSettings: mergeTimedScrollSettings(data.timedScroll),
+    pomodoroSettings: mergePomodoroSettings(data.pomodoro),
+  };
+}
+
+export function snapshotSharedReaderSettingsForMain(
+  state: SharedReaderSettingsSnapshot,
+): Record<string, unknown> {
+  return {
+    fontSize: state.readerFontSize,
+    lineHeightMultiple: state.readerLineHeightMultiple,
+    fontFamily: state.monacoFontFamily,
+    pinnedOtherFonts: [...state.pinnedOtherFonts],
+    monacoCustomHighlight: state.monacoCustomHighlight,
+    txtrDelimitedMatchCrossLine: state.txtrDelimitedMatchCrossLine,
+    compressBlankLines: state.compressBlankLines,
+    compressBlankKeepOneBlank: state.compressBlankKeepOneBlank,
+    leadIndentFullWidth: state.leadIndentFullWidth,
+    textConvertZh: state.textConvertZh,
+    textConvertLetter: state.textConvertLetter,
+    textConvertDigit: state.textConvertDigit,
+    monacoAdvancedWrapping: state.monacoAdvancedWrapping,
+    monacoSmoothScrolling: state.monacoSmoothScrolling,
+    mouseWheelScrollSensitivity: state.mouseWheelScrollSensitivity,
+    fastScrollSensitivity: state.fastScrollSensitivity,
+    stickyChapterTitleEnabled: state.stickyChapterTitleEnabled,
+    chapterNavToolbarEnabled: state.chapterNavToolbarEnabled,
+    readerEditShowLineNumbers: state.readerEditShowLineNumbers,
+    readerEditMinimap: state.readerEditMinimap,
+    fullscreenReaderWidthPercent: state.fullscreenReaderWidthPercent,
+    fullscreenShowSystemTime: state.fullscreenShowSystemTime,
+    timedScroll: state.timedScrollSettings,
+    pomodoro: state.pomodoroSettings,
+  };
+}
+
+export function createInitialFindBookSettingsState() {
+  const data = loadPersistedFindBookSettings();
+  const shared = sharedReaderSettingsFromMainData(loadMainSettingsData());
+  return {
+    cacheDir:
+      typeof data.cacheDir === "string" && data.cacheDir.trim()
+        ? data.cacheDir.trim()
+        : resolveDefaultBookSourceChapterCacheDirSync(),
+    downloadDir:
+      typeof data.downloadDir === "string" && data.downloadDir.trim()
+        ? data.downloadDir.trim()
+        : resolveDefaultBookSourceDownloadDirSync(),
+    downloadAfterAction: isFindBookDownloadAfterAction(data.downloadAfterAction)
+      ? data.downloadAfterAction
+      : DEFAULT_FIND_BOOK_DOWNLOAD_AFTER_ACTION,
+    downloadAddToMainFileList: data.downloadAddToMainFileList !== false,
+    downloadDefaultCategory:
+      data.downloadDefaultCategory === undefined
+        ? DEFAULT_FIND_BOOK_DOWNLOAD_CATEGORY
+        : typeof data.downloadDefaultCategory === "string"
+          ? data.downloadDefaultCategory.trim()
+          : "",
+    proxy: normalizeFindBookProxySettings(
+      data.proxy ?? DEFAULT_FIND_BOOK_PROXY_SETTINGS,
+    ),
     showSidebar:
       typeof data.showSidebar === "boolean"
         ? data.showSidebar
@@ -317,8 +312,7 @@ export function createInitialFindBookSettingsState() {
       typeof data.showChapterTag === "boolean"
         ? data.showChapterTag
         : defaultFindBookShowChapterTag,
-    timedScrollSettings: mergeTimedScrollSettings(data.timedScroll),
-    pomodoroSettings: mergePomodoroSettings(data.pomodoro),
+    ...shared,
   };
 }
 

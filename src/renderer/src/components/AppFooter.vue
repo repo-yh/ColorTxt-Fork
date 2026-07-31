@@ -32,6 +32,13 @@ const props = withDefaults(
     pathMenuReloadEnabled: boolean;
     pathMenuReconvertEnabled: boolean;
     pathMenuCloseEnabled: boolean;
+    /** 是否在路径菜单前置 WebDAV 书包上传/更新 */
+    webDavMenuEnabled?: boolean;
+    /** 底栏路径右侧：WebDAV 书包上传/同步进度 */
+    webDavBookPackProgress?: {
+      kind: "upload" | "sync";
+      percent: number;
+    } | null;
     /** 编辑态底栏光标/选区文案（空串不展示） */
     editCursorLabel?: string;
     /** 番茄时钟：是否在底栏左侧显示 */
@@ -51,6 +58,8 @@ const props = withDefaults(
     pathMenuReloadEnabled: false,
     pathMenuReconvertEnabled: false,
     pathMenuCloseEnabled: false,
+    webDavMenuEnabled: false,
+    webDavBookPackProgress: null,
     editCursorLabel: "",
     pomodoroEnabled: false,
     pomodoroPhase: "idle",
@@ -69,6 +78,8 @@ const emit = defineEmits<{
   pathClose: [];
   pathExportBookPack: [];
   pathExportBookPackWithProgress: [];
+  pathUploadBookPackWebDav: [];
+  pathUpdateBookPackWebDav: [];
   pathClearReadingData: [];
   saveFileAsEncoding: [encoding: "utf8" | "gb2312"];
   pomodoroStart: [];
@@ -95,6 +106,7 @@ const encodingMenuItems = [
 
 const pathMenuItems = computed(() => {
   const exportDisabled = !props.pathMenuCloseEnabled;
+  const webDavBusy = props.webDavBookPackProgress != null;
   const items: {
     id: string;
     label?: string;
@@ -102,7 +114,25 @@ const pathMenuItems = computed(() => {
     disabled?: boolean;
     iconHtml?: string;
     separator?: boolean;
-  }[] = [
+  }[] = [];
+  if (props.webDavMenuEnabled) {
+    items.push(
+      {
+        id: "uploadBookPackWebDav",
+        label: "上传书包",
+        iconHtml: icons.webDavUpload,
+        disabled: exportDisabled || webDavBusy,
+      },
+      {
+        id: "updateBookPackWebDav",
+        label: "同步书包",
+        iconHtml: icons.webDavDownload,
+        disabled: exportDisabled || webDavBusy,
+      },
+      { id: "webDavBookPackSep", separator: true },
+    );
+  }
+  items.push(
     {
       id: "exportBookPack",
       label: "导出书包",
@@ -136,7 +166,7 @@ const pathMenuItems = computed(() => {
       iconHtml: icons.refresh,
       disabled: !props.pathMenuReloadEnabled,
     },
-  ];
+  );
   if (props.pathMenuReconvertEnabled) {
     items.push({
       id: "reconvert",
@@ -211,6 +241,8 @@ function onPathMenuSelect(id: string) {
   if (id === "reveal") emit("pathRevealInFolder");
   else if (id === "reload") emit("pathReload");
   else if (id === "reconvert") emit("pathReconvert");
+  else if (id === "uploadBookPackWebDav") emit("pathUploadBookPackWebDav");
+  else if (id === "updateBookPackWebDav") emit("pathUpdateBookPackWebDav");
   else if (id === "exportBookPack") emit("pathExportBookPack");
   else if (id === "exportBookPackWithProgress")
     emit("pathExportBookPackWithProgress");
@@ -248,6 +280,15 @@ function onPathMenuSelect(id: string) {
         >
           {{ pathCaption }}
         </button>
+        <span
+          v-if="webDavBookPackProgress"
+          class="footerWebDavProgress"
+          aria-live="polite"
+        >
+          {{ webDavBookPackProgress.kind === "upload" ? "上传" : "同步" }}进度：{{
+            webDavBookPackProgress.percent
+          }}%
+        </span>
       </div>
     </div>
     <div v-if="currentFile || ebookParsing" class="footer-right">
@@ -370,10 +411,12 @@ function onPathMenuSelect(id: string) {
   display: flex;
   justify-content: flex-start;
   align-items: center;
+  gap: 8px;
 }
 
 .footerPath {
   display: block;
+  flex: 1 1 0%;
   min-width: 0;
   box-sizing: border-box;
   font-size: 12px;
@@ -381,6 +424,12 @@ function onPathMenuSelect(id: string) {
   text-overflow: ellipsis;
   overflow: hidden;
   white-space: nowrap;
+}
+
+.footerWebDavProgress {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  color: var(--accent);
 }
 
 .footer-right {

@@ -1,8 +1,12 @@
 import { computed, ref } from "vue";
 import {
   createInitialFindBookSettingsState,
+  loadMainSettingsData,
+  patchPersistedMainSettings,
   persistFindBookSettings,
-  snapshotFindBookSettingsFromStore,
+  sharedReaderSettingsFromMainData,
+  snapshotFindBookOnlySettingsFromStore,
+  snapshotSharedReaderSettingsForMain,
 } from "../services/findBookSettingsStore";
 import {
   buildFindBookProxyUrl,
@@ -12,6 +16,10 @@ import {
   resolveDefaultBookSourceChapterCacheDirSync,
   resolveDefaultBookSourceDownloadDirSync,
 } from "../../utils/defaultCacheDirs";
+import {
+  clonePersistBaselineValue,
+  WINDOW_LOCAL_MAIN_SETTING_KEYS,
+} from "../../services/settingsPersistMerge";
 
 let store: ReturnType<typeof createFindBookSettingsStore> | null = null;
 
@@ -38,6 +46,8 @@ function createFindBookSettingsStore() {
   const textConvertDigit = ref(initial.textConvertDigit);
   const monacoAdvancedWrapping = ref(initial.monacoAdvancedWrapping);
   const monacoSmoothScrolling = ref(initial.monacoSmoothScrolling);
+  const mouseWheelScrollSensitivity = ref(initial.mouseWheelScrollSensitivity);
+  const fastScrollSensitivity = ref(initial.fastScrollSensitivity);
   const stickyChapterTitleEnabled = ref(initial.stickyChapterTitleEnabled);
   const chapterNavToolbarEnabled = ref(initial.chapterNavToolbarEnabled);
   const readerEditShowLineNumbers = ref(initial.readerEditShowLineNumbers);
@@ -49,6 +59,9 @@ function createFindBookSettingsStore() {
   const showChapterTag = ref(initial.showChapterTag);
   const timedScrollSettings = ref(initial.timedScrollSettings);
   const pomodoroSettings = ref(initial.pomodoroSettings);
+
+  /** 阅读/编辑共用字段落盘基线（不把磁盘合并进本窗内存） */
+  const readerUiPersistBaseline: Record<string, unknown> = {};
 
   const effectiveCacheDir = computed(() => {
     const configured = cacheDir.value.trim();
@@ -65,48 +78,100 @@ function createFindBookSettingsStore() {
     void window.colorTxt.bookSourceSetHttpProxy(url || null);
   }
 
+  function sharedReaderSnapshot() {
+    return {
+      readerFontSize: readerFontSize.value,
+      readerLineHeightMultiple: readerLineHeightMultiple.value,
+      monacoFontFamily: monacoFontFamily.value,
+      pinnedOtherFonts: pinnedOtherFonts.value,
+      monacoCustomHighlight: monacoCustomHighlight.value,
+      txtrDelimitedMatchCrossLine: txtrDelimitedMatchCrossLine.value,
+      compressBlankLines: compressBlankLines.value,
+      compressBlankKeepOneBlank: compressBlankKeepOneBlank.value,
+      leadIndentFullWidth: leadIndentFullWidth.value,
+      textConvertZh: textConvertZh.value,
+      textConvertLetter: textConvertLetter.value,
+      textConvertDigit: textConvertDigit.value,
+      monacoAdvancedWrapping: monacoAdvancedWrapping.value,
+      monacoSmoothScrolling: monacoSmoothScrolling.value,
+      mouseWheelScrollSensitivity: mouseWheelScrollSensitivity.value,
+      fastScrollSensitivity: fastScrollSensitivity.value,
+      stickyChapterTitleEnabled: stickyChapterTitleEnabled.value,
+      chapterNavToolbarEnabled: chapterNavToolbarEnabled.value,
+      readerEditShowLineNumbers: readerEditShowLineNumbers.value,
+      readerEditMinimap: readerEditMinimap.value,
+      fullscreenReaderWidthPercent: fullscreenReaderWidthPercent.value,
+      fullscreenShowSystemTime: fullscreenShowSystemTime.value,
+      timedScrollSettings: timedScrollSettings.value,
+      pomodoroSettings: pomodoroSettings.value,
+    };
+  }
+
+  function captureReaderUiPersistBaseline() {
+    const patch = snapshotSharedReaderSettingsForMain(sharedReaderSnapshot());
+    for (const [key, value] of Object.entries(patch)) {
+      if (!WINDOW_LOCAL_MAIN_SETTING_KEYS.has(key)) continue;
+      if (value === undefined) continue;
+      readerUiPersistBaseline[key] = clonePersistBaselineValue(value);
+    }
+  }
+
+  /** 仅找书专属（下载/代理/侧栏等） */
   function persistAll() {
     persistFindBookSettings(
-      snapshotFindBookSettingsFromStore({
+      snapshotFindBookOnlySettingsFromStore({
         cacheDir: cacheDir.value,
         downloadDir: downloadDir.value,
         downloadAfterAction: downloadAfterAction.value,
         downloadAddToMainFileList: downloadAddToMainFileList.value,
         downloadDefaultCategory: downloadDefaultCategory.value,
         proxy: proxy.value,
-        readerFontSize: readerFontSize.value,
-        readerLineHeightMultiple: readerLineHeightMultiple.value,
-        monacoFontFamily: monacoFontFamily.value,
-        pinnedOtherFonts: pinnedOtherFonts.value,
-        monacoCustomHighlight: monacoCustomHighlight.value,
-        txtrDelimitedMatchCrossLine: txtrDelimitedMatchCrossLine.value,
-        compressBlankLines: compressBlankLines.value,
-        compressBlankKeepOneBlank: compressBlankKeepOneBlank.value,
-        leadIndentFullWidth: leadIndentFullWidth.value,
-        textConvertZh: textConvertZh.value,
-        textConvertLetter: textConvertLetter.value,
-        textConvertDigit: textConvertDigit.value,
-        monacoAdvancedWrapping: monacoAdvancedWrapping.value,
-        monacoSmoothScrolling: monacoSmoothScrolling.value,
-        stickyChapterTitleEnabled: stickyChapterTitleEnabled.value,
-        chapterNavToolbarEnabled: chapterNavToolbarEnabled.value,
-        readerEditShowLineNumbers: readerEditShowLineNumbers.value,
-        readerEditMinimap: readerEditMinimap.value,
-        fullscreenReaderWidthPercent: fullscreenReaderWidthPercent.value,
-        fullscreenShowSystemTime: fullscreenShowSystemTime.value,
         showSidebar: showSidebar.value,
         sidebarWidth: sidebarWidth.value,
         showChapterTag: showChapterTag.value,
-        timedScrollSettings: timedScrollSettings.value,
-        pomodoroSettings: pomodoroSettings.value,
       }),
     );
     syncHttpProxyToMain();
   }
 
+  /** 阅读/编辑相关写入主界面 `colorTxt.ui.settings`（未改字段保留磁盘） */
   function persistReaderUiPrefs() {
-    persistAll();
+    patchPersistedMainSettings(
+      snapshotSharedReaderSettingsForMain(sharedReaderSnapshot()),
+      { baseline: readerUiPersistBaseline },
+    );
   }
+
+  function hydrateSharedReaderFromMain() {
+    const shared = sharedReaderSettingsFromMainData(loadMainSettingsData());
+    readerFontSize.value = shared.readerFontSize;
+    readerLineHeightMultiple.value = shared.readerLineHeightMultiple;
+    monacoFontFamily.value = shared.monacoFontFamily;
+    pinnedOtherFonts.value = shared.pinnedOtherFonts;
+    monacoCustomHighlight.value = shared.monacoCustomHighlight;
+    txtrDelimitedMatchCrossLine.value = shared.txtrDelimitedMatchCrossLine;
+    compressBlankLines.value = shared.compressBlankLines;
+    compressBlankKeepOneBlank.value = shared.compressBlankKeepOneBlank;
+    leadIndentFullWidth.value = shared.leadIndentFullWidth;
+    textConvertZh.value = shared.textConvertZh;
+    textConvertLetter.value = shared.textConvertLetter;
+    textConvertDigit.value = shared.textConvertDigit;
+    monacoAdvancedWrapping.value = shared.monacoAdvancedWrapping;
+    monacoSmoothScrolling.value = shared.monacoSmoothScrolling;
+    mouseWheelScrollSensitivity.value = shared.mouseWheelScrollSensitivity;
+    fastScrollSensitivity.value = shared.fastScrollSensitivity;
+    stickyChapterTitleEnabled.value = shared.stickyChapterTitleEnabled;
+    chapterNavToolbarEnabled.value = shared.chapterNavToolbarEnabled;
+    readerEditShowLineNumbers.value = shared.readerEditShowLineNumbers;
+    readerEditMinimap.value = shared.readerEditMinimap;
+    fullscreenReaderWidthPercent.value = shared.fullscreenReaderWidthPercent;
+    fullscreenShowSystemTime.value = shared.fullscreenShowSystemTime;
+    timedScrollSettings.value = shared.timedScrollSettings;
+    pomodoroSettings.value = shared.pomodoroSettings;
+    captureReaderUiPersistBaseline();
+  }
+
+  captureReaderUiPersistBaseline();
 
   // 窗口启动时把已持久化的代理同步到主进程
   syncHttpProxyToMain();
@@ -135,6 +200,8 @@ function createFindBookSettingsStore() {
     textConvertDigit,
     monacoAdvancedWrapping,
     monacoSmoothScrolling,
+    mouseWheelScrollSensitivity,
+    fastScrollSensitivity,
     stickyChapterTitleEnabled,
     chapterNavToolbarEnabled,
     readerEditShowLineNumbers,
@@ -148,6 +215,8 @@ function createFindBookSettingsStore() {
     pomodoroSettings,
     persistAll,
     persistReaderUiPrefs,
+    hydrateSharedReaderFromMain,
+    readerUiPersistBaseline,
   };
 }
 

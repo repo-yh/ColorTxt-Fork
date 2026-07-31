@@ -1,5 +1,8 @@
 type ShortcutScope = "window" | "global";
 
+/** 快捷键面板展示上下文：主窗与找书窗列表项不同 */
+export type ShortcutPanelContext = "main" | "findBook";
+
 export type ShortcutActionId =
   | "openFile"
   | "pickTxtDirectory"
@@ -31,6 +34,19 @@ type ShortcutActionDef = {
   desc: string;
   handlerKey: ShortcutActionId;
 };
+
+/** 主窗口快捷键面板不展示（仅找书窗使用） */
+const MAIN_PANEL_HIDDEN_ACTION_IDS = new Set<ShortcutActionId>([
+  "openBookSource",
+]);
+
+/** 找书窗口快捷键面板不展示（仅主窗使用） */
+const FIND_BOOK_PANEL_HIDDEN_ACTION_IDS = new Set<ShortcutActionId>([
+  "openFile",
+  "pickTxtDirectory",
+  "openChapterRules",
+  "toggleBookmark",
+]);
 
 export const SHORTCUT_ACTIONS: ShortcutActionDef[] = [
   { id: "openFile", scope: "window", desc: "打开文件", handlerKey: "openFile" },
@@ -125,13 +141,13 @@ export const SHORTCUT_ACTIONS: ShortcutActionDef[] = [
   {
     id: "openFindBook",
     scope: "window",
-    desc: "找书",
+    desc: "找书/主界面",
     handlerKey: "openFindBook",
   },
   {
     id: "openBookSource",
     scope: "window",
-    desc: "书源管理（找书窗口）",
+    desc: "书源管理",
     handlerKey: "openBookSource",
   },
   {
@@ -147,6 +163,16 @@ export const SHORTCUT_ACTIONS: ShortcutActionDef[] = [
     handlerKey: "toggleAllWindowsVisibility",
   },
 ];
+
+export function shortcutActionsForPanel(
+  context: ShortcutPanelContext,
+): ShortcutActionDef[] {
+  const hidden =
+    context === "findBook"
+      ? FIND_BOOK_PANEL_HIDDEN_ACTION_IDS
+      : MAIN_PANEL_HIDDEN_ACTION_IDS;
+  return SHORTCUT_ACTIONS.filter((a) => !hidden.has(a.id));
+}
 
 export type ShortcutBindingMap = Record<ShortcutActionId, string>;
 
@@ -182,4 +208,3 @@ export function createDefaultShortcutBindings(isMac: boolean): ShortcutBindingMa
     toggleAllWindowsVisibility: "Control+`",
   };
 }
-

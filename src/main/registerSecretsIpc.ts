@@ -4,6 +4,7 @@ import {
   DEPRECATED_SECRET_SLOTS,
   isDeprecatedSecretSlot,
   SECRET_SLOT_VOICE_READ_PROFILE_KEYS,
+  SECRET_SLOT_WEBDAV_PASSWORD,
   type SecretSlotId,
 } from "@shared/secretSlots";
 import {
@@ -16,8 +17,11 @@ import {
   setSecretsBatch,
 } from "./secretStorage";
 
-function isVoiceReadProfileKeysSlot(slot: unknown): slot is SecretSlotId {
-  return slot === SECRET_SLOT_VOICE_READ_PROFILE_KEYS;
+function isRendererReadableSecretSlot(slot: unknown): slot is SecretSlotId {
+  return (
+    slot === SECRET_SLOT_VOICE_READ_PROFILE_KEYS ||
+    slot === SECRET_SLOT_WEBDAV_PASSWORD
+  );
 }
 
 export function registerSecretsIpcHandlers(): void {
@@ -38,7 +42,7 @@ export function registerSecretsIpcHandlers(): void {
   });
 
   ipcMain.handle("secrets:get", async (_evt, slotRaw: unknown) => {
-    if (!isVoiceReadProfileKeysSlot(slotRaw)) {
+    if (!isRendererReadableSecretSlot(slotRaw)) {
       return { ok: false as const, error: "不支持的密钥类型" };
     }
     return {
@@ -52,7 +56,7 @@ export function registerSecretsIpcHandlers(): void {
       return { ok: false as const, error: "无效参数" };
     }
     const o = payload as { slot?: unknown; value?: unknown };
-    if (!isVoiceReadProfileKeysSlot(o.slot)) {
+    if (!isRendererReadableSecretSlot(o.slot)) {
       return { ok: false as const, error: "不支持的密钥类型" };
     }
     await setSecret(o.slot, typeof o.value === "string" ? o.value : "");
@@ -73,6 +77,12 @@ export function registerSecretsIpcHandlers(): void {
     await purgeDeprecatedSecretSlots([
       DEPRECATED_SECRET_SLOT_VOICE_READ_DASHSCOPE_API_KEY,
     ]);
+    return { ok: true as const };
+  });
+
+  ipcMain.handle("secrets:setWebDavPassword", async (_evt, password: unknown) => {
+    const value = typeof password === "string" ? password : "";
+    await setSecret(SECRET_SLOT_WEBDAV_PASSWORD, value);
     return { ok: true as const };
   });
 

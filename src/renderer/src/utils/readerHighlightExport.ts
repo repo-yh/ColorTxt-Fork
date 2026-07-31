@@ -5,10 +5,7 @@ import {
   bookTitleForExport,
   pickAndReadJsonFile,
 } from "./readerAnnotationExport";
-import {
-  chatExportDateSlug,
-  sanitizeChatExportTitleForFilename,
-} from "../aiAssistant/aiAssistantExport";
+import { sanitizeChatExportTitleForFilename } from "../aiAssistant/aiAssistantExport";
 
 /** 本书 / 收藏共用同一 JSON 形态，可互导入 */
 export type ReaderHighlightsExportV1 = {
@@ -17,13 +14,16 @@ export type ReaderHighlightsExportV1 = {
   highlightWordsByIndex: HighlightWordsByIndex;
 };
 
+/** 本书高亮词默认导出名：`{书名}.highlights.json` */
 export function buildHighlightExportDefaultName(bookName: string): string {
-  const slug = chatExportDateSlug();
   const titlePart = sanitizeChatExportTitleForFilename(
     bookTitleForExport(bookName || "高亮词"),
   );
-  return `${titlePart}-${slug}.colortxt-highlights.json`;
+  return `${titlePart}.highlights.json`;
 }
+
+/** 收藏高亮词默认导出名（固定） */
+export const FAVORITE_HIGHLIGHTS_EXPORT_DEFAULT_NAME = "favorite.highlights.json";
 
 export function countHighlightWordsInMap(
   map: HighlightWordsByIndex | undefined,

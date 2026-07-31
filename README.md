@@ -28,6 +28,7 @@
 | :---: | --- | --- |
 |  | 本地文件阅读 | 支持本地 `.txt` / `.md` 文件 |
 |  | 其他电子书 | 支持常见的电子书格式（如 `.epub`），打开时会转换为 `.md` 进行加载 |
+|  | 彩读书包 | 可导入/导出彩读专用的 `.ctz` / `.ctzx` 书包文件，方便分享和跨设备同步 |
 |  | 自动编码识别 | `UTF-8` 和 `ANSI` 都能正常打开 |
 | <img src="./src/renderer/src/assets/chapter_list.svg" width="18" height="18" alt=""> | 自动章节识别 | 内置常用的章节匹配规则，也支持自定义匹配规则 |
 | <img src="./src/renderer/src/assets/palette.svg" width="18" height="18" alt=""> | **个性内容上色** | 使用一套自定义的高亮规则对内容进行着色，带来 **独特的阅读体验**！ |
@@ -40,11 +41,12 @@
 | <img src="./src/renderer/src/assets/reading.svg" width="18" height="18" alt=""> | **语音朗读** | 支持旁白 / 对白多音色，配合 AI + 角色卡可实现多角色语音朗读 |
 | <img src="./src/renderer/src/assets/replace.svg" width="18" height="18" alt=""> | **文本替换** | 全局替换文本（可用于替换人名、去广告文本等） |
 | <img src="./src/renderer/src/assets/conver.svg" width="18" height="18" alt=""> | **简繁互转** | 简繁互转，字母 / 数字全半角互转 |
-| <img src="./src/renderer/src/assets/history.svg" width="18" height="18" alt=""> | **番茄时钟** | 保护眼睛，健康阅读，从你我做起 |
+| <img src="./src/renderer/src/assets/history.svg" width="18" height="18" alt=""> | **番茄时钟** | 保护眼睛，健康阅读，从你我做起！ |
 | <img src="./src/renderer/src/assets/AI_chat.svg" width="18" height="18" alt=""> | **AI 阅读助手** | 可以让 **AI** 帮忙分析剧情、回答小说相关问题（支持生成 <img src="./src/renderer/src/assets/mindmap.svg" width="18" height="18" alt=""> **思维导图** / <img src="./src/renderer/src/assets/wordcloud.svg" width="18" height="18" alt=""> **词云图**） |
 | <img src="./src/renderer/src/assets/character.svg" width="18" height="18" alt=""> | **角色卡生成** | 借助 **AI** 检索小说中角色的相关信息生成摘要，通过 **文生图** 生成角色立绘 |
 | <img src="./src/renderer/src/assets/AI_compose.svg" width="18" height="18" alt=""> | **AI 智能排版** | 让 **AI** 对文本进行排版，可自动处理硬换行、修正标点符号等 |
 | <img src="./src/renderer/src/assets/findBook.svg" width="18" height="18" alt=""> | 书源找书 | 可多源搜索，支持在线阅读或整书下载 |
+| <img src="./src/renderer/src/assets/WebDAV.svg" width="18" height="18" alt=""> | **WebDAV** | 用于跨设备同步应用配置、书包 |
 | <img src="./src/renderer/src/assets/compress.svg" width="18" height="18" alt=""> | 空行压缩 | 压缩多余空行 |
 | <img src="./src/renderer/src/assets/indent.svg" width="18" height="18" alt=""> | 行首缩进 | 在行首添加全角缩进 |
 | <img src="./src/renderer/src/assets/ebook.svg" width="18" height="18" alt=""> | 文件列表 | 拖放添加文件 / 目录（会递归读取子目录），支持分类 / 排序 / 过滤 |
@@ -188,6 +190,47 @@ OpenAI 接口拼接方式：
 可通过「设置 → 技能 → 智能排版」自定义 AI 排版行为。
 
 > 「最大 Token 数」会限制 AI 单次回复内容长度，所以排版时会根据该设置进行分段，如果想减少分段数（请求次数），可以适当调高该值，如改为 8192。
+
+## 关于「书包」
+
+书包是彩读专用的压缩包格式，方便分享和跨设备同步。
+
+书包文件的扩展名为 **`.ctz`**（普通 zip 包）/ **`.ctzx`**（加密包），目录结构如下：
+
+```text
+{文件名}.ctz|ctzx/
+  characters/
+    portraits/       # 角色立绘
+    manifest.json    # 角色卡
+  content/
+    {文件名}.txt|md   # 原文件
+    {文件名}.Images/  # md 文件的插图
+  bookmarks.json     # 书签
+  highlights.json    # 高亮词
+  notes.json         # 笔记
+  manifest.json      # 书包配置文件
+```
+
+## 关于「WebDAV」
+
+用于跨设备同步应用配置、书包。
+
+在「设置 → WebDAV」中开启：
+
+- 主界面：
+  - 侧栏「WebDAV」面板：上传/同步「配置」；拉取上传的书包列表，可过滤、排序、下载
+  - 底栏「文件路径」菜单：上传/同步「书包」（基于当前打开文件导出的带阅读进度的书包）
+- 找书窗口：
+  - 顶栏「WebDAV」菜单可分别上传/同步「书架 / 书源 / 设置」
+
+远端目录结构：
+
+```text
+ColorTxt/
+  Main/       # 主界面配置
+  Books/      # 上传的书包
+  FindBook/   # 找书窗口书架/书源/设置
+```
 
 ## 预设字体
 

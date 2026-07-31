@@ -114,6 +114,9 @@ import cacheIcon from "./assets/cache.svg?raw";
 import subheadIcon from "./assets/subhead.svg?raw";
 import effectIcon from "./assets/effect.svg?raw";
 import markdownIcon from "./assets/Markdown.svg?raw";
+import webDavIcon from "./assets/WebDAV.svg?raw";
+import webDavUploadIcon from "./assets/WebDAV_upload.svg?raw";
+import webDavDownloadIcon from "./assets/WebDAV_download.svg?raw";
 
 /** 角色卡「语音」播放动画帧：speak_0 → speak_1 → speak */
 export const speakIconAnimFrames = [
@@ -283,4 +286,8 @@ export const icons = {
   effect: effectIcon,
   /** Markdown */
   markdown: markdownIcon,
+  /** WebDAV 同步 */
+  webDav: webDavIcon,
+  webDavUpload: webDavUploadIcon,
+  webDavDownload: webDavDownloadIcon,
 } as const;

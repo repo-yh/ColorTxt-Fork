@@ -95,6 +95,7 @@ const moreMenu = useAnchoredAppShellMenu({
   anchor: moreBtnRef,
   placement: "below-end",
   widthPx: 200,
+  gap: 6,
 });
 const {
   open: moreOpen,
@@ -843,6 +844,7 @@ async function onDownloadOrStop() {
       v-model:open="moreOpen"
       :left="moreLeft"
       :top="moreTop"
+      caret="end"
       :on-panel-mount="bindMorePanel"
     >
       <button

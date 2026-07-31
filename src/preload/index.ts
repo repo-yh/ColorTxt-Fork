@@ -57,8 +57,22 @@ import type {
   VoiceReadAttributeSpeakersResult,
 } from "@shared/voiceReadSpeakerIpc";
 import { SECRET_SLOT_VOICE_READ_PROFILE_KEYS } from "@shared/secretSlots";
+import { SECRET_SLOT_WEBDAV_PASSWORD } from "@shared/secretSlots";
 import { BOOK_SOURCE_IPC } from "@shared/bookSource/ipc";
 import type { BookSourceIpcApi } from "@shared/bookSource/ipc";
+import { WEBDAV_IPC } from "@shared/webDavIpc";
+import type {
+  WebDavAuthPayload,
+  WebDavDeleteResult,
+  WebDavGetTextResult,
+  WebDavGetToFileResult,
+  WebDavListResult,
+  WebDavMkdirResult,
+  WebDavPutResult,
+  WebDavTestResult,
+  WebDavTransferProgress,
+  WebDavAbortResult,
+} from "@shared/webDavIpc";
 
 /** sandbox 下 preload 不可 require('path')，与 renderer 的 joinFs 行为对齐 */
 function joinUserDataSubdir(userData: string, segment: string): string {
@@ -273,6 +287,102 @@ const api = {
         "secrets:setVoiceReadSecrets",
         payload,
       ) as Promise<{ ok: true } | { ok: false; error: string }>,
+    getWebDavPassword: () =>
+      ipcRenderer.invoke("secrets:get", SECRET_SLOT_WEBDAV_PASSWORD).then(
+        (res: { ok: boolean; value?: string }) =>
+          ({
+            ok: true as const,
+            password: res.ok ? (res.value ?? "") : "",
+          }) as const,
+      ),
+    setWebDavPassword: (password: string) =>
+      ipcRenderer.invoke(
+        "secrets:setWebDavPassword",
+        password,
+      ) as Promise<{ ok: true }>,
+  },
+  webdav: {
+    test: (auth: WebDavAuthPayload) =>
+      ipcRenderer.invoke(WEBDAV_IPC.test, auth) as Promise<WebDavTestResult>,
+    ensureLayout: (auth: WebDavAuthPayload) =>
+      ipcRenderer.invoke(WEBDAV_IPC.ensureLayout, auth) as Promise<
+        WebDavTestResult & { appRoot?: string }
+      >,
+    list: (auth: WebDavAuthPayload, relativePath: string) =>
+      ipcRenderer.invoke(WEBDAV_IPC.list, {
+        auth,
+        relativePath,
+      }) as Promise<WebDavListResult>,
+    getText: (auth: WebDavAuthPayload, relativePath: string) =>
+      ipcRenderer.invoke(WEBDAV_IPC.getText, {
+        auth,
+        relativePath,
+      }) as Promise<WebDavGetTextResult>,
+    getToFile: (
+      auth: WebDavAuthPayload,
+      relativePath: string,
+      fileName?: string,
+      requestId?: string,
+    ) =>
+      ipcRenderer.invoke(WEBDAV_IPC.getToFile, {
+        auth,
+        relativePath,
+        fileName,
+        requestId,
+      }) as Promise<WebDavGetToFileResult>,
+    putText: (
+      auth: WebDavAuthPayload,
+      relativePath: string,
+      text: string,
+      contentType?: string,
+    ) =>
+      ipcRenderer.invoke(WEBDAV_IPC.putText, {
+        auth,
+        relativePath,
+        text,
+        contentType,
+      }) as Promise<WebDavPutResult>,
+    putFile: (
+      auth: WebDavAuthPayload,
+      relativePath: string,
+      localPath: string,
+      contentType?: string,
+      requestId?: string,
+    ) =>
+      ipcRenderer.invoke(WEBDAV_IPC.putFile, {
+        auth,
+        relativePath,
+        localPath,
+        contentType,
+        requestId,
+      }) as Promise<WebDavPutResult>,
+    mkdir: (auth: WebDavAuthPayload, relativePath: string) =>
+      ipcRenderer.invoke(WEBDAV_IPC.mkdir, {
+        auth,
+        relativePath,
+      }) as Promise<WebDavMkdirResult>,
+    delete: (auth: WebDavAuthPayload, relativePath: string) =>
+      ipcRenderer.invoke(WEBDAV_IPC.delete, {
+        auth,
+        relativePath,
+      }) as Promise<WebDavDeleteResult>,
+    onTransferProgress: (
+      cb: (payload: WebDavTransferProgress) => void,
+    ): (() => void) => {
+      const fn = (
+        _e: Electron.IpcRendererEvent,
+        payload: WebDavTransferProgress,
+      ) => {
+        cb(payload);
+      };
+      ipcRenderer.on(WEBDAV_IPC.transferProgress, fn);
+      return () => ipcRenderer.off(WEBDAV_IPC.transferProgress, fn);
+    },
+    abortTransfer: (requestId: string) =>
+      ipcRenderer.invoke(
+        WEBDAV_IPC.abortTransfer,
+        requestId,
+      ) as Promise<WebDavAbortResult>,
   },
   pathToFileUrl: (filePath: string) =>
     ipcRenderer.invoke("path:toFileUrl", filePath) as Promise<string | null>,
@@ -403,6 +513,10 @@ const api = {
   },
   openFindBookWindow: () => {
     ipcRenderer.send("window:openFindBook");
+  },
+  /** 始终新建找书窗（默认「书架」标签） */
+  openNewFindBookWindow: () => {
+    ipcRenderer.send("window:newFindBook");
   },
   createFindBookDesktopShortcut: () =>
     ipcRenderer.invoke("findBook:createDesktopShortcut") as Promise<

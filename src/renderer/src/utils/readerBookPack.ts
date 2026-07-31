@@ -1,5 +1,6 @@
 import JSZip from "jszip";
 import {
+  COLOR_TXT_BOOK_PACK_ENCRYPTED_FILE_EXT,
   COLOR_TXT_BOOK_PACK_FILE_EXT,
 } from "@shared/colorTxtOpenSaveDialog";
 import type {
@@ -59,27 +60,48 @@ import {
   type CharacterRosterPackManifestV1,
 } from "./characterRosterPack";
 import {
-  chatExportDateSlug,
   sanitizeChatExportTitleForFilename,
 } from "../aiAssistant/aiAssistantExport";
 import { resolveDefaultEbookConvertOutputDirSync } from "./defaultCacheDirs";
+import {
+  openBookPackZipPayload,
+  sealBookPackZipIfNeeded,
+} from "./readerBookPackCrypto";
 
 export const READER_BOOK_PACK_KIND = "readerBook" as const;
 export const READER_BOOK_PACK_SCHEMA_VERSION = 1 as const;
 export const READER_BOOK_PACK_FILE_EXT = COLOR_TXT_BOOK_PACK_FILE_EXT;
+export const READER_BOOK_PACK_ENCRYPTED_FILE_EXT =
+  COLOR_TXT_BOOK_PACK_ENCRYPTED_FILE_EXT;
 
 export const READER_BOOK_PACK_SAVE_FILTERS: Array<{
   name: string;
   extensions: string[];
 }> = [
-  { name: "彩读书包", extensions: ["zip"] },
+  { name: "彩读书包", extensions: [COLOR_TXT_BOOK_PACK_FILE_EXT] },
+];
+
+export const READER_BOOK_PACK_ENCRYPTED_SAVE_FILTERS: Array<{
+  name: string;
+  extensions: string[];
+}> = [
+  {
+    name: "加密彩读书包",
+    extensions: [COLOR_TXT_BOOK_PACK_ENCRYPTED_FILE_EXT],
+  },
 ];
 
 export const READER_BOOK_PACK_OPEN_FILTERS: Array<{
   name: string;
   extensions: string[];
 }> = [
-  { name: "彩读书包", extensions: ["zip"] },
+  {
+    name: "彩读书包",
+    extensions: [
+      COLOR_TXT_BOOK_PACK_FILE_EXT,
+      COLOR_TXT_BOOK_PACK_ENCRYPTED_FILE_EXT,
+    ],
+  },
 ];
 
 const MANIFEST_NAME = "manifest.json";
@@ -121,23 +143,32 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
 }
 
 export function isReaderBookPackPath(filePath: string): boolean {
-  return filePath.trim().toLowerCase().endsWith(".zip");
+  return looksLikeZipBookPackCandidate(filePath);
 }
 
 /**
- * 可能是彩读书包的候选：任意 `.zip`。
+ * 可能是彩读书包的候选：`.ctz`（明文）或 `.ctzx`（加密）。
  * 是否合法书包由 `parseReaderBookPackZip`（manifest / kind）判定。
  */
 export function looksLikeZipBookPackCandidate(filePath: string): boolean {
-  return filePath.trim().toLowerCase().endsWith(".zip");
+  const lower = filePath.trim().toLowerCase();
+  return (
+    lower.endsWith(`.${COLOR_TXT_BOOK_PACK_FILE_EXT}`) ||
+    lower.endsWith(`.${COLOR_TXT_BOOK_PACK_ENCRYPTED_FILE_EXT}`)
+  );
 }
 
-export function buildReaderBookPackDefaultName(bookName: string): string {
-  const slug = chatExportDateSlug();
+export function buildReaderBookPackDefaultName(
+  bookName: string,
+  encrypted = false,
+): string {
   const titlePart = sanitizeChatExportTitleForFilename(
     bookTitleForExport(bookName || "书包"),
   );
-  return `${titlePart}-${slug}.${READER_BOOK_PACK_FILE_EXT}`;
+  const ext = encrypted
+    ? READER_BOOK_PACK_ENCRYPTED_FILE_EXT
+    : READER_BOOK_PACK_FILE_EXT;
+  return `${titlePart}.${ext}`;
 }
 
 export function parseReaderBookPackManifest(
@@ -312,6 +343,8 @@ export async function buildReaderBookPackZip(options: {
   portraitCacheDir: string;
   includeReadingProgress: boolean;
   viewportTopPhysicalLine?: number | null;
+  /** 非空则对 ZIP 整包 AES-GCM 加密 */
+  password?: string;
 }): Promise<ArrayBuffer> {
   const contentAbs = options.physicalContentPath.trim();
   const contentBuf = await window.colorTxt.readFileAsArrayBuffer(contentAbs);
@@ -414,18 +447,30 @@ export async function buildReaderBookPackZip(options: {
     }
   }
 
-  return zip.generateAsync({ type: "arraybuffer", compression: "DEFLATE" });
+  const zipBuffer = await zip.generateAsync({
+    type: "arraybuffer",
+    compression: "DEFLATE",
+  });
+  return sealBookPackZipIfNeeded(zipBuffer, options.password ?? "");
 }
 
 export async function parseReaderBookPackZip(
   buffer: ArrayBuffer,
+  password = "",
 ): Promise<
   | { ok: true; pack: ParsedReaderBookPack }
-  | { ok: false; error: string }
+  | {
+      ok: false;
+      error: string;
+      code?: "needPassword" | "wrongPassword";
+    }
 > {
+  const opened = await openBookPackZipPayload(buffer, password);
+  if (!opened.ok) return opened;
+
   let zip: JSZip;
   try {
-    zip = await JSZip.loadAsync(buffer);
+    zip = await JSZip.loadAsync(opened.zipBuffer);
   } catch {
     return { ok: false, error: "无法读取压缩包" };
   }
@@ -575,6 +620,7 @@ export async function parseReaderBookPackZip(
 export async function saveReaderBookPackFile(
   defaultName: string,
   zipBuffer: ArrayBuffer,
+  encrypted = false,
 ): Promise<
   | { ok: true; path: string }
   | { ok: false; cancelled: true }
@@ -583,18 +629,24 @@ export async function saveReaderBookPackFile(
   const r = await window.colorTxt.showSaveDialog({
     title: "导出书包",
     defaultPath: defaultName,
-    filters: READER_BOOK_PACK_SAVE_FILTERS,
+    filters: encrypted
+      ? READER_BOOK_PACK_ENCRYPTED_SAVE_FILTERS
+      : READER_BOOK_PACK_SAVE_FILTERS,
   });
   if (r.canceled || !r.filePath) {
     return { ok: false, cancelled: true };
   }
   let target = r.filePath;
   const lower = target.toLowerCase();
-  if (
-    !lower.endsWith(".colortxt-book.zip") &&
-    !lower.endsWith(".zip")
-  ) {
-    target = `${target}.${READER_BOOK_PACK_FILE_EXT}`;
+  const hasKnownExt =
+    lower.endsWith(`.${COLOR_TXT_BOOK_PACK_FILE_EXT}`) ||
+    lower.endsWith(`.${COLOR_TXT_BOOK_PACK_ENCRYPTED_FILE_EXT}`);
+  if (!hasKnownExt) {
+    target = `${target}.${
+      encrypted
+        ? READER_BOOK_PACK_ENCRYPTED_FILE_EXT
+        : READER_BOOK_PACK_FILE_EXT
+    }`;
   }
   try {
     await window.colorTxt.writeBinaryFile(

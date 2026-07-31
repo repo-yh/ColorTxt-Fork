@@ -42,6 +42,10 @@ const props = withDefaults(
     inBookshelf?: boolean;
     /** 设置菜单项右侧快捷键文案（如 F5） */
     settingsShortcutLabel?: string;
+    /** 配色菜单项右侧快捷键文案（如 F6） */
+    colorSchemeShortcutLabel?: string;
+    /** 查找菜单项右侧快捷键文案 */
+    findShortcutLabel?: string;
     readerEditMode?: boolean;
     canEnterReaderEditMode?: boolean;
     /** 有已启用的文本替换规则时工具栏按钮为激活态 */
@@ -60,6 +64,8 @@ const props = withDefaults(
     voiceReadHeaderLocked: false,
     inBookshelf: false,
     settingsShortcutLabel: "",
+    colorSchemeShortcutLabel: "",
+    findShortcutLabel: "",
     readerEditMode: false,
     canEnterReaderEditMode: false,
     textReplaceActive: false,
@@ -91,6 +97,8 @@ const emit = defineEmits<{
   voiceReadToggle: [];
   timedScrollToggle: [];
   openSettings: [];
+  openColorScheme: [];
+  toggleFind: [];
   toggleBookshelf: [];
   toggleReaderEdit: [];
   saveReaderChapter: [];
@@ -116,6 +124,7 @@ const moreMenu = useAnchoredAppShellMenu({
   anchor: moreBtnRef,
   placement: "below-end",
   widthPx: 320,
+  gap: 6,
 });
 const {
   open: moreMenuOpen,
@@ -133,6 +142,16 @@ function bindMoreMenuPanel(el: HTMLElement | null) {
 function onOpenSettingsFromToolbar() {
   closeMoreMenu();
   emit("openSettings");
+}
+
+function onOpenColorSchemeFromToolbar() {
+  closeMoreMenu();
+  emit("openColorScheme");
+}
+
+function onToggleFindFromToolbar() {
+  closeMoreMenu();
+  emit("toggleFind");
 }
 
 function onOpenTextReplace() {
@@ -299,9 +318,23 @@ function onOpenTextReplace() {
       :min-width="120"
       :left="moreMenuLeft"
       :top="moreMenuTop"
+      caret="end"
       :fullscreen-header-float="inFullscreen"
       :on-panel-mount="bindMoreMenuPanel"
     >
+      <button
+        type="button"
+        class="appShellMenuItem"
+        role="menuitem"
+        @click="onToggleFindFromToolbar"
+      >
+        <span class="appShellMenuIconSlot" v-html="icons.find" />
+        <span class="appShellMenuLabel">查找</span>
+        <span v-if="findShortcutLabel" class="appShellMenuShortcut">{{
+          findShortcutLabel
+        }}</span>
+      </button>
+      <div class="appShellMenuDivider" role="separator" />
       <div v-if="showToolbarInMoreMenu" class="findBookReaderMorePanel">
         <HeaderFontToolbar
           v-if="compactFontToolbar"
@@ -360,6 +393,21 @@ function onOpenTextReplace() {
         <span class="appShellMenuLabel">设置</span>
         <span v-if="settingsShortcutLabel" class="appShellMenuShortcut">{{
           settingsShortcutLabel
+        }}</span>
+      </button>
+      <button
+        type="button"
+        class="appShellMenuItem"
+        role="menuitem"
+        @click="onOpenColorSchemeFromToolbar"
+      >
+        <span
+          class="appShellMenuIconSlot appShellMenuIconSlot--colorful"
+          v-html="icons.palette"
+        />
+        <span class="appShellMenuLabel">配色</span>
+        <span v-if="colorSchemeShortcutLabel" class="appShellMenuShortcut">{{
+          colorSchemeShortcutLabel
         }}</span>
       </button>
     </AppShellMenuTeleport>

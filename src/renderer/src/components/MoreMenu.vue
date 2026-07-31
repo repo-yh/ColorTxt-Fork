@@ -295,6 +295,7 @@ onBeforeUnmount(() => {
         <span class="appShellMenuLabel">找书（beta）</span>
         <span class="appShellMenuShortcut">{{ findBookShortcutLabel }}</span>
       </button>
+      <div class="appShellMenuDivider" role="separator"></div>
       <button class="appShellMenuItem" role="menuitem" @click="onCheckForUpdates">
         <span class="appShellMenuIconSlot" v-html="icons.update"></span>
         <span class="appShellMenuLabel">检查更新</span>

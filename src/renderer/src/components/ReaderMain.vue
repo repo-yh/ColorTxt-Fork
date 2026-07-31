@@ -99,6 +99,8 @@ import {
   defaultMonacoAdvancedWrapping,
   defaultMonacoCustomHighlight,
   defaultMonacoSmoothScrolling,
+  defaultMouseWheelScrollSensitivity,
+  defaultFastScrollSensitivity,
   defaultStickyChapterTitleEnabled,
   defaultReaderEditShowLineNumbers,
   defaultReaderEditMinimap,
@@ -320,6 +322,10 @@ const props = withDefaults(
     monacoAdvancedWrapping?: boolean;
     /** Monaco 平滑滚动（滚轮、revealLine、setScrollTop 等） */
     monacoSmoothScrolling?: boolean;
+    /** Monaco 滚轮滚动倍率 */
+    mouseWheelScrollSensitivity?: number;
+    /** Monaco 按住 Alt 时的滚轮加速倍率 */
+    fastScrollSensitivity?: number;
     /** 阅读区顶部粘性章节标题 */
     stickyChapterTitleEnabled?: boolean;
     /** 编辑模式下是否显示行号（只读模式始终关闭） */
@@ -395,6 +401,8 @@ const props = withDefaults(
     compressBlankLines: defaultCompressBlankLines,
     monacoAdvancedWrapping: defaultMonacoAdvancedWrapping,
     monacoSmoothScrolling: defaultMonacoSmoothScrolling,
+    mouseWheelScrollSensitivity: defaultMouseWheelScrollSensitivity,
+    fastScrollSensitivity: defaultFastScrollSensitivity,
     stickyChapterTitleEnabled: defaultStickyChapterTitleEnabled,
     readerEditShowLineNumbers: defaultReaderEditShowLineNumbers,
     readerEditMinimap: defaultReaderEditMinimap,
@@ -543,6 +551,8 @@ function getDiffEditorOptionsInput(): import("../monaco/readerEditorOptions").Re
     fontFamily: currentFontFamily,
     theme: readerMonacoThemeForAppTheme(lastAppThemeName),
     smoothScrolling: props.monacoSmoothScrolling,
+    mouseWheelScrollSensitivity: props.mouseWheelScrollSensitivity,
+    fastScrollSensitivity: props.fastScrollSensitivity,
     wrappingStrategyAdvanced: props.monacoAdvancedWrapping,
   };
 }
@@ -1138,6 +1148,20 @@ watch(
   () => props.monacoSmoothScrolling,
   (on) => {
     editor.value?.updateOptions({ smoothScrolling: on });
+  },
+);
+
+watch(
+  () =>
+    [
+      props.mouseWheelScrollSensitivity,
+      props.fastScrollSensitivity,
+    ] as const,
+  ([wheel, fast]) => {
+    editor.value?.updateOptions({
+      mouseWheelScrollSensitivity: wheel,
+      fastScrollSensitivity: fast,
+    });
   },
 );
 
@@ -2724,6 +2748,8 @@ onMounted(() => {
       theme: readerMonacoThemeForAppTheme(lastAppThemeName),
       wrappingStrategyAdvanced: props.monacoAdvancedWrapping,
       smoothScrolling: props.monacoSmoothScrolling,
+      mouseWheelScrollSensitivity: props.mouseWheelScrollSensitivity,
+      fastScrollSensitivity: props.fastScrollSensitivity,
       stickyChapterTitleEnabled: props.stickyChapterTitleEnabled,
     }),
   });

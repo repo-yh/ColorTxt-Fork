@@ -61,8 +61,10 @@ import { readActiveChatEndpoint } from "@shared/aiEndpointProfiles";
 import { attributeVoiceReadSpeakers } from "./ai/voiceReadSpeaker";
 import { registerVoiceReadIpcHandlers } from "./voiceRead/registerVoiceReadIpc";
 import { registerBookSourceIpcHandlers } from "./bookSource/registerBookSourceIpc";
+import { registerWebDavIpcHandlers } from "./webdav/registerWebDavIpc";
 import { createFindBookDesktopShortcut } from "./findBookLaunch";
 import {
+  focusOrOpenFindBookWindow,
   focusOrOpenMainReaderWindow,
   openTxtInMainWindow,
 } from "./openTxtInMainWindow";
@@ -74,6 +76,7 @@ function isTxtOrEbookFileName(fileName: string): boolean {
   const lower = fileName.toLowerCase();
   if (lower.endsWith(".txt")) return true;
   if (lower.endsWith(".md")) return true;
+  if (lower.endsWith(".ctz") || lower.endsWith(".ctzx")) return true;
   return EBOOK_DOT_EXTENSIONS.some((ext) => lower.endsWith(ext));
 }
 
@@ -352,7 +355,15 @@ export function registerMainIpcHandlers(
   });
 
   ipcMain.on("window:openFindBook", () => {
-    createWindow({ openFindBook: true });
+    focusOrOpenFindBookWindow({
+      createWindow,
+      findBookWindowByWindowId,
+    });
+  });
+
+  /** 始终新建找书窗（默认书架），用于找书「更多 → 新窗口」 */
+  ipcMain.on("window:newFindBook", () => {
+    createWindow({ openFindBook: true, findBookInitialTab: "bookshelf" });
   });
 
   ipcMain.handle("findBook:createDesktopShortcut", async () => {
@@ -1047,4 +1058,5 @@ function unknownQuoteAttributions(
   registerBookSourceIpcHandlers();
   registerSecretsIpcHandlers();
   registerTextConvertIpcHandlers();
+  registerWebDavIpcHandlers();
 }

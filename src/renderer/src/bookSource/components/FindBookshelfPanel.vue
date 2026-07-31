@@ -88,6 +88,7 @@ const rowMenu = useAnchoredAppShellMenu({
   anchor: rowMenuAnchor,
   placement: "below-end",
   widthPx: 168,
+  gap: 6,
 });
 const {
   open: rowMenuOpen,
@@ -645,6 +646,9 @@ defineExpose({ refresh, updateAll, enterManage, exitManage });
           :updating="isUpdating(item)"
           :managing="managing"
           :selected="isSelected(item)"
+          :more-menu-open="
+            rowMenuOpen && rowMenuItem?.id === item.id
+          "
           @click="(book, ev) => onItemClick(book, index, ev)"
           @cover-error="onCoverError"
           @more="onRowMoreClick"
@@ -695,8 +699,12 @@ defineExpose({ refresh, updateAll, enterManage, exitManage });
         <div ref="footerMoreBtnRef" class="findBookshelfFooterMoreWrap">
           <IconButton
             :icon-html="icons.more"
+            :active="footerMoreOpen"
+            :pressed="footerMoreOpen"
             title="更多"
             aria-label="更多"
+            aria-haspopup="menu"
+            :aria-expanded="footerMoreOpen"
             @click="toggleFooterMoreMenu"
           />
           <AppShellMenuTeleport
@@ -752,6 +760,7 @@ defineExpose({ refresh, updateAll, enterManage, exitManage });
       v-model:open="rowMenuOpen"
       :left="rowMenuLeft"
       :top="rowMenuTop"
+      caret="end"
       panel-class="findBookshelfRowMenu"
       :on-panel-mount="bindRowMenuPanel"
     >

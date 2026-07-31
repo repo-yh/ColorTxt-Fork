@@ -112,6 +112,7 @@ const sourceMoreMenu = useAnchoredAppShellMenu({
   anchor: sourceMoreBtnRef,
   placement: "below-end",
   widthPx: 160,
+  gap: 6,
 });
 const {
   open: sourceMoreOpen,
@@ -767,9 +768,20 @@ defineExpose({ refreshSources });
                       :icon-html="icons.more"
                       title="更多"
                       aria-label="更多"
+                      aria-haspopup="menu"
+                      :aria-expanded="
+                        sourceMoreOpen &&
+                        sourceMoreItem?.bookSourceUrl === source.bookSourceUrl
+                      "
                       class="findDiscoverSourceBtn"
-                      :active="sourceMoreOpen && sourceMoreItem?.bookSourceUrl === source.bookSourceUrl"
-                      :pressed="sourceMoreOpen && sourceMoreItem?.bookSourceUrl === source.bookSourceUrl"
+                      :active="
+                        sourceMoreOpen &&
+                        sourceMoreItem?.bookSourceUrl === source.bookSourceUrl
+                      "
+                      :pressed="
+                        sourceMoreOpen &&
+                        sourceMoreItem?.bookSourceUrl === source.bookSourceUrl
+                      "
                       @click.stop="onSourceMoreClick(source, $event)"
                     />
                   </div>
@@ -832,6 +844,7 @@ defineExpose({ refreshSources });
       v-model:open="sourceMoreOpen"
       :left="sourceMoreLeft"
       :top="sourceMoreTop"
+      caret="end"
       :on-panel-mount="bindSourceMorePanel"
     >
       <button
@@ -982,7 +995,8 @@ defineExpose({ refreshSources });
   height: 26px;
   background: transparent !important;
 }
-.findDiscoverSourceBtn:hover :deep(.icon) {
+.findDiscoverSourceBtn:hover :deep(.icon),
+.findDiscoverSourceBtn.active :deep(.icon) {
   color: var(--accent) !important;
 }
 .findDiscoverSourceBtn--warning :deep(.icon),

@@ -11,6 +11,10 @@ import {
   minFontSize,
   minFullscreenReaderWidthPercent,
   minLineHeightMultiple,
+  minMouseWheelScrollSensitivity,
+  maxMouseWheelScrollSensitivity,
+  minFastScrollSensitivity,
+  maxFastScrollSensitivity,
 } from "../constants/appUi";
 import {
   TIMED_SCROLL_RANGE_OPTIONS,
@@ -29,6 +33,8 @@ const props = defineProps<{
   draftFontSize: number;
   draftLineHeightMultiple: number;
   draftMonacoSmoothScrolling: boolean;
+  draftMouseWheelScrollSensitivity: number;
+  draftFastScrollSensitivity: number;
   draftStickyChapterTitleEnabled: boolean;
   draftChapterNavToolbarEnabled: boolean;
   draftCompressBlankKeepOneBlank: boolean;
@@ -48,6 +54,8 @@ defineEmits<{
   "update:draftFontSize": [v: number];
   "update:draftLineHeightMultiple": [v: number];
   "update:draftMonacoSmoothScrolling": [v: boolean];
+  "update:draftMouseWheelScrollSensitivity": [v: number];
+  "update:draftFastScrollSensitivity": [v: number];
   "update:draftStickyChapterTitleEnabled": [v: boolean];
   "update:draftChapterNavToolbarEnabled": [v: boolean];
   "update:draftCompressBlankKeepOneBlank": [v: boolean];
@@ -166,6 +174,10 @@ const draftMaxLineHeightMultiple = computed(() =>
           在阅读区底部显示「上一章 / 下一章」快捷跳转；仅一章或无章节时不显示。
         </p>
       </div>
+    </div>
+
+    <div class="settingsBody settingsBody--scroll">
+      <h3 class="settingsSectionTitle settingsSectionTitle--scroll">滚动</h3>
 
       <div class="settingsRow">
         <div class="settingsRowMain">
@@ -179,6 +191,38 @@ const draftMaxLineHeightMultiple = computed(() =>
           />
         </div>
         <p class="settingsHint">关闭后，阅读区滚动不再使用平滑动画。</p>
+      </div>
+
+      <div class="settingsRow">
+        <div class="settingsRowMain settingsRowMain--baseline">
+          <span class="settingsLabel">滚动倍率</span>
+          <NumericInput
+            :model-value="draftMouseWheelScrollSensitivity"
+            :min="minMouseWheelScrollSensitivity"
+            :max="maxMouseWheelScrollSensitivity"
+            aria-label="滚动倍率"
+            @update:model-value="
+              $emit('update:draftMouseWheelScrollSensitivity', $event)
+            "
+          />
+        </div>
+        <p class="settingsHint">滚轮每次滚动的距离倍率（默认 1）。</p>
+      </div>
+
+      <div class="settingsRow">
+        <div class="settingsRowMain settingsRowMain--baseline">
+          <span class="settingsLabel">滚动加速倍率</span>
+          <NumericInput
+            :model-value="draftFastScrollSensitivity"
+            :min="minFastScrollSensitivity"
+            :max="maxFastScrollSensitivity"
+            aria-label="滚动加速倍率"
+            @update:model-value="
+              $emit('update:draftFastScrollSensitivity', $event)
+            "
+          />
+        </div>
+        <p class="settingsHint">按住 <code>Alt</code> 时的加速倍率（默认 5）。</p>
       </div>
     </div>
 
@@ -385,12 +429,14 @@ const draftMaxLineHeightMultiple = computed(() =>
   color: var(--muted);
 }
 
+.settingsBody--scroll,
 .settingsBody--fullscreen,
 .settingsBody--pomodoro,
 .settingsBody--timedScroll {
   gap: 10px;
 }
 
+.settingsSectionTitle--scroll,
 .settingsSectionTitle--fullscreen,
 .settingsSectionTitle--pomodoro,
 .settingsSectionTitle--timedScroll {

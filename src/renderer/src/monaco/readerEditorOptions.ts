@@ -82,6 +82,10 @@ export type ReaderEditorCreateOptionsInput = {
   wrappingStrategyAdvanced?: boolean;
   /** Monaco `smoothScrolling`；与设置「平滑滚动」一致 */
   smoothScrolling?: boolean;
+  /** Monaco `mouseWheelScrollSensitivity`；与设置「滚动倍率」一致 */
+  mouseWheelScrollSensitivity?: number;
+  /** Monaco `fastScrollSensitivity`；与设置「滚动加速倍率」一致 */
+  fastScrollSensitivity?: number;
   /** Monaco `stickyScroll`；与设置「启用粘性章节标题」一致 */
   stickyChapterTitleEnabled?: boolean;
 };
@@ -100,6 +104,8 @@ export function buildReaderEditorSharedCoreOptions(
   | "fontFamily"
   | "automaticLayout"
   | "smoothScrolling"
+  | "mouseWheelScrollSensitivity"
+  | "fastScrollSensitivity"
   | "wrappingStrategy"
   | "stickyScroll"
   | "lineNumbers"
@@ -123,6 +129,8 @@ export function buildReaderEditorSharedCoreOptions(
     theme = "txtr-reader",
     wrappingStrategyAdvanced = false,
     smoothScrolling = true,
+    mouseWheelScrollSensitivity = 1,
+    fastScrollSensitivity = 5,
     stickyChapterTitleEnabled = true,
   } = input;
 
@@ -133,6 +141,8 @@ export function buildReaderEditorSharedCoreOptions(
     fontFamily,
     automaticLayout: true,
     smoothScrolling,
+    mouseWheelScrollSensitivity,
+    fastScrollSensitivity,
     wrappingStrategy: wrappingStrategyAdvanced ? "advanced" : "simple",
     stickyScroll: {
       enabled: stickyChapterTitleEnabled,

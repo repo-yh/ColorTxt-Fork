@@ -12,5 +12,6 @@ export const EBOOK_DOT_EXTENSIONS = [
 export function isSupportedShellOpenPath(filePath: string): boolean {
   const lower = filePath.trim().toLowerCase();
   if (lower.endsWith(".txt") || lower.endsWith(".md")) return true;
+  if (lower.endsWith(".ctz") || lower.endsWith(".ctzx")) return true;
   return EBOOK_DOT_EXTENSIONS.some((ext) => lower.endsWith(ext));
 }

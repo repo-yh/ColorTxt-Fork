@@ -7,6 +7,8 @@ export const SECRET_SLOT_AI_CHAT_PROFILE_KEYS = "ai.chatProfileKeys";
 export const SECRET_SLOT_AI_TXT2IMG_PROFILE_KEYS = "ai.txt2imgProfileKeys";
 /** 语音朗读配置方案密钥映射（JSON：profileId → { dashscopeApiKey?, minimaxApiKey?, mimoApiKey? }） */
 export const SECRET_SLOT_VOICE_READ_PROFILE_KEYS = "voiceRead.profileKeys";
+/** WebDAV 密码 */
+export const SECRET_SLOT_WEBDAV_PASSWORD = "webdav.password";
 
 /** 已废弃：仅启动迁移时读取一次，写入后从磁盘清除 */
 export const DEPRECATED_SECRET_SLOT_AI_CHAT_API_KEY = "ai.chat.apiKey";
@@ -26,13 +28,15 @@ export type SecretSlotId =
   | typeof SECRET_SLOT_AI_EMBEDDING_API_KEY
   | typeof SECRET_SLOT_AI_CHAT_PROFILE_KEYS
   | typeof SECRET_SLOT_AI_TXT2IMG_PROFILE_KEYS
-  | typeof SECRET_SLOT_VOICE_READ_PROFILE_KEYS;
+  | typeof SECRET_SLOT_VOICE_READ_PROFILE_KEYS
+  | typeof SECRET_SLOT_WEBDAV_PASSWORD;
 
 export const ALL_SECRET_SLOT_IDS: readonly SecretSlotId[] = [
   SECRET_SLOT_AI_EMBEDDING_API_KEY,
   SECRET_SLOT_AI_CHAT_PROFILE_KEYS,
   SECRET_SLOT_AI_TXT2IMG_PROFILE_KEYS,
   SECRET_SLOT_VOICE_READ_PROFILE_KEYS,
+  SECRET_SLOT_WEBDAV_PASSWORD,
 ];
 
 export function isDeprecatedSecretSlot(

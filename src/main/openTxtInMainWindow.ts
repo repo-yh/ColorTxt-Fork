@@ -14,6 +14,15 @@ export function listMainReaderWindows(
   );
 }
 
+/** 找书窗口列表 */
+export function listFindBookWindows(
+  findBookWindowByWindowId: Map<number, boolean>,
+): BrowserWindow[] {
+  return BrowserWindow.getAllWindows().filter(
+    (w) => !w.isDestroyed() && findBookWindowByWindowId.get(w.id) === true,
+  );
+}
+
 function pickPreferredMainWindow(
   mains: BrowserWindow[],
   mainWindowFocusState: { lastId: number | null },
@@ -22,6 +31,14 @@ function pickPreferredMainWindow(
     ? mains.find((w) => w.id === mainWindowFocusState.lastId)
     : undefined;
   return preferred ?? mains[mains.length - 1]!;
+}
+
+function pickPreferredFindBookWindow(findBooks: BrowserWindow[]): BrowserWindow {
+  const focused = BrowserWindow.getFocusedWindow();
+  if (focused && findBooks.some((w) => w.id === focused.id)) {
+    return focused;
+  }
+  return findBooks[findBooks.length - 1]!;
 }
 
 /** 聚焦已有主窗口；若无则新建 */
@@ -42,6 +59,23 @@ export function focusOrOpenMainReaderWindow(options: {
   target.show();
   target.focus();
   mainWindowFocusState.lastId = target.id;
+}
+
+/** 聚焦已有找书窗口；若无则新建 */
+export function focusOrOpenFindBookWindow(options: {
+  createWindow: CreateMainWindow;
+  findBookWindowByWindowId: Map<number, boolean>;
+}): void {
+  const { createWindow, findBookWindowByWindowId } = options;
+  const findBooks = listFindBookWindows(findBookWindowByWindowId);
+  if (findBooks.length === 0) {
+    createWindow({ openFindBook: true });
+    return;
+  }
+  const target = pickPreferredFindBookWindow(findBooks);
+  if (target.isMinimized()) target.restore();
+  target.show();
+  target.focus();
 }
 
 /** 在主阅读窗口打开 txt；无主窗口时新建并带上路径 */

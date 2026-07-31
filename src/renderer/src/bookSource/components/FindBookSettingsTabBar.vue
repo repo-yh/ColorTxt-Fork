@@ -1,5 +1,13 @@
 <script setup lang="ts">
-export type FindBookSettingsTabId = "download" | "reading" | "edit" | "proxy";
+import ScrollableTabNav from "../../components/ScrollableTabNav.vue";
+
+export type FindBookSettingsTabId =
+  | "download"
+  | "reading"
+  | "edit"
+  | "voiceRead"
+  | "proxy"
+  | "webDav";
 
 defineProps<{
   activeTab: FindBookSettingsTabId;
@@ -12,48 +20,70 @@ const emit = defineEmits<{
 
 <template>
   <div class="settingsTabBar" role="tablist" aria-label="找书设置分类">
-    <div class="tabs">
-      <button
-        type="button"
-        role="tab"
-        class="tabBtn"
-        :class="{ active: activeTab === 'download' }"
-        :aria-selected="activeTab === 'download'"
-        @click="emit('update:activeTab', 'download')"
-      >
-        下载
-      </button>
-      <button
-        type="button"
-        role="tab"
-        class="tabBtn"
-        :class="{ active: activeTab === 'reading' }"
-        :aria-selected="activeTab === 'reading'"
-        @click="emit('update:activeTab', 'reading')"
-      >
-        阅读
-      </button>
-      <button
-        type="button"
-        role="tab"
-        class="tabBtn"
-        :class="{ active: activeTab === 'edit' }"
-        :aria-selected="activeTab === 'edit'"
-        @click="emit('update:activeTab', 'edit')"
-      >
-        编辑
-      </button>
-      <button
-        type="button"
-        role="tab"
-        class="tabBtn"
-        :class="{ active: activeTab === 'proxy' }"
-        :aria-selected="activeTab === 'proxy'"
-        @click="emit('update:activeTab', 'proxy')"
-      >
-        代理
-      </button>
-    </div>
+    <ScrollableTabNav :active-key="activeTab">
+      <div class="tabs">
+        <button
+          type="button"
+          role="tab"
+          class="tabBtn"
+          :class="{ active: activeTab === 'download' }"
+          :aria-selected="activeTab === 'download'"
+          @click="emit('update:activeTab', 'download')"
+        >
+          下载
+        </button>
+        <button
+          type="button"
+          role="tab"
+          class="tabBtn"
+          :class="{ active: activeTab === 'reading' }"
+          :aria-selected="activeTab === 'reading'"
+          @click="emit('update:activeTab', 'reading')"
+        >
+          阅读
+        </button>
+        <button
+          type="button"
+          role="tab"
+          class="tabBtn"
+          :class="{ active: activeTab === 'edit' }"
+          :aria-selected="activeTab === 'edit'"
+          @click="emit('update:activeTab', 'edit')"
+        >
+          编辑
+        </button>
+        <button
+          type="button"
+          role="tab"
+          class="tabBtn"
+          :class="{ active: activeTab === 'voiceRead' }"
+          :aria-selected="activeTab === 'voiceRead'"
+          @click="emit('update:activeTab', 'voiceRead')"
+        >
+          语音朗读
+        </button>
+        <button
+          type="button"
+          role="tab"
+          class="tabBtn"
+          :class="{ active: activeTab === 'proxy' }"
+          :aria-selected="activeTab === 'proxy'"
+          @click="emit('update:activeTab', 'proxy')"
+        >
+          代理
+        </button>
+        <button
+          type="button"
+          role="tab"
+          class="tabBtn"
+          :class="{ active: activeTab === 'webDav' }"
+          :aria-selected="activeTab === 'webDav'"
+          @click="emit('update:activeTab', 'webDav')"
+        >
+          WebDAV
+        </button>
+      </div>
+    </ScrollableTabNav>
   </div>
 </template>
 
@@ -62,6 +92,7 @@ const emit = defineEmits<{
   flex-shrink: 0;
   margin-bottom: 0;
   border-bottom: 1px solid var(--border);
+  min-width: 0;
 }
 
 .tabs {

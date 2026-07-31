@@ -22,7 +22,9 @@ import {
   newEmptyBookSource,
   useBookSourceApi,
 } from "../composables/useBookSource";
-import type { BookSourceListItem } from "@shared/bookSource/types";
+import type {
+  BookSourceListItem,
+} from "@shared/bookSource/types";
 import type { BookSourceCheckEvent } from "@shared/bookSource/ipc";
 import { appConfirm, appPrompt } from "../../services/appDialog";
 import { appToast } from "../../services/appToast";
@@ -81,6 +83,7 @@ const headerMoreMenu = useAnchoredAppShellMenu({
   anchor: headerMoreBtnRef,
   placement: "below-end",
   widthPx: 200,
+  gap: 6,
 });
 const {
   open: headerMoreOpen,
@@ -112,6 +115,7 @@ const rowMenu = useAnchoredAppShellMenu({
   anchor: rowMenuAnchor,
   placement: "below-end",
   widthPx: 168,
+  gap: 6,
 });
 const {
   open: rowMenuOpen,
@@ -278,6 +282,10 @@ async function refreshAndNotify() {
   await refresh();
   emit("sourcesChanged");
 }
+
+defineExpose({
+  refreshLibrary: refreshAndNotify,
+});
 
 function notifySourcesChanged() {
   emit("sourcesChanged");
@@ -670,7 +678,7 @@ async function onClipboardImport() {
   showImport.value = true;
 }
 
-function onImportDone() {
+async function onImportDone() {
   showImport.value = false;
   focusList();
   void refreshAndNotify();
@@ -751,14 +759,19 @@ function onEditDone() {
         <div ref="headerMoreBtnRef" class="bsMoreWrap">
           <IconButton
             :icon-html="icons.more"
+            :active="headerMoreOpen"
+            :pressed="headerMoreOpen"
             title="更多"
             aria-label="更多"
+            aria-haspopup="menu"
+            :aria-expanded="headerMoreOpen"
             @click="toggleHeaderMoreMenu"
           />
           <AppShellMenuTeleport
             v-model:open="headerMoreOpen"
             :left="headerMoreLeft"
             :top="headerMoreTop"
+            caret="end"
             :on-panel-mount="bindHeaderMorePanel"
           >
             <button type="button" class="appShellMenuItem" @click="onNewSource">
@@ -856,6 +869,19 @@ function onEditDone() {
                   :icon-html="icons.more"
                   title="更多"
                   aria-label="更多"
+                  aria-haspopup="menu"
+                  :aria-expanded="
+                    rowMenuOpen &&
+                    rowMenuItem?.bookSourceUrl === item.bookSourceUrl
+                  "
+                  :active="
+                    rowMenuOpen &&
+                    rowMenuItem?.bookSourceUrl === item.bookSourceUrl
+                  "
+                  :pressed="
+                    rowMenuOpen &&
+                    rowMenuItem?.bookSourceUrl === item.bookSourceUrl
+                  "
                   @click="onRowMoreClick(item, $event)"
                 />
                 <span
@@ -875,6 +901,7 @@ function onEditDone() {
       v-model:open="rowMenuOpen"
       :left="rowMenuLeft"
       :top="rowMenuTop"
+      caret="end"
       :on-panel-mount="bindRowMenuPanel"
     >
       <button type="button" class="appShellMenuItem" @click="onRowMenuTop">
@@ -926,10 +953,10 @@ function onEditDone() {
             </template>
           </AppCheckbox>
           <div class="bsFooterActions">
-            <button type="button" class="btn bsFooterBtn" size="large" @click="invertSelect">反选</button>
+            <button type="button" class="btn" size="large" @click="invertSelect">反选</button>
             <button
               type="button"
-              class="btn danger bsFooterBtn"
+              class="btn danger"
               size="large"
               :disabled="!selectedCount"
               @click="onDelete"
@@ -939,8 +966,12 @@ function onEditDone() {
             <div ref="footerMoreBtnRef" class="bsFooterMoreWrap">
               <IconButton
                 :icon-html="icons.more"
+                :active="footerMoreOpen"
+                :pressed="footerMoreOpen"
                 title="更多"
                 aria-label="更多"
+                aria-haspopup="menu"
+                :aria-expanded="footerMoreOpen"
                 @click="toggleFooterMoreMenu"
               />
               <AppShellMenuTeleport
@@ -1301,10 +1332,6 @@ function onEditDone() {
   display: flex;
   align-items: center;
   gap: 8px;
-}
-.bsFooterBtn {
-  justify-content: center;
-  line-height: 1;
 }
 .bsFooterMoreWrap {
   position: relative;

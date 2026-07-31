@@ -334,18 +334,18 @@ function onCancel() {
           </template>
         </AppCheckbox>
         <div class="bsFooterActions">
-          <button type="button" class="btn bsFooterBtn" size="large" @click="selectNew">
+          <button type="button" class="btn" size="large" @click="selectNew">
             选中新增
           </button>
-          <button type="button" class="btn bsFooterBtn" size="large" @click="selectUpdate">
+          <button type="button" class="btn" size="large" @click="selectUpdate">
             选中更新
           </button>
-          <button type="button" class="btn bsFooterBtn" size="large" @click="onCancel">
+          <button type="button" class="btn" size="large" @click="onCancel">
             取消
           </button>
           <button
             type="button"
-            class="btn primary bsFooterBtn"
+            class="btn primary"
             size="large"
             :disabled="!selectedCount"
             @click="onConfirm"
@@ -492,9 +492,5 @@ function onCancel() {
   align-items: center;
   flex-wrap: wrap;
   gap: 8px;
-}
-.bsFooterBtn {
-  justify-content: center;
-  line-height: 1;
 }
 </style>

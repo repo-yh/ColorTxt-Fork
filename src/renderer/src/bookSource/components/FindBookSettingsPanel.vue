@@ -1,29 +1,39 @@
 <script setup lang="ts">
-import { ref, watch } from "vue";
+import { nextTick, ref, useTemplateRef, watch } from "vue";
 import AppModal from "../../components/AppModal.vue";
 import SettingsReadingPanel from "../../components/SettingsReadingPanel.vue";
+import SettingsEditPanel from "../../components/SettingsEditPanel.vue";
+import SettingsVoiceReadPanel from "../../components/SettingsVoiceReadPanel.vue";
 import FindBookSettingsTabBar, {
   type FindBookSettingsTabId,
 } from "./FindBookSettingsTabBar.vue";
 import FindBookSettingsDownloadPanel from "./FindBookSettingsDownloadPanel.vue";
-import FindBookSettingsEditPanel from "./FindBookSettingsEditPanel.vue";
 import FindBookSettingsProxyPanel from "./FindBookSettingsProxyPanel.vue";
+import SettingsWebDavPanel from "../../components/SettingsWebDavPanel.vue";
 import {
   clampFindBookReaderLineHeight,
   defaultTimedScrollIntervalMs,
   defaultTimedScrollRange,
+  loadMainSettingsData,
+  patchPersistedMainSettings,
 } from "../services/findBookSettingsStore";
 import {
   defaultCompressBlankKeepOneBlank,
   defaultFullscreenReaderWidthPercent,
   defaultFullscreenShowSystemTime,
   defaultMonacoSmoothScrolling,
+  defaultMouseWheelScrollSensitivity,
+  defaultFastScrollSensitivity,
+  clampMouseWheelScrollSensitivity,
+  clampFastScrollSensitivity,
   defaultReaderEditMinimap,
   defaultReaderEditShowLineNumbers,
   defaultReaderFontSize,
   defaultReaderLineHeightMultiple,
   defaultStickyChapterTitleEnabled,
   defaultTxtrDelimitedMatchCrossLine,
+  defaultChapterNavToolbarEnabled,
+  maxLineHeightMultipleForFontSize,
 } from "../../constants/appUi";
 import { mergeTimedScrollSettings } from "../../constants/timedScroll";
 import type { TimedScrollRange } from "../../constants/timedScroll";
@@ -34,12 +44,36 @@ import {
   defaultPomodoroShortBreakMinutes,
   mergePomodoroSettings,
 } from "../../constants/pomodoro";
+import {
+  mergeVoiceReadSettings,
+  voiceReadDashScopeRequiresApiKey,
+  type VoiceReadSettings,
+} from "../../constants/voiceRead";
+import type { VoiceReadProfile } from "@shared/voiceReadProfiles";
+import {
+  mergeVoiceReadProfileSecretsForSave,
+  stripVoiceReadProfileApiKeysForDisk,
+  stripVoiceReadSettingsApiKeysForDisk,
+} from "@shared/voiceReadProfiles";
+import {
+  parseProfileSecretsBlob,
+  serializeProfileSecretsBlob,
+} from "@shared/voiceReadEngineConfig";
+import {
+  cloneVoiceReadProfiles,
+  mergeVoiceReadProfilesForPersist,
+  migrateVoiceReadFromPersisted,
+  normalizeVoiceReadProfilesForSave,
+  type PersistedVoiceReadRaw,
+} from "../../services/voiceRead/voiceReadProfileState";
+import { hydrateVoiceReadProfilesWithSecrets } from "../../services/voiceRead/voiceReadSecretsHydration";
+import { settingsPersistValuesEqual } from "../../services/settingsPersistMerge";
 import { useFindBookSettings } from "../composables/useFindBookSettings";
+import { useFindBookReaderSettings } from "../composables/useFindBookReaderSettings";
 import {
   DEFAULT_FIND_BOOK_DOWNLOAD_AFTER_ACTION,
   DEFAULT_FIND_BOOK_DOWNLOAD_CATEGORY,
   DEFAULT_FIND_BOOK_PROXY_SETTINGS,
-  defaultFindBookChapterNavToolbarEnabled,
   type FindBookDownloadAfterAction,
   type FindBookProxyType,
 } from "../constants/findBookSettings";
@@ -48,7 +82,16 @@ import {
   resolveDefaultBookSourceDownloadDirSync,
 } from "../../utils/defaultCacheDirs";
 import { confirmClearAllChapterCache } from "../services/clearBookChapterCache";
+import { appAlert } from "../../services/appDialog";
+import type { CharacterRosterEntry } from "@shared/characterTypes";
 import "../../styles/settingsPanel.css";
+
+type SettingsVoiceReadPanelExpose = {
+  cancelPreview?: () => void;
+  finalizeVoiceReadProfiles?: () => void;
+  initVoiceReadProfiles?: () => void;
+  resetCurrentVoiceReadProfile?: () => void;
+};
 
 const modelValue = defineModel<boolean>({ default: false });
 
@@ -64,7 +107,10 @@ const emit = defineEmits<{
 }>();
 
 const fb = useFindBookSettings();
+const fbReaderSettings = useFindBookReaderSettings();
 const activeTab = ref<FindBookSettingsTabId>("download");
+const voiceReadPanelRef =
+  useTemplateRef<SettingsVoiceReadPanelExpose>("voiceReadPanelRef");
 
 const draftCacheDir = ref("");
 const draftDownloadDir = ref("");
@@ -79,11 +125,20 @@ const draftProxyHost = ref(DEFAULT_FIND_BOOK_PROXY_SETTINGS.host);
 const draftProxyPort = ref(DEFAULT_FIND_BOOK_PROXY_SETTINGS.port);
 const draftProxyUsername = ref(DEFAULT_FIND_BOOK_PROXY_SETTINGS.username);
 const draftProxyPassword = ref(DEFAULT_FIND_BOOK_PROXY_SETTINGS.password);
+const draftWebDavEnabled = ref(false);
+const draftWebDavUrl = ref("");
+const draftWebDavUsername = ref("");
+const draftWebDavPassword = ref("");
+const draftWebDavRemoteDir = ref("ColorTxt");
 const draftFontSize = ref(defaultReaderFontSize);
 const draftLineHeightMultiple = ref(defaultReaderLineHeightMultiple);
 const draftMonacoSmoothScrolling = ref(defaultMonacoSmoothScrolling);
+const draftMouseWheelScrollSensitivity = ref(
+  defaultMouseWheelScrollSensitivity,
+);
+const draftFastScrollSensitivity = ref(defaultFastScrollSensitivity);
 const draftStickyChapterTitleEnabled = ref(defaultStickyChapterTitleEnabled);
-const draftChapterNavToolbarEnabled = ref(defaultFindBookChapterNavToolbarEnabled);
+const draftChapterNavToolbarEnabled = ref(defaultChapterNavToolbarEnabled);
 const draftReaderEditShowLineNumbers = ref(defaultReaderEditShowLineNumbers);
 const draftReaderEditMinimap = ref(defaultReaderEditMinimap);
 const draftCompressBlankKeepOneBlank = ref(defaultCompressBlankKeepOneBlank);
@@ -96,8 +151,13 @@ const draftPomodoroShortBreakMinutes = ref(defaultPomodoroShortBreakMinutes);
 const draftPomodoroLongBreakMinutes = ref(defaultPomodoroLongBreakMinutes);
 const draftTimedScrollRange = ref<TimedScrollRange>(defaultTimedScrollRange);
 const draftTimedScrollIntervalMs = ref(defaultTimedScrollIntervalMs);
+const draftVoiceRead = ref<VoiceReadSettings>(mergeVoiceReadSettings(undefined));
+const draftVoiceReadProfiles = ref<VoiceReadProfile[]>([]);
+const draftActiveVoiceReadProfileId = ref("");
+const draftAiEnabled = ref(false);
+const emptyCharacterRoster: CharacterRosterEntry[] = [];
 
-function syncDraftFromStore() {
+function syncFindBookOnlyDraftFromStore() {
   draftCacheDir.value = fb.cacheDir.value;
   draftDownloadDir.value = fb.downloadDir.value;
   draftDownloadAfterAction.value = fb.downloadAfterAction.value;
@@ -109,12 +169,43 @@ function syncDraftFromStore() {
   draftProxyPort.value = fb.proxy.value.port;
   draftProxyUsername.value = fb.proxy.value.username;
   draftProxyPassword.value = fb.proxy.value.password;
+}
+
+function syncWebDavDraftFromMainSettings() {
+  const main = loadMainSettingsData();
+  draftWebDavEnabled.value = main.webDavEnabled === true;
+  draftWebDavUrl.value =
+    typeof main.webDavUrl === "string" ? main.webDavUrl : "";
+  draftWebDavUsername.value =
+    typeof main.webDavUsername === "string" ? main.webDavUsername : "";
+  draftWebDavRemoteDir.value =
+    typeof main.webDavRemoteDir === "string" && main.webDavRemoteDir.trim()
+      ? main.webDavRemoteDir.trim()
+      : "ColorTxt";
+}
+
+async function loadWebDavPasswordDraft() {
+  try {
+    const r = await window.colorTxt.secrets.getWebDavPassword();
+    draftWebDavPassword.value = r.password ?? "";
+  } catch {
+    draftWebDavPassword.value = "";
+  }
+}
+
+function syncSharedReaderDraftFromStore() {
   draftFontSize.value = fb.readerFontSize.value;
   draftLineHeightMultiple.value = clampFindBookReaderLineHeight(
     fb.readerFontSize.value,
     fb.readerLineHeightMultiple.value,
   );
   draftMonacoSmoothScrolling.value = fb.monacoSmoothScrolling.value;
+  draftMouseWheelScrollSensitivity.value = clampMouseWheelScrollSensitivity(
+    fb.mouseWheelScrollSensitivity.value,
+  );
+  draftFastScrollSensitivity.value = clampFastScrollSensitivity(
+    fb.fastScrollSensitivity.value,
+  );
   draftStickyChapterTitleEnabled.value = fb.stickyChapterTitleEnabled.value;
   draftChapterNavToolbarEnabled.value = fb.chapterNavToolbarEnabled.value;
   draftReaderEditShowLineNumbers.value = fb.readerEditShowLineNumbers.value;
@@ -131,6 +222,34 @@ function syncDraftFromStore() {
   const timedScrollMerged = mergeTimedScrollSettings(fb.timedScrollSettings.value);
   draftTimedScrollRange.value = timedScrollMerged.range;
   draftTimedScrollIntervalMs.value = timedScrollMerged.intervalMs;
+}
+
+async function syncVoiceDraftFromStore() {
+  draftVoiceReadProfiles.value = cloneVoiceReadProfiles(
+    fbReaderSettings.voiceReadProfiles.value,
+  );
+  draftActiveVoiceReadProfileId.value =
+    fbReaderSettings.activeVoiceReadProfileId.value;
+  draftVoiceRead.value = mergeVoiceReadSettings(
+    fbReaderSettings.voiceReadSettings.value,
+  );
+  try {
+    const c = await window.colorTxt.ai.configGet();
+    draftAiEnabled.value = c.aiEnabled === true;
+  } catch {
+    draftAiEnabled.value = false;
+  }
+}
+
+async function syncAllDraftsFromStores() {
+  // 阅读/编辑/语音均用本窗内存（与多主窗口一致）
+  syncFindBookOnlyDraftFromStore();
+  syncSharedReaderDraftFromStore();
+  syncWebDavDraftFromMainSettings();
+  await loadWebDavPasswordDraft();
+  await syncVoiceDraftFromStore();
+  await nextTick();
+  voiceReadPanelRef.value?.initVoiceReadProfiles?.();
 }
 
 function resetDownloadDraft() {
@@ -150,12 +269,22 @@ function resetProxyDraft() {
   draftProxyPassword.value = DEFAULT_FIND_BOOK_PROXY_SETTINGS.password;
 }
 
+function resetWebDavDraft() {
+  draftWebDavEnabled.value = false;
+  draftWebDavUrl.value = "";
+  draftWebDavUsername.value = "";
+  draftWebDavPassword.value = "";
+  draftWebDavRemoteDir.value = "ColorTxt";
+}
+
 function resetReadingDraft() {
   draftFontSize.value = defaultReaderFontSize;
   draftLineHeightMultiple.value = defaultReaderLineHeightMultiple;
   draftMonacoSmoothScrolling.value = defaultMonacoSmoothScrolling;
+  draftMouseWheelScrollSensitivity.value = defaultMouseWheelScrollSensitivity;
+  draftFastScrollSensitivity.value = defaultFastScrollSensitivity;
   draftStickyChapterTitleEnabled.value = defaultStickyChapterTitleEnabled;
-  draftChapterNavToolbarEnabled.value = defaultFindBookChapterNavToolbarEnabled;
+  draftChapterNavToolbarEnabled.value = defaultChapterNavToolbarEnabled;
   draftCompressBlankKeepOneBlank.value = defaultCompressBlankKeepOneBlank;
   draftTxtrDelimitedMatchCrossLine.value = defaultTxtrDelimitedMatchCrossLine;
   draftFullscreenReaderWidthPercent.value = defaultFullscreenReaderWidthPercent;
@@ -173,18 +302,122 @@ function resetEditDraft() {
   draftReaderEditMinimap.value = defaultReaderEditMinimap;
 }
 
+function resetVoiceReadDraft() {
+  voiceReadPanelRef.value?.resetCurrentVoiceReadProfile?.();
+}
+
 function onResetCurrentTab() {
   if (activeTab.value === "download") resetDownloadDraft();
   else if (activeTab.value === "edit") resetEditDraft();
   else if (activeTab.value === "proxy") resetProxyDraft();
+  else if (activeTab.value === "webDav") resetWebDavDraft();
+  else if (activeTab.value === "voiceRead") resetVoiceReadDraft();
   else resetReadingDraft();
 }
 
 function onCancel() {
+  voiceReadPanelRef.value?.cancelPreview?.();
   modelValue.value = false;
 }
 
-function onConfirm() {
+async function persistVoiceDraftToMain() {
+  const profiles = normalizeVoiceReadProfilesForSave(
+    draftVoiceReadProfiles.value,
+  );
+  const main = loadMainSettingsData();
+  const prevVoice = main.voiceRead;
+  const activeLocal =
+    profiles.find((p) => p.id === draftActiveVoiceReadProfileId.value) ??
+    profiles[0];
+  const voiceReadMergedLocal = stripVoiceReadSettingsApiKeysForDisk(
+    mergeVoiceReadSettings(
+      activeLocal?.settings ?? draftVoiceRead.value,
+    ),
+  );
+  const profilesForCompare = stripVoiceReadProfileApiKeysForDisk(profiles);
+  const localVoicePayload: Record<string, unknown> = {
+    activeProfileId: draftActiveVoiceReadProfileId.value,
+    profiles: profilesForCompare,
+    ...voiceReadMergedLocal,
+    aiSpeakerTokenUsage: prevVoice?.aiSpeakerTokenUsage,
+    aiSpeakerTokenUsageAvailable: prevVoice?.aiSpeakerTokenUsageAvailable,
+  };
+
+  try {
+    const existingRes = await window.colorTxt.secrets.getVoiceReadProfileKeys();
+    const existingVault = parseProfileSecretsBlob(existingRes.keys ?? "");
+    const mergedSecrets = mergeVoiceReadProfileSecretsForSave(
+      profiles,
+      existingVault,
+    );
+    await window.colorTxt.secrets.setVoiceReadSecrets({
+      profileKeys: serializeProfileSecretsBlob(mergedSecrets),
+    });
+  } catch {
+    // ignore vault failures; still persist non-secret settings
+  }
+
+  const voiceDirty = !settingsPersistValuesEqual(
+    localVoicePayload,
+    fbReaderSettings.voiceReadPersistBaseline,
+  );
+  if (voiceDirty) {
+    const diskVoice = migrateVoiceReadFromPersisted(
+      prevVoice as PersistedVoiceReadRaw | undefined,
+    );
+    const mergedVoice = mergeVoiceReadProfilesForPersist({
+      localProfiles: profiles,
+      diskProfiles: diskVoice.profiles,
+      baselineKnownIds: fbReaderSettings.getVoiceReadProfileBaselineIds(),
+      localActiveProfileId: draftActiveVoiceReadProfileId.value,
+      diskActiveProfileId: diskVoice.activeProfileId,
+    });
+    const profilesForDisk = stripVoiceReadProfileApiKeysForDisk(
+      mergedVoice.profiles,
+    );
+    patchPersistedMainSettings({
+      voiceRead: {
+        activeProfileId: mergedVoice.activeProfileId,
+        profiles: profilesForDisk,
+        ...voiceReadMergedLocal,
+        aiSpeakerTokenUsage: prevVoice?.aiSpeakerTokenUsage,
+        aiSpeakerTokenUsageAvailable: prevVoice?.aiSpeakerTokenUsageAvailable,
+      },
+    });
+    fbReaderSettings.setVoiceReadPersistBaseline(localVoicePayload);
+  }
+
+  // 本窗内存只跟本窗草稿；磁盘合并结果不灌回
+  fbReaderSettings.voiceReadProfiles.value = cloneVoiceReadProfiles(profiles);
+  fbReaderSettings.activeVoiceReadProfileId.value =
+    draftActiveVoiceReadProfileId.value;
+  const hydrated = await hydrateVoiceReadProfilesWithSecrets(
+    fbReaderSettings.voiceReadProfiles.value,
+    fbReaderSettings.activeVoiceReadProfileId.value,
+  );
+  fbReaderSettings.voiceReadSettings.value = mergeVoiceReadSettings(
+    hydrated ?? activeLocal?.settings ?? draftVoiceRead.value,
+  );
+  fbReaderSettings.setVoiceReadProfileBaseline(
+    fbReaderSettings.voiceReadProfiles.value,
+  );
+  draftVoiceReadProfiles.value = cloneVoiceReadProfiles(
+    fbReaderSettings.voiceReadProfiles.value,
+  );
+  draftActiveVoiceReadProfileId.value =
+    fbReaderSettings.activeVoiceReadProfileId.value;
+  draftVoiceRead.value = mergeVoiceReadSettings(
+    fbReaderSettings.voiceReadSettings.value,
+  );
+}
+
+async function onConfirm() {
+  voiceReadPanelRef.value?.finalizeVoiceReadProfiles?.();
+  if (voiceReadDashScopeRequiresApiKey(draftVoiceRead.value)) {
+    await appAlert("「语音朗读」阿里云通义（DashScope）需要 API 密钥");
+    return;
+  }
+
   fb.cacheDir.value = draftCacheDir.value.trim();
   fb.downloadDir.value = draftDownloadDir.value.trim();
   fb.downloadAfterAction.value = draftDownloadAfterAction.value;
@@ -204,6 +437,12 @@ function onConfirm() {
     draftLineHeightMultiple.value,
   );
   fb.monacoSmoothScrolling.value = draftMonacoSmoothScrolling.value;
+  fb.mouseWheelScrollSensitivity.value = clampMouseWheelScrollSensitivity(
+    draftMouseWheelScrollSensitivity.value,
+  );
+  fb.fastScrollSensitivity.value = clampFastScrollSensitivity(
+    draftFastScrollSensitivity.value,
+  );
   fb.stickyChapterTitleEnabled.value = draftStickyChapterTitleEnabled.value;
   fb.chapterNavToolbarEnabled.value = draftChapterNavToolbarEnabled.value;
   fb.readerEditShowLineNumbers.value = draftReaderEditShowLineNumbers.value;
@@ -222,8 +461,29 @@ function onConfirm() {
     range: draftTimedScrollRange.value,
     intervalMs: draftTimedScrollIntervalMs.value,
   });
+
   fb.persistAll();
+  fb.persistReaderUiPrefs();
+
+  try {
+    await window.colorTxt.secrets.setWebDavPassword(draftWebDavPassword.value);
+  } catch (e) {
+    await appAlert(
+      e instanceof Error ? e.message : "保存 WebDAV 密码失败",
+    );
+    return;
+  }
+  patchPersistedMainSettings({
+    webDavEnabled: draftWebDavEnabled.value,
+    webDavUrl: draftWebDavUrl.value.trim(),
+    webDavUsername: draftWebDavUsername.value.trim(),
+    webDavRemoteDir: draftWebDavRemoteDir.value.trim() || "ColorTxt",
+  });
+
+  await persistVoiceDraftToMain();
+
   modelValue.value = false;
+  voiceReadPanelRef.value?.cancelPreview?.();
 }
 
 async function onClearCache() {
@@ -236,9 +496,12 @@ async function onClearCache() {
 watch(
   () => modelValue.value,
   (open) => {
-    if (!open) return;
+    if (!open) {
+      voiceReadPanelRef.value?.cancelPreview?.();
+      return;
+    }
     activeTab.value = props.initialTab;
-    syncDraftFromStore();
+    void syncAllDraftsFromStores();
   },
 );
 
@@ -249,11 +512,20 @@ watch(
   },
 );
 
+watch(activeTab, (tab, prev) => {
+  if (prev === "voiceRead" && tab !== "voiceRead") {
+    voiceReadPanelRef.value?.cancelPreview?.();
+  }
+  if (tab === "webDav") {
+    void loadWebDavPasswordDraft();
+  }
+});
+
 watch(draftFontSize, (size) => {
-  draftLineHeightMultiple.value = clampFindBookReaderLineHeight(
-    size,
-    draftLineHeightMultiple.value,
-  );
+  const cap = maxLineHeightMultipleForFontSize(size);
+  if (draftLineHeightMultiple.value > cap + 1e-6) {
+    draftLineHeightMultiple.value = cap;
+  }
 });
 </script>
 
@@ -290,6 +562,10 @@ watch(draftFontSize, (size) => {
               v-model:draft-font-size="draftFontSize"
               v-model:draft-line-height-multiple="draftLineHeightMultiple"
               v-model:draft-monaco-smooth-scrolling="draftMonacoSmoothScrolling"
+              v-model:draft-mouse-wheel-scroll-sensitivity="
+                draftMouseWheelScrollSensitivity
+              "
+              v-model:draft-fast-scroll-sensitivity="draftFastScrollSensitivity"
               v-model:draft-sticky-chapter-title-enabled="draftStickyChapterTitleEnabled"
               v-model:draft-chapter-nav-toolbar-enabled="draftChapterNavToolbarEnabled"
               v-model:draft-compress-blank-keep-one-blank="draftCompressBlankKeepOneBlank"
@@ -305,12 +581,23 @@ watch(draftFontSize, (size) => {
               :monaco-custom-highlight="fb.monacoCustomHighlight.value"
             />
 
-            <FindBookSettingsEditPanel
+            <SettingsEditPanel
               v-show="activeTab === 'edit'"
+              :show-main-only-edit-options="false"
               v-model:draft-reader-edit-show-line-numbers="
                 draftReaderEditShowLineNumbers
               "
               v-model:draft-reader-edit-minimap="draftReaderEditMinimap"
+            />
+
+            <SettingsVoiceReadPanel
+              ref="voiceReadPanelRef"
+              v-show="activeTab === 'voiceRead'"
+              v-model="draftVoiceRead"
+              v-model:profiles="draftVoiceReadProfiles"
+              v-model:active-profile-id="draftActiveVoiceReadProfileId"
+              :ai-enabled="draftAiEnabled"
+              :character-roster="emptyCharacterRoster"
             />
 
             <FindBookSettingsProxyPanel
@@ -321,6 +608,16 @@ watch(draftFontSize, (size) => {
               v-model:draft-proxy-port="draftProxyPort"
               v-model:draft-proxy-username="draftProxyUsername"
               v-model:draft-proxy-password="draftProxyPassword"
+            />
+
+            <SettingsWebDavPanel
+              v-show="activeTab === 'webDav'"
+              context="findBook"
+              v-model:draft-web-dav-enabled="draftWebDavEnabled"
+              v-model:draft-web-dav-url="draftWebDavUrl"
+              v-model:draft-web-dav-username="draftWebDavUsername"
+              v-model:draft-web-dav-password="draftWebDavPassword"
+              v-model:draft-web-dav-remote-dir="draftWebDavRemoteDir"
             />
           </div>
         </div>
@@ -368,6 +665,7 @@ watch(draftFontSize, (size) => {
   display: flex;
   flex-direction: column;
   flex: 1 1 auto;
+  min-width: 0;
   min-height: 0;
 }
 

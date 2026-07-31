@@ -70,6 +70,7 @@ const headerMoreMenu = useAnchoredAppShellMenu({
   anchor: headerMoreBtnRef,
   placement: "below-end",
   widthPx: 180,
+  gap: 6,
 });
 const {
   open: headerMoreOpen,
@@ -400,14 +401,19 @@ const showScopeColumn = computed(() => props.bucket === "findBook");
       <div ref="headerMoreBtnRef" class="descMoreWrap">
         <IconButton
           :icon-html="icons.more"
+          :active="headerMoreOpen"
+          :pressed="headerMoreOpen"
           title="更多"
           aria-label="更多"
+          aria-haspopup="menu"
+          :aria-expanded="headerMoreOpen"
           @click="toggleHeaderMoreMenu"
         />
         <AppShellMenuTeleport
           v-model:open="headerMoreOpen"
           :left="headerMoreLeft"
           :top="headerMoreTop"
+          caret="end"
           :on-panel-mount="bindHeaderMorePanel"
         >
           <button
@@ -521,9 +527,10 @@ const showScopeColumn = computed(() => props.bucket === "findBook");
                     @click="openEdit(item)"
                   />
                   <IconButton
+                    danger
                     :icon-html="icons.remove"
-                    aria-label="删除"
-                    title="删除"
+                    aria-label="移除"
+                    title="移除"
                     @click="onDeleteOne(item)"
                   />
                 </div>

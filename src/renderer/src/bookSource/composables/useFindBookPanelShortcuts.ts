@@ -3,7 +3,10 @@ import {
   persistKey,
   persistedSettingsChangedEvent,
 } from "../../constants/appUi";
-import { loadPersistedSettingsData } from "../../stores/cacheStore";
+import {
+  loadPersistedSettingsData,
+  patchPersistedMainSettings,
+} from "../../stores/cacheStore";
 import {
   createDefaultShortcutBindings,
   type ShortcutBindingMap,
@@ -24,6 +27,9 @@ const defaultShortcutBindings = createDefaultShortcutBindings(
 /** 阅读器打开时仍由找书面板处理的快捷键（其余交给 useFindBookReaderShortcuts） */
 const PANEL_ACTIONS_WHEN_READER_OPEN = new Set<keyof AppShortcutActions>([
   "openSettings",
+  "openColorScheme",
+  "openFindBook",
+  "openNewWindow",
   "openBookSource",
 ]);
 
@@ -34,13 +40,19 @@ function loadMainShortcutBindings():
     ?.shortcutBindings;
 }
 
-/** 找书窗口：设置 / 书源管理快捷键在找书面板内始终可用（与主界面同一套绑定） */
+/** 找书窗口：设置 / 配色 / 主界面 / 新窗口 / 书源管理快捷键在找书面板内始终可用（与主界面同一套绑定） */
 export function useFindBookPanelShortcuts(deps: {
   showSettingsPanel: Ref<boolean>;
+  showColorSchemePanel: Ref<boolean>;
+  showShortcutPanel: Ref<boolean>;
   showBookSourcePanel: Ref<boolean>;
   showBookReader: Ref<boolean>;
   openSettings: (tab?: FindBookSettingsTabId) => void;
+  openColorScheme: () => void;
   openBookSources: () => void;
+  /** 找书窗内：同一绑定（默认 F7）→ 主界面 */
+  goMain: () => void;
+  openNewWindow: () => void;
 }) {
   const shortcutBindings = ref<ShortcutBindingMap>(
     mergeShortcutBindings(defaultShortcutBindings, loadMainShortcutBindings()),
@@ -56,6 +68,19 @@ export function useFindBookPanelShortcuts(deps: {
     if (!r.ok) {
       await appAlert(r.message || "系统级快捷键设置失败");
     }
+  }
+
+  async function applyShortcutBindings(next: ShortcutBindingMap) {
+    const merged = mergeShortcutBindings(defaultShortcutBindings, next);
+    const globalResult = await window.colorTxt.setGlobalShortcut(
+      merged.toggleAllWindowsVisibility,
+    );
+    if (!globalResult.ok) {
+      await appAlert(globalResult.message || "系统级快捷键设置失败");
+      return;
+    }
+    shortcutBindings.value = merged;
+    patchPersistedMainSettings({ shortcutBindings: merged });
   }
 
   function syncShortcutBindingsFromMain() {
@@ -76,15 +101,21 @@ export function useFindBookPanelShortcuts(deps: {
         openBookSource: () => {
           deps.openBookSources();
         },
-        openColorScheme: () => {},
-        openFindBook: () => {},
+        openColorScheme: () => {
+          deps.openColorScheme();
+        },
+        openFindBook: () => {
+          deps.goMain();
+        },
         toggleFullscreen: () => {},
         increaseFontSize: () => {},
         decreaseFontSize: () => {},
         increaseLineHeight: () => {},
         decreaseLineHeight: () => {},
         toggleSidebar: () => {},
-        openNewWindow: () => {},
+        openNewWindow: () => {
+          deps.openNewWindow();
+        },
         openFile: () => {},
         pickTxtDirectory: () => {},
         openChapterRules: () => {},
@@ -100,6 +131,8 @@ export function useFindBookPanelShortcuts(deps: {
       () => shortcutBindings.value,
       () =>
         !deps.showSettingsPanel.value &&
+        !deps.showColorSchemePanel.value &&
+        !deps.showShortcutPanel.value &&
         !deps.showBookSourcePanel.value &&
         !hasEscBeforeModalLayers(),
       (action) =>
@@ -133,5 +166,9 @@ export function useFindBookPanelShortcuts(deps: {
     );
   });
 
-  return { shortcutBindings };
+  return {
+    shortcutBindings,
+    defaultShortcutBindings,
+    applyShortcutBindings,
+  };
 }

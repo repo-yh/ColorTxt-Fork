@@ -362,18 +362,17 @@ export function useAppHighlightTerms(deps: {
     const map = deps.highlightWordsByIndexGlobal.value;
     if (!map) return;
     const {
-      buildHighlightExportDefaultName,
+      FAVORITE_HIGHLIGHTS_EXPORT_DEFAULT_NAME,
       buildReaderHighlightsExportJson,
       countHighlightWordsInMap,
       saveHighlightExportFile,
     } = await import("../utils/readerHighlightExport");
     if (countHighlightWordsInMap(map) <= 0) return;
-    const path = deps.currentFile.value;
-    const name = buildHighlightExportDefaultName(
-      path ? fileNameKey(path) : "高亮词",
-    );
     const data = buildReaderHighlightsExportJson(map);
-    const r = await saveHighlightExportFile(name, data);
+    const r = await saveHighlightExportFile(
+      FAVORITE_HIGHLIGHTS_EXPORT_DEFAULT_NAME,
+      data,
+    );
     if (!r.ok && "error" in r) await appAlert(r.error);
   }
 

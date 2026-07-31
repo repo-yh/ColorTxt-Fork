@@ -52,7 +52,7 @@ export function useAppWindowBindings(deps: {
   fileSession: FileSession;
   persistWindowUnloadState: () => void;
   persistFileListCache: () => void;
-  persistSettings: () => void;
+  persistSidebarWidth: () => void;
   isFullscreenView: Ref<boolean>;
   showSidebar: Ref<boolean>;
   sidebarWidth: Ref<number>;
@@ -668,7 +668,7 @@ export function useAppWindowBindings(deps: {
       const wasResizing = deps.resizingSidebar.value;
       deps.endSidebarResize();
       if (wasResizing) {
-        deps.persistSettings();
+        deps.persistSidebarWidth();
       }
     };
     document.addEventListener("mousemove", onMouseMove);
@@ -682,8 +682,9 @@ export function useAppWindowBindings(deps: {
     unsubscribers.push(() => window.removeEventListener("resize", onResize));
 
     const flushPersistence = () => {
+      // 会话/文件列表/meta；界面设置仅在变更时落盘（设置确定、工具栏改字号等），
+      // 避免关窗用本窗旧内存覆盖其它窗（如找书）已写入的 colorTxt.ui.settings。
       deps.persistWindowUnloadState();
-      deps.persistSettings();
     };
     window.addEventListener("pagehide", flushPersistence);
     unsubscribers.push(() =>

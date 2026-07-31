@@ -62,5 +62,12 @@ export const COLOR_TXT_OPEN_BOOK_EXTENSIONS = [
   "pdf",
 ] as const;
 
-/** 彩读书包建议扩展（完整后缀） */
-export const COLOR_TXT_BOOK_PACK_FILE_EXT = "colortxt-book.zip";
+/**
+ * 彩读书包默认扩展名（不含点）：ZIP 容器，扩展名 `.ctz`（ColorTxt Zip）。
+ */
+export const COLOR_TXT_BOOK_PACK_FILE_EXT = "ctz";
+
+/**
+ * 加密彩读书包扩展名（不含点）：CTZE 封装，扩展名 `.ctzx`。
+ */
+export const COLOR_TXT_BOOK_PACK_ENCRYPTED_FILE_EXT = "ctzx";

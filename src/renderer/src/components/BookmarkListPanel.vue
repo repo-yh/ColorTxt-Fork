@@ -77,6 +77,7 @@ const moreMenu = useAnchoredAppShellMenu({
   anchor: anchorRef,
   placement: "below-end",
   widthPx: BOOKMARKS_HEADER_MORE_MENU_W,
+  gap: 6,
   disabled: computed(() => !props.currentFilePath),
 });
 const {
@@ -95,6 +96,7 @@ function bindMorePanel(el: HTMLElement | null) {
 defineExpose({
   scrollToLine,
   openMoreMenu: toggleMoreMenu,
+  moreOpen,
 });
 
 onMounted(() => {
@@ -221,6 +223,7 @@ function onMoreSelect(action: string) {
       :left="moreLeft"
       :top="moreTop"
       :width="BOOKMARKS_HEADER_MORE_MENU_W"
+      caret="end"
       :on-panel-mount="bindMorePanel"
       aria-label="书签更多"
     >

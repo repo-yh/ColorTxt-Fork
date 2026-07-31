@@ -10,10 +10,7 @@ import {
 import {
   bookTitleForExport,
 } from "./readerAnnotationExport";
-import {
-  chatExportDateSlug,
-  sanitizeChatExportTitleForFilename,
-} from "../aiAssistant/aiAssistantExport";
+import { sanitizeChatExportTitleForFilename } from "../aiAssistant/aiAssistantExport";
 
 /** 权威包类型标识（导入时校验） */
 export const CHARACTER_ROSTER_PACK_KIND = "characterRoster" as const;
@@ -21,7 +18,7 @@ export const CHARACTER_ROSTER_PACK_KIND = "characterRoster" as const;
 export const CHARACTER_ROSTER_PACK_SCHEMA_VERSION = 1 as const;
 
 /** 建议保存扩展（完整后缀，含 .zip） */
-export const CHARACTER_ROSTER_PACK_FILE_EXT = "colortxt-characters.zip";
+export const CHARACTER_ROSTER_PACK_FILE_EXT = "characters.zip";
 
 export const CHARACTER_ROSTER_PACK_SAVE_FILTERS: Array<{
   name: string;
@@ -66,11 +63,10 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
 }
 
 export function buildCharacterRosterPackDefaultName(bookName: string): string {
-  const slug = chatExportDateSlug();
   const titlePart = sanitizeChatExportTitleForFilename(
     bookTitleForExport(bookName || "角色卡"),
   );
-  return `${titlePart}-${slug}.${CHARACTER_ROSTER_PACK_FILE_EXT}`;
+  return `${titlePart}.${CHARACTER_ROSTER_PACK_FILE_EXT}`;
 }
 
 /** 同 id 以导入侧为准；总数经 normalize 裁到上限 */
@@ -226,6 +222,8 @@ export async function saveCharacterRosterPackFile(
   let target = r.filePath;
   const lower = target.toLowerCase();
   if (
+    !lower.endsWith(".characters.zip") &&
+    !lower.endsWith(".ct-characters.zip") &&
     !lower.endsWith(".colortxt-characters.zip") &&
     !lower.endsWith(".zip")
   ) {

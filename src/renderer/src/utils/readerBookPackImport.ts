@@ -30,9 +30,15 @@ export type ImportReaderBookPackResult =
       txtFiles: TxtFileItem[];
       fileMetaRecords: FileMetaRecord[];
       message: string;
+      /** 解密成功时使用的密码（明文包为空） */
+      usedPassword?: string;
     }
   | { ok: false; cancelled: true }
+  | { ok: false; skipped: true }
   | { ok: false; error: string };
+
+/** 询问密码：`string` 再试；`null` 取消（打开入口）；`{ skip: true }` 跳过本包（批量） */
+export type AskBookPackPasswordResult = string | null | { skip: true };
 
 type ImportHit =
   | {
@@ -81,13 +87,30 @@ function applyMergedMeta(params: {
   });
 }
 
-function asMatchItem(path: string): TxtFileItem {
+function asMatchItem(path: string, size = 0): TxtFileItem {
   return {
     name: basenameFromPath(path),
     path,
-    size: 0,
+    size,
     addedAt: Date.now(),
   };
+}
+
+/** 路径已在列表则原样返回；否则 merge 进列表（补 size） */
+async function ensurePathInTxtFiles(
+  txtFiles: TxtFileItem[],
+  absPath: string,
+): Promise<TxtFileItem[]> {
+  const path = absPath.trim();
+  if (!path || txtFiles.some((f) => f.path === path)) return txtFiles;
+  let size = 0;
+  try {
+    const st = await window.colorTxt.stat(path);
+    if (typeof st.size === "number") size = st.size;
+  } catch {
+    /* keep 0 */
+  }
+  return mergeTxtFileLists(txtFiles, [asMatchItem(path, size)]);
 }
 
 /**
@@ -273,6 +296,8 @@ async function applyHitAndMeta(params: {
  * 2. 「最近的文件」同名（仍存在）
  * 3. 「文件」列表同名
  * 4. 都没有 → 解压到 UnpackedBooks（同名文件同样：相同只更新 meta，不同确认覆盖）
+ *
+ * 命中 1～3 时若目标路径不在「文件」列表，会补进列表（侧栏加书包可见）。
  */
 export async function importReaderBookPack(options: {
   packFilePath: string;
@@ -282,6 +307,19 @@ export async function importReaderBookPack(options: {
   portraitCacheDir: string;
   /** 设置中的解压目录；空串回退 userData/UnpackedBooks */
   bookPackUnpackDir?: string;
+  /** 首次尝试密码；也可并入 tryPasswords */
+  password?: string;
+  /** 按序尝试的密码（空串忽略）；均失败后再 askPassword */
+  tryPasswords?: readonly string[];
+  /**
+   * 加密包密码缺失/错误时询问用户。
+   * - `string`：用该密码再解
+   * - `null`：取消（打开入口）
+   * - `{ skip: true }`：跳过本包（侧栏批量）
+   */
+  askPassword?: (
+    reason: "needPassword" | "wrongPassword",
+  ) => Promise<AskBookPackPasswordResult>;
   currentFilePath?: string | null;
   physicalReaderPath?: string | null;
   recentFiles?: readonly { path: string }[];
@@ -299,14 +337,53 @@ export async function importReaderBookPack(options: {
       error: e instanceof Error ? e.message : String(e),
     };
   }
-  const parsed = await parseReaderBookPackZip(buffer);
-  if (!parsed.ok) return { ok: false, error: parsed.error };
+
+  const tried = new Set<string>();
+  const candidates: string[] = [];
+  const pushCandidate = (raw: string | undefined) => {
+    const pw = (raw ?? "").trim();
+    if (!pw || tried.has(pw)) return;
+    tried.add(pw);
+    candidates.push(pw);
+  };
+  pushCandidate(options.password);
+  for (const p of options.tryPasswords ?? []) pushCandidate(p);
+
+  let password = "";
+  let parsed = await parseReaderBookPackZip(buffer, "");
+  if (!parsed.ok && parsed.code) {
+    for (const pw of candidates) {
+      parsed = await parseReaderBookPackZip(buffer, pw);
+      if (parsed.ok) {
+        password = pw;
+        break;
+      }
+    }
+  }
+
+  while (!parsed.ok) {
+    if (
+      (parsed.code === "needPassword" || parsed.code === "wrongPassword") &&
+      options.askPassword
+    ) {
+      const next = await options.askPassword(parsed.code);
+      if (next === null) return { ok: false, cancelled: true };
+      if (typeof next !== "string") {
+        return { ok: false, skipped: true };
+      }
+      password = next;
+      parsed = await parseReaderBookPackZip(buffer, password);
+      continue;
+    }
+    return { ok: false, error: parsed.error };
+  }
   const pack = parsed.pack;
   const includeProgress =
     typeof pack.manifest.viewportTopPhysicalLine === "number";
   const restorePhysicalLine = includeProgress
     ? pack.manifest.viewportTopPhysicalLine
     : undefined;
+  const usedPassword = password.trim() || undefined;
 
   const hit = await resolveImportHit({
     pack,
@@ -328,14 +405,19 @@ export async function importReaderBookPack(options: {
       confirmOverwrite: options.confirmOverwrite,
     });
     if (!applied.ok) return applied;
+    // 命中「最近打开」/当前文件但尚未在「文件」列表时，补进列表（侧栏加书包依赖此行为）
+    const txtFiles = await ensurePathInTxtFiles(
+      options.txtFiles,
+      applied.openPath,
+    );
     return {
       ok: true,
       openPath: applied.openPath,
       restorePhysicalLine,
-      // 命中当前打开/列表已有路径时不改列表（未在列表中的当前文件保持不加入）
-      txtFiles: options.txtFiles,
+      txtFiles,
       fileMetaRecords: applied.fileMetaRecords,
       message: applied.message,
+      usedPassword,
     };
   }
 
@@ -415,5 +497,6 @@ export async function importReaderBookPack(options: {
     message: existed
       ? applied.message
       : "已解压书包并加入文件列表",
+    usedPassword,
   };
 }

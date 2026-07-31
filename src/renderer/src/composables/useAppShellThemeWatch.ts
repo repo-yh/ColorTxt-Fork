@@ -57,6 +57,20 @@ export function useAppShellThemeWatch(deps: {
     { immediate: true },
   );
 
+  /** 其它窗口改配色后本窗只更新了内存；CSS 变量（背景/章节标题）需单独灌入 document */
+  watch(
+    () =>
+      [deps.readerSurfaceLight.value, deps.readerSurfaceDark.value] as const,
+    () => {
+      applyReaderSurfaceToDocument(
+        deps.currentTheme.value,
+        deps.readerSurfaceLight.value,
+        deps.readerSurfaceDark.value,
+      );
+    },
+    { deep: true },
+  );
+
   watch(deps.showChapterCounts, () => {
     deps.persistSettings();
   });

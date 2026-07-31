@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, useTemplateRef, watch } from "vue";
 import AppModal from "./AppModal.vue";
+import AppCheckbox from "./AppCheckbox.vue";
 import AutoResizeTextarea from "./AutoResizeTextarea.vue";
 import { useAppDialogLogSelectAll } from "../composables/useAppDialogLogSelectAll";
 import {
@@ -8,6 +9,8 @@ import {
   appDialogNeutral,
   appDialogPrimary,
   appDialogSecondary,
+  appDialogSetPromptRevealPassword,
+  appDialogSetPromptSkipOnFail,
   appDialogUserDismiss,
 } from "../services/appDialog";
 
@@ -21,6 +24,37 @@ const promptTextareaRef = useTemplateRef<InstanceType<typeof AutoResizeTextarea>
 const promptTextareaMaxHeight = computed(() =>
   Math.min(Math.floor(window.innerHeight * 0.4), 280),
 );
+
+const promptInputEffectiveType = computed(() => {
+  if (
+    appDialogModel.promptInputType === "password" &&
+    appDialogModel.promptRevealPassword
+  ) {
+    return "text";
+  }
+  return appDialogModel.promptInputType;
+});
+
+const footerHasLeading = computed(
+  () =>
+    Boolean(appDialogModel.promptNeutralLabel) ||
+    appDialogModel.promptShowPasswordToggle ||
+    appDialogModel.promptShowSkipOnFailToggle,
+);
+
+const promptRevealPassword = computed({
+  get: () => appDialogModel.promptRevealPassword,
+  set(v: boolean) {
+    appDialogSetPromptRevealPassword(v);
+  },
+});
+
+const promptSkipOnFail = computed({
+  get: () => appDialogModel.promptSkipOnFail,
+  set(v: boolean) {
+    appDialogSetPromptSkipOnFail(v);
+  },
+});
 
 const dialogOpen = computed({
   get: () => appDialogModel.open,
@@ -142,7 +176,7 @@ function onLogPointerDown(e: MouseEvent) {
         v-if="appDialogModel.kind === 'prompt' && !appDialogModel.promptMultiline"
         ref="promptInputRef"
         v-model="appDialogModel.promptValue"
-        :type="appDialogModel.promptInputType"
+        :type="promptInputEffectiveType"
         class="appDialogPromptInput"
         :placeholder="appDialogModel.promptPlaceholder || undefined"
         :min="appDialogModel.promptInputType === 'number' ? 1 : undefined"
@@ -167,8 +201,7 @@ function onLogPointerDown(e: MouseEvent) {
           'appDialogModalFooter--single':
             appDialogModel.kind === 'alert' || appDialogModel.kind === 'log',
           'appDialogModalFooter--withNeutral':
-            appDialogModel.kind === 'prompt' &&
-            Boolean(appDialogModel.promptNeutralLabel),
+            appDialogModel.kind === 'prompt' && footerHasLeading,
         }"
       >
         <template v-if="appDialogModel.kind === 'alert' || appDialogModel.kind === 'log'">
@@ -182,8 +215,28 @@ function onLogPointerDown(e: MouseEvent) {
           </button>
         </template>
         <template v-else>
+          <div
+            v-if="
+              appDialogModel.promptShowPasswordToggle ||
+              appDialogModel.promptShowSkipOnFailToggle
+            "
+            class="appDialogFooterLeading"
+          >
+            <AppCheckbox
+              v-if="appDialogModel.promptShowPasswordToggle"
+              v-model="promptRevealPassword"
+              class="appDialogShowPassword"
+              label="显示密码"
+            />
+            <AppCheckbox
+              v-if="appDialogModel.promptShowSkipOnFailToggle"
+              v-model="promptSkipOnFail"
+              class="appDialogSkipOnFail"
+              label="解密失败时跳过"
+            />
+          </div>
           <button
-            v-if="appDialogModel.promptNeutralLabel"
+            v-else-if="appDialogModel.promptNeutralLabel"
             type="button"
             class="btn appDialogNeutralBtn"
             size="large"
@@ -321,5 +374,24 @@ function onLogPointerDown(e: MouseEvent) {
 
 .appDialogNeutralBtn {
   flex-shrink: 0;
+}
+
+.appDialogShowPassword {
+  flex-shrink: 0;
+  font-size: 13px;
+}
+
+.appDialogFooterLeading {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+  min-width: 0;
+}
+
+.appDialogSkipOnFail {
+  flex-shrink: 0;
+  font-size: 13px;
 }
 </style>

@@ -49,6 +49,11 @@ const props = withDefaults(
   },
 );
 
+const emit = defineEmits<{
+  /** 蒙层根节点捕获阶段的 keydown（焦点在弹框内或蒙层自身时触发） */
+  keydown: [ev: KeyboardEvent];
+}>();
+
 const slots = useSlots();
 
 const showCloseChrome = computed(
@@ -78,6 +83,7 @@ const insetCss = computed(() => {
 const modelValue = defineModel<boolean>({ default: false });
 
 const titleId = useId();
+const backdropEl = ref<HTMLElement | null>(null);
 
 const zIndex = ref(6000);
 
@@ -103,8 +109,21 @@ function bringToFront() {
   bringToFrontFn?.();
 }
 
+/** 将焦点收到蒙层根节点，便于弹框级快捷键在点击蒙层后仍可用 */
+function focusBackdrop() {
+  backdropEl.value?.focus({ preventScroll: true });
+}
+
 function onMaskClick() {
-  if (props.maskClosable) void close();
+  if (props.maskClosable) {
+    void close();
+    return;
+  }
+  focusBackdrop();
+}
+
+function onBackdropKeydown(ev: KeyboardEvent) {
+  emit("keydown", ev);
 }
 
 watch(
@@ -136,6 +155,7 @@ onBeforeUnmount(() => {
 
 defineExpose({
   bringToFront,
+  focusBackdrop,
 });
 </script>
 
@@ -144,6 +164,7 @@ defineExpose({
     <Transition name="appModal">
       <div
         v-if="modelValue"
+        ref="backdropEl"
         class="appModalBackdrop"
         :class="{
           'appModalBackdrop--fullscreen': fullscreen,
@@ -151,11 +172,13 @@ defineExpose({
         }"
         :data-fullscreen-header-float="fullscreenHeaderFloat || undefined"
         :style="{ zIndex, padding: insetCss }"
+        tabindex="-1"
         role="dialog"
         aria-modal="true"
         :aria-labelledby="hasTitle ? titleId : undefined"
         :aria-label="hasTitle ? undefined : '对话框'"
         @click.self="onMaskClick"
+        @keydown.capture="onBackdropKeydown"
         @drop.stop.prevent
       >
         <div
@@ -245,6 +268,7 @@ defineExpose({
   justify-content: center;
   padding: 24px;
   background: rgba(0, 0, 0, 0.45);
+  outline: none;
 }
 
 .appModalBackdrop--fullscreen {

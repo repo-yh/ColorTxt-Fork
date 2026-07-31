@@ -1,45 +1,41 @@
 <script setup lang="ts">
-defineProps<{
-  activeTab: "reader" | "highlight" | "lineation";
-}>();
+export type ColorSchemeTabId = "reader" | "highlight" | "lineation";
+
+withDefaults(
+  defineProps<{
+    activeTab: ColorSchemeTabId;
+    visibleTabs?: readonly ColorSchemeTabId[];
+  }>(),
+  {
+    visibleTabs: () => ["reader", "highlight", "lineation"],
+  },
+);
 
 const emit = defineEmits<{
-  "update:activeTab": [value: "reader" | "highlight" | "lineation"];
+  "update:activeTab": [value: ColorSchemeTabId];
 }>();
+
+const tabLabels: Record<ColorSchemeTabId, string> = {
+  reader: "阅读器",
+  highlight: "高亮色",
+  lineation: "标注色",
+};
 </script>
 
 <template>
   <div class="colorSchemeTabBar" role="tablist" aria-label="配色分类">
     <div class="tabs">
       <button
+        v-for="tab in visibleTabs"
+        :key="tab"
         type="button"
         role="tab"
         class="tabBtn"
-        :class="{ active: activeTab === 'reader' }"
-        :aria-selected="activeTab === 'reader'"
-        @click="emit('update:activeTab', 'reader')"
+        :class="{ active: activeTab === tab }"
+        :aria-selected="activeTab === tab"
+        @click="emit('update:activeTab', tab)"
       >
-        阅读器
-      </button>
-      <button
-        type="button"
-        role="tab"
-        class="tabBtn"
-        :class="{ active: activeTab === 'highlight' }"
-        :aria-selected="activeTab === 'highlight'"
-        @click="emit('update:activeTab', 'highlight')"
-      >
-        高亮色
-      </button>
-      <button
-        type="button"
-        role="tab"
-        class="tabBtn"
-        :class="{ active: activeTab === 'lineation' }"
-        :aria-selected="activeTab === 'lineation'"
-        @click="emit('update:activeTab', 'lineation')"
-      >
-        标注色
+        {{ tabLabels[tab] }}
       </button>
     </div>
   </div>

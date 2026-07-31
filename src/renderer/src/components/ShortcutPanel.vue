@@ -2,9 +2,10 @@
 import { computed, nextTick, ref, watch } from "vue";
 import AppModal from "./AppModal.vue";
 import {
-  SHORTCUT_ACTIONS,
+  shortcutActionsForPanel,
   type ShortcutActionId,
   type ShortcutBindingMap,
+  type ShortcutPanelContext,
 } from "../services/shortcutRegistry";
 import {
   acceleratorToDisplayKeys,
@@ -15,11 +16,22 @@ import {
 } from "../services/shortcutUtils";
 
 const modelValue = defineModel<boolean>({ default: false });
-const props = defineProps<{
-  shortcutBindings: ShortcutBindingMap;
-  defaultShortcutBindings: ShortcutBindingMap;
-}>();
+const props = withDefaults(
+  defineProps<{
+    shortcutBindings: ShortcutBindingMap;
+    defaultShortcutBindings: ShortcutBindingMap;
+    /** 主窗 / 找书窗展示不同动作列表；绑定仍共用完整表 */
+    panelContext?: ShortcutPanelContext;
+  }>(),
+  {
+    panelContext: "main",
+  },
+);
 const emit = defineEmits<{ apply: [payload: ShortcutBindingMap] }>();
+
+const visibleActions = computed(() =>
+  shortcutActionsForPanel(props.panelContext),
+);
 
 const isMac = computed(() =>
   /mac|iphone|ipad|ipod/i.test(navigator.platform || ""),
@@ -64,7 +76,7 @@ async function resetAllBindings() {
 }
 
 const editingAction = computed(
-  () => SHORTCUT_ACTIONS.find((x) => x.id === editingId.value) ?? null,
+  () => visibleActions.value.find((x) => x.id === editingId.value) ?? null,
 );
 const pendingRecordedDisplayText = computed(() => {
   return acceleratorToDisplayText(pendingRecordedAccel.value, isMac.value);
@@ -191,7 +203,7 @@ async function close() {
         </thead>
         <tbody>
           <tr
-            v-for="item in SHORTCUT_ACTIONS"
+            v-for="item in visibleActions"
             :key="item.id"
             class="shortcutRow shortcutRow--clickable"
             role="button"

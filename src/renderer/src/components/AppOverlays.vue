@@ -21,6 +21,7 @@ import AppModal from "./AppModal.vue";
 import ColorSchemePanel from "./ColorSchemePanel.vue";
 import AppUpdateFlow from "./AppUpdateFlow.vue";
 import ChapterRulePanel from "./ChapterRulePanel.vue";
+import ReadingDataPanel from "./ReadingDataPanel.vue";
 import ReplaceRulePanel from "../bookSource/components/ReplaceRulePanel.vue";
 import type { ReplaceRule } from "@shared/bookSource/replaceRule";
 import SettingsPanel, { type SettingsApplyPayload } from "./SettingsPanel.vue";
@@ -42,6 +43,8 @@ const props = defineProps<{
   readerFontSize: number;
   readerLineHeightMultiple: number;
   monacoSmoothScrolling: boolean;
+  mouseWheelScrollSensitivity: number;
+  fastScrollSensitivity: number;
   stickyChapterTitleEnabled: boolean;
   chapterNavToolbarEnabled: boolean;
   chapterCharCountExact: boolean;
@@ -86,6 +89,11 @@ const props = defineProps<{
   lineationColorsDark: string[];
   ebookConvertOutputDir: string;
   bookPackUnpackDir: string;
+  bookPackPassword: string;
+  webDavEnabled: boolean;
+  webDavUrl: string;
+  webDavUsername: string;
+  webDavRemoteDir: string;
   characterPortraitCacheDir: string;
   aiSkillsEnabled: Record<string, boolean>;
   aiSkillOverrides: Record<string, AiSkillUserOverride>;
@@ -94,6 +102,13 @@ const props = defineProps<{
   voiceReadProfiles: VoiceReadProfile[];
   activeVoiceReadProfileId: string;
   characterRoster: CharacterRosterEntry[];
+  /** 有可清除阅读数据的文件列表（阅读数据面板） */
+  readingDataItems: {
+    path: string;
+    fileName: string;
+    progress?: number;
+    lastOpenedAt?: number;
+  }[];
 }>();
 
 const emit = defineEmits<{
@@ -114,6 +129,10 @@ const emit = defineEmits<{
   applyHighlightColors: [payload: { light: string[]; dark: string[] }];
   applyLineationColors: [payload: { light: string[]; dark: string[] }];
   applyReplaceRuleFormat: [rules: ReplaceRule[]];
+  openReadingData: [];
+  clearReadingDataPaths: [paths: string[]];
+  clearAllReadingData: [];
+  removeMissingReadingDataFiles: [];
 }>();
 
 const showAboutPanel = defineModel<boolean>("showAboutPanel", {
@@ -126,6 +145,9 @@ const showSettingsPanel = defineModel<boolean>("showSettingsPanel", {
   default: false,
 });
 const showChapterRulePanel = defineModel<boolean>("showChapterRulePanel", {
+  default: false,
+});
+const showReadingDataPanel = defineModel<boolean>("showReadingDataPanel", {
   default: false,
 });
 const showReplaceRulePanel = defineModel<boolean>("showReplaceRulePanel", {
@@ -224,6 +246,7 @@ onBeforeUnmount(() => {
   <AboutPanel v-model="showAboutPanel" />
   <ShortcutPanel
     v-model="showShortcutPanel"
+    panel-context="main"
     :shortcut-bindings="shortcutBindings"
     :default-shortcut-bindings="defaultShortcutBindings"
     @apply="emit('applyShortcutBindings', $event)"
@@ -239,6 +262,8 @@ onBeforeUnmount(() => {
     :reader-font-size="readerFontSize"
     :reader-line-height-multiple="readerLineHeightMultiple"
     :monaco-smooth-scrolling="monacoSmoothScrolling"
+    :mouse-wheel-scroll-sensitivity="mouseWheelScrollSensitivity"
+    :fast-scroll-sensitivity="fastScrollSensitivity"
     :sticky-chapter-title-enabled="stickyChapterTitleEnabled"
     :chapter-nav-toolbar-enabled="chapterNavToolbarEnabled"
     :chapter-char-count-exact="chapterCharCountExact"
@@ -253,6 +278,11 @@ onBeforeUnmount(() => {
     :pomodoro-settings="pomodoroSettings"
     :ebook-convert-output-dir="ebookConvertOutputDir"
     :book-pack-unpack-dir="bookPackUnpackDir"
+    :book-pack-password="bookPackPassword"
+    :web-dav-enabled="webDavEnabled"
+    :web-dav-url="webDavUrl"
+    :web-dav-username="webDavUsername"
+    :web-dav-remote-dir="webDavRemoteDir"
     :character-portrait-cache-dir="characterPortraitCacheDir"
     :ai-skills-enabled="aiSkillsEnabled"
     :ai-skill-overrides="aiSkillOverrides"
@@ -262,6 +292,14 @@ onBeforeUnmount(() => {
     :active-voice-read-profile-id="activeVoiceReadProfileId"
     :character-roster="characterRoster"
     @apply="emit('applySettings', $event)"
+    @open-reading-data="emit('openReadingData')"
+  />
+  <ReadingDataPanel
+    v-model="showReadingDataPanel"
+    :items="readingDataItems"
+    @clear-paths="emit('clearReadingDataPaths', $event)"
+    @clear-all-reading-data="emit('clearAllReadingData')"
+    @remove-missing-files="emit('removeMissingReadingDataFiles')"
   />
   <ChapterRulePanel
     v-model="showChapterRulePanel"

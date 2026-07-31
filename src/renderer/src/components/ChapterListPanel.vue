@@ -1,22 +1,101 @@
 <script setup lang="ts">
-import type { ComponentPublicInstance } from "vue";
+import { computed, ref, watch, type ComponentPublicInstance } from "vue";
 import type { Chapter } from "../chapter";
+import { icons } from "../icons";
+import { useAnchoredAppShellMenu } from "../composables/useAnchoredAppShellMenu";
+import { appToast } from "../services/appToast";
 import VirtualList from "./VirtualList.vue";
+import AppShellMenuTeleport from "./AppShellMenuTeleport.vue";
 import { READER_SIDEBAR_ROW_STRIDE } from "../composables/useReaderSidebarLists";
 
-defineProps<{
-  currentFilePath: string | null;
-  chaptersVisible: Chapter[];
-  isChapterActive: (ch: Chapter) => boolean;
-  showChapterCounts: boolean;
-  formatCharCount: (n: number) => string;
-}>();
+const CHAPTERS_HEADER_MORE_MENU_W = 120;
+
+const props = withDefaults(
+  defineProps<{
+    currentFilePath: string | null;
+    chaptersVisible: Chapter[];
+    isChapterActive: (ch: Chapter) => boolean;
+    showChapterCounts: boolean;
+    formatCharCount: (n: number) => string;
+    /** 侧栏标题行「更多」按钮（锚定菜单） */
+    menuAnchorEl?: HTMLButtonElement | null;
+  }>(),
+  {
+    menuAnchorEl: null,
+  },
+);
 
 const emit = defineEmits<{
   jumpToChapter: [chapter: Chapter];
   closeCurrentFile: [];
   bindListRef: [value: InstanceType<typeof VirtualList> | null];
 }>();
+
+const moreBtnRef = ref<HTMLButtonElement | null>(null);
+const moreAnchorRef = ref<HTMLButtonElement | null>(null);
+watch(
+  () => props.menuAnchorEl ?? moreBtnRef.value,
+  (el) => {
+    moreAnchorRef.value = el;
+  },
+  { immediate: true },
+);
+const moreMenu = useAnchoredAppShellMenu({
+  anchor: moreAnchorRef,
+  placement: "below-end",
+  widthPx: CHAPTERS_HEADER_MORE_MENU_W,
+  gap: 6,
+});
+const {
+  open: moreOpen,
+  left: moreLeft,
+  top: moreTop,
+  panelRef: morePanelRef,
+  toggleMenu: toggleMoreMenu,
+  closeMenu: closeMoreMenu,
+} = moreMenu;
+
+function bindMorePanel(el: HTMLElement | null) {
+  morePanelRef.value = el;
+}
+
+defineExpose({
+  openMoreMenu: toggleMoreMenu,
+  moreOpen,
+});
+
+const copyTocDisabled = computed(
+  () => !props.currentFilePath || props.chaptersVisible.length === 0,
+);
+
+/** 与侧栏层级一致：`(headingLevel - 1)` 级各缩进 2 空格，一行一标题 */
+function formatChaptersTocText(chapters: Chapter[]): string {
+  return chapters
+    .map((ch) => {
+      const level = Math.max(1, Math.floor(ch.headingLevel ?? 1));
+      const indent = "  ".repeat(level - 1);
+      return `${indent}${ch.title}`;
+    })
+    .join("\n");
+}
+
+async function onCopyToc() {
+  closeMoreMenu();
+  if (copyTocDisabled.value) {
+    appToast(
+      props.currentFilePath ? "未识别到章节" : "未打开文件",
+      { kind: "info" },
+    );
+    return;
+  }
+  const text = formatChaptersTocText(props.chaptersVisible);
+  try {
+    await navigator.clipboard.writeText(text);
+    appToast("已复制目录", { kind: "success", duration: 1200 });
+  } catch {
+    appToast("复制目录失败", { kind: "warning" });
+  }
+}
 
 function headingPaddingStyle(ch: Chapter): { paddingLeft: string } | undefined {
   const level = ch.headingLevel;
@@ -82,6 +161,26 @@ function onBindListRef(value: Element | ComponentPublicInstance | null) {
         关闭文件
       </button>
     </div>
+    <AppShellMenuTeleport
+      v-model:open="moreOpen"
+      :left="moreLeft"
+      :top="moreTop"
+      :width="CHAPTERS_HEADER_MORE_MENU_W"
+      caret="end"
+      :on-panel-mount="bindMorePanel"
+      aria-label="章节更多"
+    >
+      <button
+        type="button"
+        class="appShellMenuItem"
+        role="menuitem"
+        :disabled="copyTocDisabled"
+        @click="onCopyToc"
+      >
+        <span class="appShellMenuIconSlot" v-html="icons.copy" />
+        <span class="appShellMenuLabel">复制目录</span>
+      </button>
+    </AppShellMenuTeleport>
   </div>
 </template>
 

@@ -16,6 +16,7 @@ import {
   labelForFindBookProxyType,
   type FindBookProxyType,
 } from "../constants/findBookSettings";
+import { icons } from "../../icons";
 
 const props = defineProps<{
   draftProxyEnabled: boolean;
@@ -48,6 +49,7 @@ const proxyTypeItems = computed<CustomSelectItem[]>(() =>
 );
 
 const proxyTestUrl = ref(DEFAULT_PROXY_TEST_URL);
+const showPassword = ref(false);
 
 const proxyTestSuggestions: readonly ApiEndpointSuggestionItem[] = [
   {
@@ -133,8 +135,8 @@ async function runProxyTest(): Promise<ConnectionTestResult | null> {
       <template v-if="draftProxyEnabled">
         <div class="settingsRow">
           <div class="settingsRowMain settingsRowMain--baseline">
-            <span class="settingsLabel">代理类型</span>
-            <div class="settingsSelectWrap">
+            <span class="settingsLabel short">代理类型</span>
+            <div class="aiRowField">
               <AppCustomSelect
                 class="settingsSelect"
                 :model-value="draftProxyType"
@@ -154,7 +156,7 @@ async function runProxyTest(): Promise<ConnectionTestResult | null> {
 
         <div class="settingsRow">
           <div class="settingsRowMain settingsRowMain--baseline">
-            <span class="settingsLabel">主机</span>
+            <span class="settingsLabel short">主机</span>
             <input
               class="settingsTextInput"
               type="text"
@@ -174,23 +176,25 @@ async function runProxyTest(): Promise<ConnectionTestResult | null> {
 
         <div class="settingsRow">
           <div class="settingsRowMain settingsRowMain--baseline">
-            <span class="settingsLabel">端口</span>
-            <input
-              class="settingsTextInput settingsTextInput--port"
-              type="text"
-              inputmode="numeric"
-              :value="draftProxyPort"
-              aria-label="代理端口"
-              placeholder="7890"
-              autocomplete="off"
-              @input="onPortInput(($event.target as HTMLInputElement).value)"
-            />
+            <span class="settingsLabel short">端口</span>
+            <div class="aiRowField">
+              <input
+                class="settingsTextInput settingsTextInput--port"
+                type="text"
+                inputmode="numeric"
+                :value="draftProxyPort"
+                aria-label="代理端口"
+                placeholder="7890"
+                autocomplete="off"
+                @input="onPortInput(($event.target as HTMLInputElement).value)"
+              />
+            </div>
           </div>
         </div>
 
         <div class="settingsRow">
           <div class="settingsRowMain settingsRowMain--baseline">
-            <span class="settingsLabel">用户名</span>
+            <span class="settingsLabel short">用户名</span>
             <input
               class="settingsTextInput"
               type="text"
@@ -210,28 +214,43 @@ async function runProxyTest(): Promise<ConnectionTestResult | null> {
 
         <div class="settingsRow">
           <div class="settingsRowMain settingsRowMain--baseline">
-            <span class="settingsLabel">密码</span>
-            <input
-              class="settingsTextInput"
-              type="password"
-              :value="draftProxyPassword"
-              aria-label="代理密码"
-              placeholder="可选"
-              autocomplete="new-password"
-              @input="
-                $emit(
-                  'update:draftProxyPassword',
-                  ($event.target as HTMLInputElement).value,
-                )
-              "
-            />
+            <span class="settingsLabel short">密码</span>
+            <div class="aiRowField">
+              <div class="settingsPasswordRow aiPasswordRow">
+                <input
+                  class="settingsStretchInput settingsPasswordRow__input"
+                  :value="draftProxyPassword"
+                  :type="showPassword ? 'text' : 'password'"
+                  aria-label="代理密码"
+                  placeholder="可选"
+                  autocomplete="new-password"
+                  @input="
+                    $emit(
+                      'update:draftProxyPassword',
+                      ($event.target as HTMLInputElement).value,
+                    )
+                  "
+                />
+                <button
+                  type="button"
+                  class="btn iconOnly"
+                  :title="showPassword ? '隐藏' : '显示'"
+                  @click="showPassword = !showPassword"
+                >
+                  <span
+                    class="iconSvg"
+                    v-html="showPassword ? icons.view : icons.viewOff"
+                  />
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       </template>
 
       <div class="settingsRow">
         <div class="settingsRowMain settingsRowMain--baseline">
-          <span class="settingsLabel">测试</span>
+          <span class="settingsLabel short">测试</span>
           <div class="aiRowField">
             <div class="settingsPasswordRow proxyTestRow">
               <ApiEndpointInput
@@ -245,11 +264,10 @@ async function runProxyTest(): Promise<ConnectionTestResult | null> {
                 :scroll-max-height="160"
               />
               <AppConnectionTestButton
-                label="测试"
+                label="测试连接"
                 :fingerprint="proxyTestFingerprint"
                 :on-test="runProxyTest"
                 :alert-on-error="false"
-                title="使用上方代理配置探测该 URL 是否可访问"
               />
             </div>
           </div>
@@ -293,35 +311,71 @@ async function runProxyTest(): Promise<ConnectionTestResult | null> {
   align-items: baseline;
 }
 
-.settingsSelectWrap {
-  flex: 0 1 220px;
-  min-width: 140px;
+.settingsLabel {
+  font-size: 14px;
+  color: var(--fg);
+  white-space: nowrap;
+  flex: 1 1 60%;
+}
+
+.settingsLabel.short {
+  flex: 1 1 30%;
+  min-width: 30%;
+}
+
+.settingsTextInput {
+  box-sizing: border-box;
+  flex: 1 1 0;
+  min-width: 0;
   max-width: 100%;
+  width: 100%;
+  height: 32px;
+  font-size: 13px;
+}
+
+.settingsTextInput--port {
+  width: 120px;
+  max-width: 100%;
+  flex: 0 0 120px;
+}
+
+.aiRowField {
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.aiPasswordRow {
+  width: 100%;
 }
 
 .settingsSelect {
   width: 100%;
 }
 
-.settingsTextInput {
-  box-sizing: border-box;
+.proxyTestRow {
+  width: 100%;
+}
+
+.proxyTestUrlInput {
   flex: 1 1 auto;
   min-width: 0;
-  max-width: 320px;
-  height: 32px;
-  font-size: 13px;
+  max-width: none;
 }
 
-.settingsTextInput--port {
-  max-width: 120px;
-  flex: 0 0 120px;
+.iconOnly {
+  padding: 6px;
+  flex-shrink: 0;
 }
 
-.settingsLabel {
-  font-size: 14px;
-  color: var(--fg);
-  white-space: nowrap;
-  flex: 1 1 40%;
+.iconSvg :deep(svg) {
+  width: 16px;
+  height: 16px;
+  display: block;
+}
+
+.iconSvg :deep(svg path) {
+  fill: currentColor;
 }
 
 .settingsHint {
@@ -333,15 +387,5 @@ async function runProxyTest(): Promise<ConnectionTestResult | null> {
 
 .settingsHint code {
   font-size: 11px;
-}
-
-.proxyTestRow {
-  width: 100%;
-}
-
-.proxyTestUrlInput {
-  flex: 1 1 auto;
-  min-width: 0;
-  max-width: none;
 }
 </style>

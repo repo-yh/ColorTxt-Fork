@@ -29,6 +29,7 @@ import SettingsVectorModelPanel from "./SettingsVectorModelPanel.vue";
 import SettingsTxt2ImgPanel from "./SettingsTxt2ImgPanel.vue";
 import SettingsSkillsPanel from "./SettingsSkillsPanel.vue";
 import SettingsVoiceReadPanel from "./SettingsVoiceReadPanel.vue";
+import SettingsWebDavPanel from "./SettingsWebDavPanel.vue";
 import {
   clampLineHeightMultipleForFontSize,
   defaultChapterMinCharCount,
@@ -36,6 +37,10 @@ import {
   defaultFullscreenReaderWidthPercent,
   defaultFullscreenShowSystemTime,
   defaultMonacoSmoothScrolling,
+  defaultMouseWheelScrollSensitivity,
+  defaultFastScrollSensitivity,
+  clampMouseWheelScrollSensitivity,
+  clampFastScrollSensitivity,
   defaultStickyChapterTitleEnabled,
   defaultChapterNavToolbarEnabled,
   defaultChapterCharCountExact,
@@ -116,6 +121,8 @@ export type SettingsApplyPayload = {
   fullscreenReaderWidthPercent: number;
   fullscreenShowSystemTime: boolean;
   monacoSmoothScrolling: boolean;
+  mouseWheelScrollSensitivity: number;
+  fastScrollSensitivity: number;
   stickyChapterTitleEnabled: boolean;
   chapterNavToolbarEnabled: boolean;
   chapterCharCountExact: boolean;
@@ -131,6 +138,11 @@ export type SettingsApplyPayload = {
   pomodoro: PomodoroSettings;
   ebookConvertOutputDir: string;
   bookPackUnpackDir: string;
+  bookPackPassword: string;
+  webDavEnabled: boolean;
+  webDavUrl: string;
+  webDavUsername: string;
+  webDavRemoteDir: string;
   characterPortraitCacheDir: string;
   aiSkillsEnabled: Record<string, boolean>;
   aiSkillOverrides: Record<string, AiSkillUserOverride>;
@@ -152,6 +164,8 @@ const props = defineProps<{
   readerFontSize: number;
   readerLineHeightMultiple: number;
   monacoSmoothScrolling: boolean;
+  mouseWheelScrollSensitivity: number;
+  fastScrollSensitivity: number;
   stickyChapterTitleEnabled: boolean;
   chapterNavToolbarEnabled: boolean;
   chapterCharCountExact: boolean;
@@ -166,6 +180,11 @@ const props = defineProps<{
   pomodoroSettings: PomodoroSettings;
   ebookConvertOutputDir: string;
   bookPackUnpackDir: string;
+  bookPackPassword: string;
+  webDavEnabled: boolean;
+  webDavUrl: string;
+  webDavUsername: string;
+  webDavRemoteDir: string;
   characterPortraitCacheDir: string;
   aiSkillsEnabled: Record<string, boolean>;
   aiSkillOverrides: Record<string, AiSkillUserOverride>;
@@ -178,6 +197,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   apply: [payload: SettingsApplyPayload];
+  openReadingData: [];
 }>();
 
 const activeTab = ref<SettingsTabId>("general");
@@ -207,6 +227,10 @@ const draftFullscreenShowSystemTime = ref(defaultFullscreenShowSystemTime);
 const draftFontSize = ref(14);
 const draftLineHeightMultiple = ref(1.5);
 const draftMonacoSmoothScrolling = ref(true);
+const draftMouseWheelScrollSensitivity = ref(
+  defaultMouseWheelScrollSensitivity,
+);
+const draftFastScrollSensitivity = ref(defaultFastScrollSensitivity);
 const draftStickyChapterTitleEnabled = ref(defaultStickyChapterTitleEnabled);
 const draftChapterNavToolbarEnabled = ref(defaultChapterNavToolbarEnabled);
 const draftChapterCharCountExact = ref(defaultChapterCharCountExact);
@@ -228,7 +252,14 @@ const draftPomodoroShortBreakMinutes = ref(defaultPomodoroShortBreakMinutes);
 const draftPomodoroLongBreakMinutes = ref(defaultPomodoroLongBreakMinutes);
 const draftEbookConvertOutputDir = ref("");
 const draftBookPackUnpackDir = ref("");
+const draftBookPackPassword = ref("");
+const draftWebDavEnabled = ref(false);
+const draftWebDavUrl = ref("");
+const draftWebDavUsername = ref("");
+const draftWebDavPassword = ref("");
+const draftWebDavRemoteDir = ref("ColorTxt");
 const draftCharacterPortraitCacheDir = ref("");
+const showBookPackPassword = ref(false);
 
 const draftAi = ref<AIConfig>(structuredClone(defaultAIConfig));
 const showAiExtensionTabs = computed(() => draftAi.value.aiEnabled);
@@ -266,6 +297,12 @@ function syncDraftFromProps() {
     props.readerLineHeightMultiple,
   );
   draftMonacoSmoothScrolling.value = props.monacoSmoothScrolling;
+  draftMouseWheelScrollSensitivity.value = clampMouseWheelScrollSensitivity(
+    props.mouseWheelScrollSensitivity,
+  );
+  draftFastScrollSensitivity.value = clampFastScrollSensitivity(
+    props.fastScrollSensitivity,
+  );
   draftStickyChapterTitleEnabled.value = props.stickyChapterTitleEnabled;
   draftChapterNavToolbarEnabled.value = props.chapterNavToolbarEnabled;
   draftChapterCharCountExact.value = props.chapterCharCountExact;
@@ -285,6 +322,11 @@ function syncDraftFromProps() {
   draftPomodoroLongBreakMinutes.value = pomodoroMerged.longBreakMinutes;
   draftEbookConvertOutputDir.value = props.ebookConvertOutputDir;
   draftBookPackUnpackDir.value = props.bookPackUnpackDir;
+  draftBookPackPassword.value = props.bookPackPassword;
+  draftWebDavEnabled.value = props.webDavEnabled === true;
+  draftWebDavUrl.value = props.webDavUrl;
+  draftWebDavUsername.value = props.webDavUsername;
+  draftWebDavRemoteDir.value = props.webDavRemoteDir.trim() || "ColorTxt";
   draftCharacterPortraitCacheDir.value = props.characterPortraitCacheDir;
   draftAiSkillOverrides.value = mergeAiSkillOverrides(props.aiSkillOverrides);
   draftAiCustomSkills.value = mergeAiCustomSkills(props.aiCustomSkills ?? []);
@@ -323,6 +365,15 @@ async function syncAiFromMain() {
   txt2imgPanelRef.value?.initTxt2ImgProfiles?.();
 }
 
+async function loadWebDavPasswordDraft() {
+  try {
+    const r = await window.colorTxt.secrets.getWebDavPassword();
+    draftWebDavPassword.value = r.password ?? "";
+  } catch {
+    draftWebDavPassword.value = "";
+  }
+}
+
 watch(modelValue, (open) => {
   if (!open) {
     voiceReadPanelRef.value?.cancelPreview?.();
@@ -332,6 +383,7 @@ watch(modelValue, (open) => {
   draftAi.value.embedding = normalizeEmbeddingEndpoint(draftAi.value.embedding);
   applyAllActiveProfilesToConfig(draftAi.value);
   syncDraftFromProps();
+  void loadWebDavPasswordDraft();
   void nextTick(() => {
     voiceReadPanelRef.value?.initVoiceReadProfiles?.();
   });
@@ -348,6 +400,9 @@ watch(draftFontSize, (fs) => {
 watch(activeTab, (tab, prev) => {
   if (prev === "voiceRead" && tab !== "voiceRead") {
     voiceReadPanelRef.value?.cancelPreview?.();
+  }
+  if (tab === "webDav") {
+    void loadWebDavPasswordDraft();
   }
   void nextTick(() => {
     const el = settingsTabScrollerEl.value;
@@ -377,6 +432,7 @@ function resetGeneralDraft() {
   draftChapterCharCountExact.value = defaultChapterCharCountExact;
   draftEbookConvertOutputDir.value = resolveDefaultEbookConvertOutputDirSync();
   draftBookPackUnpackDir.value = resolveDefaultUnpackedBooksDirSync();
+  draftBookPackPassword.value = "";
 }
 
 function resetReadingDraft() {
@@ -386,6 +442,8 @@ function resetReadingDraft() {
     defaultReaderLineHeightMultiple,
   );
   draftMonacoSmoothScrolling.value = defaultMonacoSmoothScrolling;
+  draftMouseWheelScrollSensitivity.value = defaultMouseWheelScrollSensitivity;
+  draftFastScrollSensitivity.value = defaultFastScrollSensitivity;
   draftStickyChapterTitleEnabled.value = defaultStickyChapterTitleEnabled;
   draftChapterNavToolbarEnabled.value = defaultChapterNavToolbarEnabled;
   draftCompressBlankKeepOneBlank.value = defaultCompressBlankKeepOneBlank;
@@ -441,6 +499,14 @@ function resetVoiceReadDraft() {
   voiceReadPanelRef.value?.resetCurrentVoiceReadProfile?.();
 }
 
+function resetWebDavDraft() {
+  draftWebDavEnabled.value = false;
+  draftWebDavUrl.value = "";
+  draftWebDavUsername.value = "";
+  draftWebDavPassword.value = "";
+  draftWebDavRemoteDir.value = "ColorTxt";
+}
+
 function onResetCurrentTab() {
   if (activeTab.value === "general") resetGeneralDraft();
   else if (activeTab.value === "reading") resetReadingDraft();
@@ -450,6 +516,7 @@ function onResetCurrentTab() {
   else if (activeTab.value === "txt2img") resetTxt2ImgDraft();
   else if (activeTab.value === "skills") resetSkillsDraft();
   else if (activeTab.value === "voiceRead") resetVoiceReadDraft();
+  else if (activeTab.value === "webDav") resetWebDavDraft();
 }
 
 function onCancel() {
@@ -547,6 +614,15 @@ async function onConfirm() {
     return;
   }
 
+  try {
+    await window.colorTxt.secrets.setWebDavPassword(draftWebDavPassword.value);
+  } catch (e) {
+    await appAlert(
+      e instanceof Error ? e.message : "保存 WebDAV 密码失败",
+    );
+    return;
+  }
+
   aiPanelRef.value?.finalizeChatProfiles?.();
   txt2imgPanelRef.value?.finalizeTxt2ImgProfiles?.();
   voiceReadPanelRef.value?.finalizeVoiceReadProfiles?.();
@@ -577,6 +653,12 @@ async function onConfirm() {
     fullscreenReaderWidthPercent: draftFullscreenReaderWidthPercent.value,
     fullscreenShowSystemTime: draftFullscreenShowSystemTime.value,
     monacoSmoothScrolling: draftMonacoSmoothScrolling.value,
+    mouseWheelScrollSensitivity: clampMouseWheelScrollSensitivity(
+      draftMouseWheelScrollSensitivity.value,
+    ),
+    fastScrollSensitivity: clampFastScrollSensitivity(
+      draftFastScrollSensitivity.value,
+    ),
     stickyChapterTitleEnabled: draftStickyChapterTitleEnabled.value,
     chapterNavToolbarEnabled: draftChapterNavToolbarEnabled.value,
     chapterCharCountExact: draftChapterCharCountExact.value,
@@ -600,6 +682,11 @@ async function onConfirm() {
     }),
     ebookConvertOutputDir: draftEbookConvertOutputDir.value.trim(),
     bookPackUnpackDir: draftBookPackUnpackDir.value.trim(),
+    bookPackPassword: draftBookPackPassword.value,
+    webDavEnabled: draftWebDavEnabled.value,
+    webDavUrl: draftWebDavUrl.value.trim(),
+    webDavUsername: draftWebDavUsername.value.trim(),
+    webDavRemoteDir: draftWebDavRemoteDir.value.trim() || "ColorTxt",
     characterPortraitCacheDir: draftCharacterPortraitCacheDir.value.trim(),
     aiSkillsEnabled: mergeAiSkillsEnabled(
       draftAiSkillsEnabled.value,
@@ -621,8 +708,12 @@ async function onClearCache() {
     defaultId: 1,
     cancelId: 0,
     message: "是否清除应用缓存？",
-    detail:
-      "将删除会话、最近打开、文件列表、书签与阅读进度等本地数据；界面设置（字号、主题、配色等）将保留。清除后窗口会重新加载。",
+    detail: [
+      "将清除会话、最近打开、文件列表、收藏高亮词、阅读数据（含立绘）等本地缓存；",
+      "不会删除电子书转换的 .md 文件、书包解压的文件、找书下载的文件；",
+      "不影响界面相关的设置（字号、主题、配色等）；",
+      "清除后窗口会重新加载。",
+    ].join("\n"),
     noLink: true,
   });
   if (r.response !== 1) return;
@@ -631,7 +722,31 @@ async function onClearCache() {
   } catch {
     // ignore
   }
-  const saved = localStorage.getItem(persistKey);
+
+  // 删除角色立绘缓存根目录（含各书立绘与草稿）
+  try {
+    const root =
+      props.characterPortraitCacheDir.trim() ||
+      resolveDefaultCharacterPortraitCacheDirSync();
+    if (root) {
+      await window.colorTxt.removePath(root);
+    }
+  } catch {
+    /* 目录不存在或删除失败不阻断清除 */
+  }
+
+  let saved = localStorage.getItem(persistKey);
+  if (saved !== null) {
+    try {
+      const obj = JSON.parse(saved) as Record<string, unknown>;
+      if (obj && typeof obj === "object" && !Array.isArray(obj)) {
+        delete obj.highlightWordsByIndexGlobal;
+        saved = JSON.stringify(obj);
+      }
+    } catch {
+      // 保留原 settings 字符串
+    }
+  }
   try {
     localStorage.clear();
     if (saved !== null) localStorage.setItem(persistKey, saved);
@@ -773,6 +888,9 @@ async function onImportConfig(): Promise<void> {
                 draftEbookConvertOutputDir
               "
               v-model:draft-book-pack-unpack-dir="draftBookPackUnpackDir"
+              v-model:draft-book-pack-password="draftBookPackPassword"
+              v-model:show-book-pack-password="showBookPackPassword"
+              @open-reading-data="emit('openReadingData')"
               @clear-cache="onClearCache"
               @export-config="onExportConfig"
               @import-config="onImportConfig"
@@ -783,6 +901,10 @@ async function onImportConfig(): Promise<void> {
               v-model:draft-font-size="draftFontSize"
               v-model:draft-line-height-multiple="draftLineHeightMultiple"
               v-model:draft-monaco-smooth-scrolling="draftMonacoSmoothScrolling"
+              v-model:draft-mouse-wheel-scroll-sensitivity="
+                draftMouseWheelScrollSensitivity
+              "
+              v-model:draft-fast-scroll-sensitivity="draftFastScrollSensitivity"
               v-model:draft-sticky-chapter-title-enabled="
                 draftStickyChapterTitleEnabled
               "
@@ -866,6 +988,16 @@ async function onImportConfig(): Promise<void> {
               v-model:overrides="draftAiSkillOverrides"
               v-model:custom-skills="draftAiCustomSkills"
             />
+
+            <SettingsWebDavPanel
+              v-show="activeTab === 'webDav'"
+              context="main"
+              v-model:draft-web-dav-enabled="draftWebDavEnabled"
+              v-model:draft-web-dav-url="draftWebDavUrl"
+              v-model:draft-web-dav-username="draftWebDavUsername"
+              v-model:draft-web-dav-password="draftWebDavPassword"
+              v-model:draft-web-dav-remote-dir="draftWebDavRemoteDir"
+            />
           </div>
         </div>
       </div>
@@ -920,6 +1052,7 @@ async function onImportConfig(): Promise<void> {
   display: flex;
   flex-direction: column;
   flex: 1 1 auto;
+  min-width: 0;
   min-height: 0;
 }
 

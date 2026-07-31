@@ -3,6 +3,7 @@ import {
   shallowRef,
   watch,
   triggerRef,
+  nextTick,
   type Ref,
   type ShallowRef,
 } from "vue";
@@ -26,11 +27,21 @@ import {
   loadPersistedSettingsData,
   loadSessionSnapshot,
   loadTxtFileListSnapshot,
+  patchPersistedMainSettings,
   persistSessionSnapshot,
   persistSettingsData,
   persistTxtFileListSnapshot,
+  type PersistedSettingsData,
   type TxtFileItem,
 } from "../stores/cacheStore";
+import {
+  applyBaselineUpdates,
+  clonePersistBaselineValue,
+  mergeLocalPatchOntoDiskSettings,
+  readPersistedMainSettingsObject,
+  settingsPersistValuesEqual,
+  WINDOW_LOCAL_MAIN_SETTING_KEYS,
+} from "../services/settingsPersistMerge";
 import {
   resolveDefaultCharacterPortraitCacheDirSync,
   resolveDefaultUnpackedBooksDirSync,
@@ -99,6 +110,10 @@ import {
   minFullscreenReaderWidthPercent,
   minFontSize,
   minChapterMinCharCount,
+  clampMouseWheelScrollSensitivity,
+  clampFastScrollSensitivity,
+  defaultMouseWheelScrollSensitivity,
+  defaultFastScrollSensitivity,
   fileListKey,
   fileMetaKey,
   persistKey,
@@ -136,6 +151,7 @@ import { DEPRECATED_SECRET_SLOT_VOICE_READ_DASHSCOPE_API_KEY } from "@shared/sec
 import { parseProfileKeysBlob } from "@shared/aiEndpointProfiles";
 import { parseProfileSecretsBlob, serializeProfileSecretsBlob } from "@shared/voiceReadEngineConfig";
 import {
+  mergeVoiceReadProfilesForPersist,
   migrateVoiceReadFromPersisted,
   normalizeVoiceReadProfilesForSave,
   type PersistedVoiceReadRaw,
@@ -216,6 +232,8 @@ export function useAppPersistence(deps: {
   chapterMinCharCount: Ref<number>;
   monacoAdvancedWrapping: Ref<boolean>;
   monacoSmoothScrolling: Ref<boolean>;
+  mouseWheelScrollSensitivity: Ref<number>;
+  fastScrollSensitivity: Ref<number>;
   stickyChapterTitleEnabled: Ref<boolean>;
   chapterNavToolbarEnabled: Ref<boolean>;
   readerEditShowLineNumbers: Ref<boolean>;
@@ -247,6 +265,16 @@ export function useAppPersistence(deps: {
   ebookConvertOutputDir: Ref<string>;
   /** 彩读书包解压目录；空串运行时回退 userData/UnpackedBooks；无键时首次写入默认路径 */
   bookPackUnpackDir: Ref<string>;
+  /** 彩读书包默认密码；空串表示不加密 */
+  bookPackPassword: Ref<string>;
+  /** 是否启用 WebDAV 同步入口 */
+  webDavEnabled: Ref<boolean>;
+  /** WebDAV 服务地址 */
+  webDavUrl: Ref<string>;
+  /** WebDAV 用户名 */
+  webDavUsername: Ref<string>;
+  /** WebDAV 应用根目录名（默认 ColorTxt） */
+  webDavRemoteDir: Ref<string>;
   /** 角色立绘缓存根目录（绝对路径）；无键时默认 userData/CharacterPortrait */
   characterPortraitCacheDir: Ref<string>;
   /** 角色卡纹理/全息效果（全局） */
@@ -272,6 +300,161 @@ export function useAppPersistence(deps: {
   activeVoiceReadProfileId: Ref<string>;
 }) {
   const settingsLoaded = ref(false);
+  /** 本窗启动/加载时已知的朗读方案 id；保存合并时用于区分「本窗删除」与「它窗新增」 */
+  let voiceReadProfileBaselineIds = new Set<string>();
+  /**
+   * 多窗不实时同步字段的落盘基线：相对基线未改则保留磁盘最新值；
+   * 读磁盘只用于拼写回盘，不合并进本窗内存。
+   */
+  const settingsPersistBaseline: Record<string, unknown> = {};
+  /** 防止 persistSettings 写回 voice 触发 watch 再入 */
+  let persistingSettings = false;
+
+  function setVoiceReadProfileBaseline(
+    profiles: readonly VoiceReadProfile[],
+  ) {
+    voiceReadProfileBaselineIds = new Set(
+      profiles.map((p) => p.id).filter(Boolean),
+    );
+  }
+
+  function buildVoiceReadPersistPayload(): Record<string, unknown> {
+    const voiceReadMerged = stripVoiceReadSettingsApiKeysForDisk(
+      mergeVoiceReadSettings(deps.voiceReadSettings.value),
+    );
+    const profilesForDisk = stripVoiceReadProfileApiKeysForDisk(
+      normalizeVoiceReadProfilesForSave(deps.voiceReadProfiles.value),
+    );
+    const voiceReadTokenPayload = voiceReadAiSpeakerTokenUsagePersistPayload();
+    return {
+      activeProfileId: deps.activeVoiceReadProfileId.value,
+      profiles: profilesForDisk,
+      ...voiceReadMerged,
+      aiSpeakerTokenUsage: voiceReadTokenPayload.usage,
+      aiSpeakerTokenUsageAvailable: voiceReadTokenPayload.available,
+    };
+  }
+
+  function buildSettingsPersistPatch(
+    voiceReadPayload: Record<string, unknown>,
+  ): Record<string, unknown> {
+    return {
+      theme: deps.currentTheme.value === "vs" ? "vs" : "vs-dark",
+      sidebarWidth: deps.sidebarWidth.value,
+      showSidebar: deps.showSidebar.value,
+      fontSize: deps.readerFontSize.value,
+      lineHeightMultiple: deps.readerLineHeightMultiple.value,
+      fontFamily: deps.monacoFontFamily.value,
+      pinnedOtherFonts: [...deps.pinnedOtherFonts.value],
+      monacoCustomHighlight: deps.monacoCustomHighlight.value,
+      compressBlankLines: deps.compressBlankLines.value,
+      compressBlankKeepOneBlank: deps.compressBlankKeepOneBlank.value,
+      txtrDelimitedMatchCrossLine: deps.txtrDelimitedMatchCrossLine.value,
+      leadIndentFullWidth: deps.leadIndentFullWidth.value,
+      textConvertZh: deps.textConvertZh.value,
+      textConvertLetter: deps.textConvertLetter.value,
+      textConvertDigit: deps.textConvertDigit.value,
+      showChapterCounts: deps.showChapterCounts.value,
+      chapterCharCountExact: deps.chapterCharCountExact.value,
+      chapterRules: deps.chapterRuleState.value.rules,
+      restoreSessionOnStartup: deps.restoreSessionOnStartup.value,
+      syncCurrentFile: deps.syncCurrentFile.value,
+      recentFilesHistoryLimit: recentLimit(),
+      chapterMinCharCount: deps.chapterMinCharCount.value,
+      monacoAdvancedWrapping: deps.monacoAdvancedWrapping.value,
+      monacoSmoothScrolling: deps.monacoSmoothScrolling.value,
+      mouseWheelScrollSensitivity: deps.mouseWheelScrollSensitivity.value,
+      fastScrollSensitivity: deps.fastScrollSensitivity.value,
+      stickyChapterTitleEnabled: deps.stickyChapterTitleEnabled.value,
+      chapterNavToolbarEnabled: deps.chapterNavToolbarEnabled.value,
+      readerEditShowLineNumbers: deps.readerEditShowLineNumbers.value,
+      readerEditMinimap: deps.readerEditMinimap.value,
+      editAutoRefreshChapterList: deps.editAutoRefreshChapterList.value,
+      aiSmartFormat: deps.aiSmartFormat.value,
+      fullscreenReaderWidthPercent: deps.fullscreenReaderWidthPercent.value,
+      fullscreenShowSystemTime: deps.fullscreenShowSystemTime.value,
+      timedScroll: deps.timedScrollSettings.value,
+      pomodoro: deps.pomodoroSettings.value,
+      shortcutBindings: deps.shortcutBindings.value,
+      // 空对象也要写入：合并落盘时若用 undefined 会跳过，磁盘上旧覆盖无法清除（恢复默认失效）
+      readerPaletteOverridesLight: {
+        ...deps.readerPaletteOverridesLight.value,
+      },
+      readerPaletteOverridesDark: {
+        ...deps.readerPaletteOverridesDark.value,
+      },
+      readerPaletteColorEnabledOverridesLight: {
+        ...deps.readerPaletteColorEnabledOverridesLight.value,
+      },
+      readerPaletteColorEnabledOverridesDark: {
+        ...deps.readerPaletteColorEnabledOverridesDark.value,
+      },
+      highlightColorsLight: highlightColorsPersistPayload(
+        deps.highlightColorsLight.value,
+        DEFAULT_HIGHLIGHT_COLORS_LIGHT,
+      ),
+      highlightColorsDark: highlightColorsPersistPayload(
+        deps.highlightColorsDark.value,
+        DEFAULT_HIGHLIGHT_COLORS_DARK,
+      ),
+      lineationColorsLight: lineationColorsPersistPayload(
+        deps.lineationColorsLight.value,
+        DEFAULT_LINEATION_COLORS_LIGHT,
+      ),
+      lineationColorsDark: lineationColorsPersistPayload(
+        deps.lineationColorsDark.value,
+        DEFAULT_LINEATION_COLORS_DARK,
+      ),
+      highlightWordsByIndexGlobal: deps.highlightWordsByIndexGlobal.value,
+      lineationLastColors:
+        deps.lineationLastColors.value.marker ===
+          DEFAULT_LINEATION_LAST_COLORS.marker &&
+        deps.lineationLastColors.value.wavy ===
+          DEFAULT_LINEATION_LAST_COLORS.wavy &&
+        deps.lineationLastColors.value.straight ===
+          DEFAULT_LINEATION_LAST_COLORS.straight
+          ? undefined
+          : { ...deps.lineationLastColors.value },
+      ebookConvertOutputDir: deps.ebookConvertOutputDir.value,
+      bookPackUnpackDir: deps.bookPackUnpackDir.value.trim(),
+      bookPackPassword: deps.bookPackPassword.value,
+      webDavEnabled: deps.webDavEnabled.value,
+      webDavUrl: deps.webDavUrl.value,
+      webDavUsername: deps.webDavUsername.value,
+      webDavRemoteDir: deps.webDavRemoteDir.value.trim() || "ColorTxt",
+      characterPortraitCacheDir: deps.characterPortraitCacheDir.value.trim(),
+      characterCardTextureEffect: deps.characterCardTextureEffect.value,
+      fileCategory: deps.fileCategory.value,
+      fileSort: deps.fileSort.value,
+      fileCategoryCatalog: deps.fileCategoryCatalog.value,
+      aiSkillsEnabled: deps.aiSkillsEnabled.value,
+      aiSkillOverrides:
+        Object.keys(deps.aiSkillOverrides.value).length > 0
+          ? deps.aiSkillOverrides.value
+          : undefined,
+      aiCustomSkills:
+        deps.aiCustomSkills.value.length > 0
+          ? deps.aiCustomSkills.value
+          : undefined,
+      aiAssistantDeepThinking: deps.aiAssistantDeepThinking.value,
+      aiAssistantSpoilerSafe: deps.aiAssistantSpoilerSafe.value,
+      wordcloudFontFamily: deps.wordcloudFontFamily.value,
+      wordcloudAngleMode: deps.wordcloudAngleMode.value,
+      wordcloudPaletteId: deps.wordcloudPaletteId.value,
+      voiceRead: voiceReadPayload,
+    };
+  }
+
+  function captureSettingsPersistBaselineFromMemory() {
+    const patch = buildSettingsPersistPatch(buildVoiceReadPersistPayload());
+    for (const key of WINDOW_LOCAL_MAIN_SETTING_KEYS) {
+      if (key in patch && patch[key] !== undefined) {
+        settingsPersistBaseline[key] = clonePersistBaselineValue(patch[key]);
+      } else if (key === "pinnedOtherFonts") {
+        settingsPersistBaseline[key] = [];
+      }
+    }
+  }
   let storageSyncBound = false;
 
   /** 合并短时间内的 file.meta 写盘，避免换书 / 恢复 / 拖入打开时主线程长时间 JSON.stringify */
@@ -484,8 +667,11 @@ export function useAppPersistence(deps: {
       return;
     }
     if (ev.key === persistKey) {
-      // 侧栏宽度按窗口独立；仍同步其它设置，并保留写盘供新窗/重启使用
-      loadPersistedSettings({ applySidebarWidth: false });
+      // 侧栏宽度、阅读/编辑/语音朗读相关 UI 按窗口独立；其它设置仍跨窗同步
+      loadPersistedSettings({
+        applySidebarWidth: false,
+        applyReaderUiPrefs: false,
+      });
     }
   }
 
@@ -802,12 +988,18 @@ export function useAppPersistence(deps: {
   function loadPersistedSettings(options?: {
     /** 为 false 时不覆盖本窗口侧栏宽度（多窗口 storage 同步） */
     applySidebarWidth?: boolean;
+    /**
+     * 为 false 时不覆盖本窗口阅读/编辑/语音朗读相关 UI。
+     * 多窗口 storage 同步时使用，避免「界面仍是本窗值、打开设置却是别窗刚存的值」。
+     */
+    applyReaderUiPrefs?: boolean;
   }): {
     ebookConvertOutputDirKeyPresent: boolean;
     bookPackUnpackDirKeyPresent: boolean;
     characterPortraitCacheDirKeyPresent: boolean;
   } {
     const applySidebarWidth = options?.applySidebarWidth !== false;
+    const applyReaderUiPrefs = options?.applyReaderUiPrefs !== false;
     const loaded = loadPersistedSettingsData(
       typeof window !== "undefined" ? window.localStorage : undefined,
       persistKey,
@@ -840,38 +1032,41 @@ export function useAppPersistence(deps: {
       deps.showSidebar.value = data.showSidebar;
     }
 
-    if (typeof data.monacoCustomHighlight === "boolean") {
-      deps.monacoCustomHighlight.value = data.monacoCustomHighlight;
-    }
+    if (applyReaderUiPrefs) {
+      if (typeof data.monacoCustomHighlight === "boolean") {
+        deps.monacoCustomHighlight.value = data.monacoCustomHighlight;
+      }
 
-    if (typeof data.compressBlankLines === "boolean") {
-      deps.compressBlankLines.value = data.compressBlankLines;
-    }
+      if (typeof data.compressBlankLines === "boolean") {
+        deps.compressBlankLines.value = data.compressBlankLines;
+      }
 
-    if (typeof data.compressBlankKeepOneBlank === "boolean") {
-      deps.compressBlankKeepOneBlank.value = data.compressBlankKeepOneBlank;
-    }
+      if (typeof data.compressBlankKeepOneBlank === "boolean") {
+        deps.compressBlankKeepOneBlank.value = data.compressBlankKeepOneBlank;
+      }
 
-    if (typeof data.txtrDelimitedMatchCrossLine === "boolean") {
-      deps.txtrDelimitedMatchCrossLine.value = data.txtrDelimitedMatchCrossLine;
-    }
+      if (typeof data.txtrDelimitedMatchCrossLine === "boolean") {
+        deps.txtrDelimitedMatchCrossLine.value =
+          data.txtrDelimitedMatchCrossLine;
+      }
 
-    if (typeof data.leadIndentFullWidth === "boolean") {
-      deps.leadIndentFullWidth.value = data.leadIndentFullWidth;
-    }
+      if (typeof data.leadIndentFullWidth === "boolean") {
+        deps.leadIndentFullWidth.value = data.leadIndentFullWidth;
+      }
 
-    if (data.textConvertZh != null) {
-      deps.textConvertZh.value = parseTextConvertZhMode(data.textConvertZh);
-    }
-    if (data.textConvertLetter != null) {
-      deps.textConvertLetter.value = parseTextConvertWidthMode(
-        data.textConvertLetter,
-      );
-    }
-    if (data.textConvertDigit != null) {
-      deps.textConvertDigit.value = parseTextConvertWidthMode(
-        data.textConvertDigit,
-      );
+      if (data.textConvertZh != null) {
+        deps.textConvertZh.value = parseTextConvertZhMode(data.textConvertZh);
+      }
+      if (data.textConvertLetter != null) {
+        deps.textConvertLetter.value = parseTextConvertWidthMode(
+          data.textConvertLetter,
+        );
+      }
+      if (data.textConvertDigit != null) {
+        deps.textConvertDigit.value = parseTextConvertWidthMode(
+          data.textConvertDigit,
+        );
+      }
     }
 
     if (typeof data.showChapterCounts === "boolean") {
@@ -881,27 +1076,29 @@ export function useAppPersistence(deps: {
       deps.chapterCharCountExact.value = data.chapterCharCountExact;
     }
 
-    if (typeof data.fontSize === "number") {
-      deps.readerFontSize.value = Math.max(
-        minFontSize,
-        Math.min(maxFontSize, Math.round(data.fontSize)),
-      );
-    }
+    if (applyReaderUiPrefs) {
+      if (typeof data.fontSize === "number") {
+        deps.readerFontSize.value = Math.max(
+          minFontSize,
+          Math.min(maxFontSize, Math.round(data.fontSize)),
+        );
+      }
 
-    if (typeof data.lineHeightMultiple === "number") {
-      deps.readerLineHeightMultiple.value = clampLineHeightMultipleForFontSize(
-        deps.readerFontSize.value,
-        data.lineHeightMultiple,
-      );
-    }
+      if (typeof data.lineHeightMultiple === "number") {
+        deps.readerLineHeightMultiple.value = clampLineHeightMultipleForFontSize(
+          deps.readerFontSize.value,
+          data.lineHeightMultiple,
+        );
+      }
 
-    if (typeof data.fontFamily === "string" && data.fontFamily.trim()) {
-      deps.monacoFontFamily.value = data.fontFamily;
-    }
-    if (Array.isArray(data.pinnedOtherFonts)) {
-      deps.pinnedOtherFonts.value = data.pinnedOtherFonts
-        .map((f) => f.trim())
-        .filter(Boolean);
+      if (typeof data.fontFamily === "string" && data.fontFamily.trim()) {
+        deps.monacoFontFamily.value = data.fontFamily;
+      }
+      if (Array.isArray(data.pinnedOtherFonts)) {
+        deps.pinnedOtherFonts.value = data.pinnedOtherFonts
+          .map((f) => f.trim())
+          .filter(Boolean);
+      }
     }
 
     if (typeof data.restoreSessionOnStartup === "boolean") {
@@ -938,50 +1135,75 @@ export function useAppPersistence(deps: {
       deps.chapterMinCharCount.value = defaultChapterMinCharCount;
     }
 
-    if (typeof data.monacoAdvancedWrapping === "boolean") {
-      deps.monacoAdvancedWrapping.value = data.monacoAdvancedWrapping;
-    }
-    if (typeof data.monacoSmoothScrolling === "boolean") {
-      deps.monacoSmoothScrolling.value = data.monacoSmoothScrolling;
-    }
-    if (typeof data.stickyChapterTitleEnabled === "boolean") {
-      deps.stickyChapterTitleEnabled.value = data.stickyChapterTitleEnabled;
-    }
-    if (typeof data.chapterNavToolbarEnabled === "boolean") {
-      deps.chapterNavToolbarEnabled.value = data.chapterNavToolbarEnabled;
-    }
-    if (typeof data.readerEditShowLineNumbers === "boolean") {
-      deps.readerEditShowLineNumbers.value = data.readerEditShowLineNumbers;
-    }
-    if (typeof data.readerEditMinimap === "boolean") {
-      deps.readerEditMinimap.value = data.readerEditMinimap;
-    }
-    if (typeof data.editAutoRefreshChapterList === "boolean") {
-      deps.editAutoRefreshChapterList.value = data.editAutoRefreshChapterList;
-    }
-    deps.aiSmartFormat.value = mergeAiSmartFormatSettings(data.aiSmartFormat);
-    if (
-      typeof data.fullscreenReaderWidthPercent === "number" &&
-      Number.isFinite(data.fullscreenReaderWidthPercent)
-    ) {
-      deps.fullscreenReaderWidthPercent.value = Math.max(
-        minFullscreenReaderWidthPercent,
-        Math.min(
-          maxFullscreenReaderWidthPercent,
-          Math.floor(data.fullscreenReaderWidthPercent),
-        ),
+    if (applyReaderUiPrefs) {
+      if (typeof data.monacoAdvancedWrapping === "boolean") {
+        deps.monacoAdvancedWrapping.value = data.monacoAdvancedWrapping;
+      }
+      if (typeof data.monacoSmoothScrolling === "boolean") {
+        deps.monacoSmoothScrolling.value = data.monacoSmoothScrolling;
+      }
+      if (
+        typeof data.mouseWheelScrollSensitivity === "number" &&
+        Number.isFinite(data.mouseWheelScrollSensitivity)
+      ) {
+        deps.mouseWheelScrollSensitivity.value =
+          clampMouseWheelScrollSensitivity(data.mouseWheelScrollSensitivity);
+      } else {
+        deps.mouseWheelScrollSensitivity.value =
+          defaultMouseWheelScrollSensitivity;
+      }
+      if (
+        typeof data.fastScrollSensitivity === "number" &&
+        Number.isFinite(data.fastScrollSensitivity)
+      ) {
+        deps.fastScrollSensitivity.value = clampFastScrollSensitivity(
+          data.fastScrollSensitivity,
+        );
+      } else {
+        deps.fastScrollSensitivity.value = defaultFastScrollSensitivity;
+      }
+      if (typeof data.stickyChapterTitleEnabled === "boolean") {
+        deps.stickyChapterTitleEnabled.value = data.stickyChapterTitleEnabled;
+      }
+      if (typeof data.chapterNavToolbarEnabled === "boolean") {
+        deps.chapterNavToolbarEnabled.value = data.chapterNavToolbarEnabled;
+      }
+      if (typeof data.readerEditShowLineNumbers === "boolean") {
+        deps.readerEditShowLineNumbers.value = data.readerEditShowLineNumbers;
+      }
+      if (typeof data.readerEditMinimap === "boolean") {
+        deps.readerEditMinimap.value = data.readerEditMinimap;
+      }
+      if (typeof data.editAutoRefreshChapterList === "boolean") {
+        deps.editAutoRefreshChapterList.value =
+          data.editAutoRefreshChapterList;
+      }
+      deps.aiSmartFormat.value = mergeAiSmartFormatSettings(data.aiSmartFormat);
+      if (
+        typeof data.fullscreenReaderWidthPercent === "number" &&
+        Number.isFinite(data.fullscreenReaderWidthPercent)
+      ) {
+        deps.fullscreenReaderWidthPercent.value = Math.max(
+          minFullscreenReaderWidthPercent,
+          Math.min(
+            maxFullscreenReaderWidthPercent,
+            Math.floor(data.fullscreenReaderWidthPercent),
+          ),
+        );
+      } else {
+        deps.fullscreenReaderWidthPercent.value =
+          defaultFullscreenReaderWidthPercent;
+      }
+      if (typeof data.fullscreenShowSystemTime === "boolean") {
+        deps.fullscreenShowSystemTime.value = data.fullscreenShowSystemTime;
+      } else {
+        deps.fullscreenShowSystemTime.value = defaultFullscreenShowSystemTime;
+      }
+      deps.timedScrollSettings.value = mergeTimedScrollSettings(
+        data.timedScroll,
       );
-    } else {
-      deps.fullscreenReaderWidthPercent.value =
-        defaultFullscreenReaderWidthPercent;
+      deps.pomodoroSettings.value = mergePomodoroSettings(data.pomodoro);
     }
-    if (typeof data.fullscreenShowSystemTime === "boolean") {
-      deps.fullscreenShowSystemTime.value = data.fullscreenShowSystemTime;
-    } else {
-      deps.fullscreenShowSystemTime.value = defaultFullscreenShowSystemTime;
-    }
-    deps.timedScrollSettings.value = mergeTimedScrollSettings(data.timedScroll);
-    deps.pomodoroSettings.value = mergePomodoroSettings(data.pomodoro);
     deps.shortcutBindings.value = mergeShortcutBindings(
       deps.defaultShortcutBindings,
       data.shortcutBindings,
@@ -1051,6 +1273,23 @@ export function useAppPersistence(deps: {
       deps.bookPackUnpackDir.value = data.bookPackUnpackDir.trim();
     }
 
+    if (typeof data.bookPackPassword === "string") {
+      deps.bookPackPassword.value = data.bookPackPassword;
+    }
+
+    if (typeof data.webDavEnabled === "boolean") {
+      deps.webDavEnabled.value = data.webDavEnabled;
+    }
+    if (typeof data.webDavUrl === "string") {
+      deps.webDavUrl.value = data.webDavUrl;
+    }
+    if (typeof data.webDavUsername === "string") {
+      deps.webDavUsername.value = data.webDavUsername;
+    }
+    if (typeof data.webDavRemoteDir === "string") {
+      deps.webDavRemoteDir.value = data.webDavRemoteDir.trim() || "ColorTxt";
+    }
+
     if (typeof data.characterPortraitCacheDir === "string") {
       deps.characterPortraitCacheDir.value =
         data.characterPortraitCacheDir.trim();
@@ -1103,26 +1342,28 @@ export function useAppPersistence(deps: {
       deps.wordcloudPaletteId.value = data.wordcloudPaletteId;
     }
 
-    const voiceReadBundle = migrateVoiceReadFromPersisted(
-      data.voiceRead as PersistedVoiceReadRaw | undefined,
-    );
-    deps.voiceReadProfiles.value = voiceReadBundle.profiles;
-    deps.activeVoiceReadProfileId.value = voiceReadBundle.activeProfileId;
-    deps.voiceReadSettings.value = mergeVoiceReadSettings(
-      voiceReadBundle.activeSettings,
-    );
-    const vrRaw = data.voiceRead as PersistedVoiceReadRaw | undefined;
-    hydrateVoiceReadAiSpeakerTokenUsage({
-      usage:
-        vrRaw && typeof vrRaw === "object"
-          ? (vrRaw as Record<string, unknown>).aiSpeakerTokenUsage as Partial<AITokenUsageTotals> | null | undefined
-          : undefined,
-      available:
-        vrRaw && typeof vrRaw === "object"
-          ? (vrRaw as Record<string, unknown>).aiSpeakerTokenUsageAvailable ===
-            true
-          : false,
-    });
+    if (applyReaderUiPrefs) {
+      const voiceReadBundle = migrateVoiceReadFromPersisted(
+        data.voiceRead as PersistedVoiceReadRaw | undefined,
+      );
+      deps.voiceReadProfiles.value = voiceReadBundle.profiles;
+      deps.activeVoiceReadProfileId.value = voiceReadBundle.activeProfileId;
+      deps.voiceReadSettings.value = mergeVoiceReadSettings(
+        voiceReadBundle.activeSettings,
+      );
+      const vrRaw = data.voiceRead as PersistedVoiceReadRaw | undefined;
+      hydrateVoiceReadAiSpeakerTokenUsage({
+        usage: vrRaw?.aiSpeakerTokenUsage,
+        available: vrRaw?.aiSpeakerTokenUsageAvailable === true,
+      });
+      setVoiceReadProfileBaseline(deps.voiceReadProfiles.value);
+    }
+
+    if (applyReaderUiPrefs) {
+      captureSettingsPersistBaselineFromMemory();
+    } else if (applySidebarWidth) {
+      settingsPersistBaseline.sidebarWidth = deps.sidebarWidth.value;
+    }
 
     return {
       ebookConvertOutputDirKeyPresent,
@@ -1132,7 +1373,7 @@ export function useAppPersistence(deps: {
   }
 
   function persistSettings() {
-    if (!settingsLoaded.value) return;
+    if (!settingsLoaded.value || persistingSettings) return;
     try {
       if (
         typeof sessionStorage !== "undefined" &&
@@ -1143,125 +1384,77 @@ export function useAppPersistence(deps: {
     } catch {
       // ignore
     }
-    const voiceReadMerged = stripVoiceReadSettingsApiKeysForDisk(
-      mergeVoiceReadSettings(deps.voiceReadSettings.value),
+
+    persistingSettings = true;
+    try {
+      const localVoicePayload = buildVoiceReadPersistPayload();
+      const patch = buildSettingsPersistPatch(localVoicePayload);
+      const disk = readPersistedMainSettingsObject();
+      const voiceSkip = new Set<string>(["voiceRead"]);
+      const { next, writtenKeys } = mergeLocalPatchOntoDiskSettings({
+        disk,
+        patch,
+        baseline: settingsPersistBaseline,
+        skipKeys: voiceSkip,
+      });
+      applyBaselineUpdates(settingsPersistBaseline, patch, writtenKeys);
+
+      const voiceDirty = !settingsPersistValuesEqual(
+        localVoicePayload,
+        settingsPersistBaseline.voiceRead,
+      );
+      if (voiceDirty) {
+        const diskVoice = migrateVoiceReadFromPersisted(
+          disk.voiceRead as PersistedVoiceReadRaw | undefined,
+        );
+        const mergedVoice = mergeVoiceReadProfilesForPersist({
+          localProfiles: deps.voiceReadProfiles.value,
+          diskProfiles: diskVoice.profiles,
+          baselineKnownIds: voiceReadProfileBaselineIds,
+          localActiveProfileId: deps.activeVoiceReadProfileId.value,
+          diskActiveProfileId: diskVoice.activeProfileId,
+        });
+        const voiceReadMerged = stripVoiceReadSettingsApiKeysForDisk(
+          mergeVoiceReadSettings(deps.voiceReadSettings.value),
+        );
+        const profilesForDisk = stripVoiceReadProfileApiKeysForDisk(
+          normalizeVoiceReadProfilesForSave(mergedVoice.profiles),
+        );
+        const voiceReadTokenPayload =
+          voiceReadAiSpeakerTokenUsagePersistPayload();
+        next.voiceRead = {
+          activeProfileId: mergedVoice.activeProfileId,
+          profiles: profilesForDisk,
+          ...voiceReadMerged,
+          aiSpeakerTokenUsage: voiceReadTokenPayload.usage,
+          aiSpeakerTokenUsageAvailable: voiceReadTokenPayload.available,
+        };
+        // 基线只记本窗内存；磁盘合并结果不灌回本窗
+        settingsPersistBaseline.voiceRead =
+          clonePersistBaselineValue(localVoicePayload);
+        setVoiceReadProfileBaseline(deps.voiceReadProfiles.value);
+      }
+
+      persistSettingsData(
+        window.localStorage,
+        persistKey,
+        next as PersistedSettingsData,
+      );
+    } finally {
+      // watch(voiceRead*) 在当前 tick 结束后触发，延后清标志避免再入死循环
+      void nextTick(() => {
+        persistingSettings = false;
+      });
+    }
+  }
+
+  /** 仅写入侧栏宽度（相对基线有改动时），不整份回写阅读等设置 */
+  function persistSidebarWidth() {
+    if (!settingsLoaded.value) return;
+    patchPersistedMainSettings(
+      { sidebarWidth: deps.sidebarWidth.value },
+      { baseline: settingsPersistBaseline },
     );
-    const profilesForDisk = stripVoiceReadProfileApiKeysForDisk(
-      normalizeVoiceReadProfilesForSave(deps.voiceReadProfiles.value),
-    );
-    const voiceReadTokenPayload = voiceReadAiSpeakerTokenUsagePersistPayload();
-    persistSettingsData(window.localStorage, persistKey, {
-      theme: deps.currentTheme.value === "vs" ? "vs" : "vs-dark",
-      sidebarWidth: deps.sidebarWidth.value,
-      showSidebar: deps.showSidebar.value,
-      fontSize: deps.readerFontSize.value,
-      lineHeightMultiple: deps.readerLineHeightMultiple.value,
-      fontFamily: deps.monacoFontFamily.value,
-      pinnedOtherFonts:
-        deps.pinnedOtherFonts.value.length > 0
-          ? deps.pinnedOtherFonts.value
-          : undefined,
-      monacoCustomHighlight: deps.monacoCustomHighlight.value,
-      compressBlankLines: deps.compressBlankLines.value,
-      compressBlankKeepOneBlank: deps.compressBlankKeepOneBlank.value,
-      txtrDelimitedMatchCrossLine: deps.txtrDelimitedMatchCrossLine.value,
-      leadIndentFullWidth: deps.leadIndentFullWidth.value,
-      textConvertZh: deps.textConvertZh.value,
-      textConvertLetter: deps.textConvertLetter.value,
-      textConvertDigit: deps.textConvertDigit.value,
-      showChapterCounts: deps.showChapterCounts.value,
-      chapterCharCountExact: deps.chapterCharCountExact.value,
-      chapterRules: deps.chapterRuleState.value.rules,
-      restoreSessionOnStartup: deps.restoreSessionOnStartup.value,
-      syncCurrentFile: deps.syncCurrentFile.value,
-      recentFilesHistoryLimit: recentLimit(),
-      chapterMinCharCount: deps.chapterMinCharCount.value,
-      monacoAdvancedWrapping: deps.monacoAdvancedWrapping.value,
-      monacoSmoothScrolling: deps.monacoSmoothScrolling.value,
-      stickyChapterTitleEnabled: deps.stickyChapterTitleEnabled.value,
-      chapterNavToolbarEnabled: deps.chapterNavToolbarEnabled.value,
-      readerEditShowLineNumbers: deps.readerEditShowLineNumbers.value,
-      readerEditMinimap: deps.readerEditMinimap.value,
-      editAutoRefreshChapterList: deps.editAutoRefreshChapterList.value,
-      aiSmartFormat: deps.aiSmartFormat.value,
-      fullscreenReaderWidthPercent: deps.fullscreenReaderWidthPercent.value,
-      fullscreenShowSystemTime: deps.fullscreenShowSystemTime.value,
-      timedScroll: deps.timedScrollSettings.value,
-      pomodoro: deps.pomodoroSettings.value,
-      shortcutBindings: deps.shortcutBindings.value,
-      readerPaletteOverridesLight:
-        Object.keys(deps.readerPaletteOverridesLight.value).length > 0
-          ? deps.readerPaletteOverridesLight.value
-          : undefined,
-      readerPaletteOverridesDark:
-        Object.keys(deps.readerPaletteOverridesDark.value).length > 0
-          ? deps.readerPaletteOverridesDark.value
-          : undefined,
-      readerPaletteColorEnabledOverridesLight:
-        Object.keys(deps.readerPaletteColorEnabledOverridesLight.value).length >
-        0
-          ? deps.readerPaletteColorEnabledOverridesLight.value
-          : undefined,
-      readerPaletteColorEnabledOverridesDark:
-        Object.keys(deps.readerPaletteColorEnabledOverridesDark.value).length >
-        0
-          ? deps.readerPaletteColorEnabledOverridesDark.value
-          : undefined,
-      highlightColorsLight: highlightColorsPersistPayload(
-        deps.highlightColorsLight.value,
-        DEFAULT_HIGHLIGHT_COLORS_LIGHT,
-      ),
-      highlightColorsDark: highlightColorsPersistPayload(
-        deps.highlightColorsDark.value,
-        DEFAULT_HIGHLIGHT_COLORS_DARK,
-      ),
-      lineationColorsLight: lineationColorsPersistPayload(
-        deps.lineationColorsLight.value,
-        DEFAULT_LINEATION_COLORS_LIGHT,
-      ),
-      lineationColorsDark: lineationColorsPersistPayload(
-        deps.lineationColorsDark.value,
-        DEFAULT_LINEATION_COLORS_DARK,
-      ),
-      highlightWordsByIndexGlobal: deps.highlightWordsByIndexGlobal.value,
-      lineationLastColors:
-        deps.lineationLastColors.value.marker ===
-          DEFAULT_LINEATION_LAST_COLORS.marker &&
-        deps.lineationLastColors.value.wavy ===
-          DEFAULT_LINEATION_LAST_COLORS.wavy &&
-        deps.lineationLastColors.value.straight ===
-          DEFAULT_LINEATION_LAST_COLORS.straight
-          ? undefined
-          : { ...deps.lineationLastColors.value },
-      ebookConvertOutputDir: deps.ebookConvertOutputDir.value,
-      bookPackUnpackDir: deps.bookPackUnpackDir.value.trim(),
-      characterPortraitCacheDir: deps.characterPortraitCacheDir.value.trim(),
-      characterCardTextureEffect: deps.characterCardTextureEffect.value,
-      fileCategory: deps.fileCategory.value,
-      fileSort: deps.fileSort.value,
-      fileCategoryCatalog: deps.fileCategoryCatalog.value,
-      aiSkillsEnabled: deps.aiSkillsEnabled.value,
-      aiSkillOverrides:
-        Object.keys(deps.aiSkillOverrides.value).length > 0
-          ? deps.aiSkillOverrides.value
-          : undefined,
-      aiCustomSkills:
-        deps.aiCustomSkills.value.length > 0
-          ? deps.aiCustomSkills.value
-          : undefined,
-      aiAssistantDeepThinking: deps.aiAssistantDeepThinking.value,
-      aiAssistantSpoilerSafe: deps.aiAssistantSpoilerSafe.value,
-      wordcloudFontFamily: deps.wordcloudFontFamily.value,
-      wordcloudAngleMode: deps.wordcloudAngleMode.value,
-      wordcloudPaletteId: deps.wordcloudPaletteId.value,
-      voiceRead: {
-        activeProfileId: deps.activeVoiceReadProfileId.value.trim(),
-        profiles: profilesForDisk,
-        ...voiceReadMerged,
-        aiSpeakerTokenUsage: voiceReadTokenPayload.usage,
-        aiSpeakerTokenUsageAvailable: voiceReadTokenPayload.available,
-      },
-    });
   }
 
   function clearPersistedSession() {
@@ -1372,6 +1565,7 @@ export function useAppPersistence(deps: {
     clearBookmarks,
     loadPersistedSettings,
     persistSettings,
+    persistSidebarWidth,
     persistVoiceReadSecretsToVault,
     persistReadingSessionSnapshot,
     persistWindowUnloadState,

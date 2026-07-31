@@ -3,10 +3,7 @@ import {
   bookTitleForExport,
   pickAndReadJsonFile,
 } from "./readerAnnotationExport";
-import {
-  chatExportDateSlug,
-  sanitizeChatExportTitleForFilename,
-} from "../aiAssistant/aiAssistantExport";
+import { sanitizeChatExportTitleForFilename } from "../aiAssistant/aiAssistantExport";
 
 export type ReaderBookmarksExportV1 = {
   schemaVersion: 1;
@@ -48,11 +45,10 @@ export function normalizeBookmarksList(
 }
 
 export function buildBookmarkExportDefaultName(bookName: string): string {
-  const slug = chatExportDateSlug();
   const titlePart = sanitizeChatExportTitleForFilename(
     bookTitleForExport(bookName || "书签"),
   );
-  return `${titlePart}-${slug}.colortxt-bookmarks.json`;
+  return `${titlePart}.bookmarks.json`;
 }
 
 export function buildReaderBookmarksExportJson(

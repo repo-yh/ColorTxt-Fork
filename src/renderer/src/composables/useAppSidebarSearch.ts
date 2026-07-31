@@ -1,6 +1,10 @@
 import { onBeforeUnmount, ref, watch, type Ref } from "vue";
 import type ReaderMain from "../components/ReaderMain.vue";
 import type { useTxtStreamPipeline } from "./useTxtStreamPipeline";
+import {
+  annotationColumnMapOptions,
+  displayColumnToPhysicalColumn,
+} from "../utils/readerAnnotations";
 
 export type SidebarSearchResult = {
   physicalLine: number;
@@ -8,6 +12,11 @@ export type SidebarSearchResult = {
   text: string;
   /** 该行内单次匹配（同一行多次匹配各占一条结果） */
   range: { start: number; end: number };
+  /**
+   * 物理行内命中起始列（1-based）。
+   * 编辑态与 `range.start+1` 一致；只读态经行首缩进映射推回（简繁/替换开启时可能与原文错位）。
+   */
+  physicalStartColumn: number;
 };
 
 type Stream = ReturnType<typeof useTxtStreamPipeline>;
@@ -180,12 +189,27 @@ export function useAppSidebarSearch(deps: {
       const physicalLine = editMode
         ? line
         : deps.stream.viewportDisplayLineToPhysicalLine(line);
+      const columnMap = annotationColumnMapOptions({
+        readerEditMode: editMode,
+        leadIndentFullWidth: deps.leadIndentFullWidth.value,
+      });
+      const physicalLineText = editMode
+        ? text
+        : deps.stream.getPhysicalLineContent(physicalLine);
       for (const range of ranges) {
+        const physicalStartColumn = editMode
+          ? range.start + 1
+          : displayColumnToPhysicalColumn(
+              physicalLineText,
+              range.start + 1,
+              columnMap,
+            );
         next.push({
           physicalLine,
           displayLine,
           text,
           range,
+          physicalStartColumn,
         });
         if (next.length >= SEARCH_RESULT_LIMIT) break;
       }

@@ -86,6 +86,7 @@ const props = withDefaults(
       displayLine: number;
       text: string;
       range: { start: number; end: number };
+      physicalStartColumn: number;
     }>;
     searchInProgress?: boolean;
     searchMatchCase?: boolean;
@@ -149,6 +150,8 @@ const props = withDefaults(
     voiceReadSettings?: VoiceReadSettings;
     /** 编辑态章节面板是否显示「刷新章节」（仅手动刷新场景） */
     showEditChapterRefreshButton?: boolean;
+    /** 设置已启用 WebDAV 时在活动栏显示同步入口 */
+    webDavEnabled?: boolean;
   }>(),
   {
     panelExpanded: true,
@@ -187,6 +190,7 @@ const props = withDefaults(
     aiAssistantConfigSyncNonce: 0,
     voiceReadSettings: () => ({ ...defaultVoiceReadSettings }),
     showEditChapterRefreshButton: false,
+    webDavEnabled: false,
   },
 );
 
@@ -217,6 +221,7 @@ const emit = defineEmits<{
   "update:fileSort": [value: FileSortMode];
   pickDirectory: [];
   importDroppedPaths: [paths: string[]];
+  pickFiles: [];
   openFile: [item: SidebarFileItem];
   jumpToChapter: [chapter: Chapter];
   /** AI 阅读助手内章节按钮：父级可在跳转前自动点亮书钉 */
@@ -253,6 +258,7 @@ const emit = defineEmits<{
   requestExpandPanel: [];
   requestCollapsePanel: [];
   openColorScheme: [];
+  openWebDav: [];
   openSettings: [];
   refreshChaptersFromReader: [];
   findHighlightTerm: [text: string, isRegex: boolean];
@@ -283,6 +289,7 @@ const emit = defineEmits<{
       displayLine: number;
       text: string;
       range: { start: number; end: number };
+      physicalStartColumn: number;
     },
   ];
   characterFileMetaPatch: [
@@ -378,6 +385,7 @@ const characterMoreMenu = useAnchoredAppShellMenu({
   anchor: characterHeaderMoreBtnRef,
   placement: "below-end",
   widthPx: CHARACTER_HEADER_MORE_MENU_W,
+  gap: 6,
   disabled: characterHeaderMoreDisabled,
   excludeCloseWithin: computed(() => [
     characterTextureFlyoutPanelRef.value,
@@ -490,6 +498,15 @@ const aiAssistantPanelRef = ref<{
   requestClearAiBookCache: () => Promise<void>;
   prefillQuotedText: (text: string) => void;
 } | null>(null);
+const fileListPanelRef = ref<InstanceType<typeof FileListPanel> | null>(null);
+const filesHeaderMoreBtnRef = ref<HTMLButtonElement | null>(null);
+const chapterListPanelRef = ref<InstanceType<typeof ChapterListPanel> | null>(
+  null,
+);
+const chaptersHeaderMoreBtnRef = ref<HTMLButtonElement | null>(null);
+const searchPanelRef = ref<InstanceType<typeof SearchPanel> | null>(null);
+const searchHeaderMoreBtnRef = ref<HTMLButtonElement | null>(null);
+
 const annotationPanelRef = ref<InstanceType<typeof AnnotationListPanel> | null>(
   null,
 );
@@ -521,6 +538,7 @@ const aiMoreMenu = useAnchoredAppShellMenu({
   anchor: aiAssistantHeaderMoreBtnRef,
   placement: "below-end",
   widthPx: AI_ASSISTANT_HEADER_MORE_MENU_W,
+  gap: 6,
   disabled: aiAssistantHeaderMoreDisabled,
 });
 const {
@@ -784,6 +802,16 @@ defineExpose({
       <div class="activityBarSpacer" aria-hidden="true" />
       <div class="activitySecondaryTabs">
         <button
+          v-if="webDavEnabled"
+          type="button"
+          class="activityTabBtn"
+          title="WebDAV"
+          aria-label="WebDAV"
+          @click="emit('openWebDav')"
+        >
+          <span class="activityIcon" v-html="icons.webDav"></span>
+        </button>
+        <button
           type="button"
           class="activityTabBtn color"
           title="配色"
@@ -818,29 +846,56 @@ defineExpose({
             <span class="svg" v-html="icons.refresh" />
           </button>
         </div>
-        <button
-          v-if="activeTab === 'files'"
-          class="btn"
-          @click="emit('pickDirectory')"
-        >
-          选择目录
-        </button>
-        <div v-else-if="activeTab === 'chapters'" class="sidebarCountToggle">
-          <span class="sidebarCountToggleLabel">字数</span>
-          <SwitchToggle
-            size="sm"
-            :model-value="showChapterCounts"
-            aria-label="章节列表显示字数"
-            @update:model-value="emit('update:showChapterCounts', $event)"
-          />
+        <div v-if="activeTab === 'files'" class="sidebarHeaderEnd">
+          <button class="btn" @click="emit('pickDirectory')">选择目录</button>
+          <button
+            ref="filesHeaderMoreBtnRef"
+            type="button"
+            class="aiReaderSidebarHeaderIconBtn"
+            :class="{ active: fileListPanelRef?.moreOpen }"
+            title="更多"
+            aria-label="更多"
+            aria-haspopup="menu"
+            :aria-expanded="!!fileListPanelRef?.moreOpen"
+            @click="fileListPanelRef?.openMoreMenu()"
+          >
+            <span class="svg" v-html="icons.more" />
+          </button>
+        </div>
+        <div v-else-if="activeTab === 'chapters'" class="sidebarHeaderEnd">
+          <div class="sidebarCountToggle">
+            <span class="sidebarCountToggleLabel">字数</span>
+            <SwitchToggle
+              size="sm"
+              :model-value="showChapterCounts"
+              aria-label="章节列表显示字数"
+              @update:model-value="emit('update:showChapterCounts', $event)"
+            />
+          </div>
+          <button
+            ref="chaptersHeaderMoreBtnRef"
+            type="button"
+            class="aiReaderSidebarHeaderIconBtn"
+            :class="{ active: chapterListPanelRef?.moreOpen }"
+            title="更多"
+            aria-label="更多"
+            aria-haspopup="menu"
+            :aria-expanded="!!chapterListPanelRef?.moreOpen"
+            @click="chapterListPanelRef?.openMoreMenu()"
+          >
+            <span class="svg" v-html="icons.more" />
+          </button>
         </div>
         <div v-else-if="activeTab === 'bookmarks'" class="sidebarHeaderEnd">
           <button
             ref="bookmarksHeaderMoreBtnRef"
             type="button"
             class="aiReaderSidebarHeaderIconBtn"
+            :class="{ active: bookmarkPanelRef?.moreOpen }"
             title="更多"
             aria-label="更多"
+            aria-haspopup="menu"
+            :aria-expanded="!!bookmarkPanelRef?.moreOpen"
             @click="bookmarkPanelRef?.openMoreMenu()"
           >
             <span class="svg" v-html="icons.more" />
@@ -851,6 +906,7 @@ defineExpose({
             ref="characterHeaderMoreBtnRef"
             type="button"
             class="aiReaderSidebarHeaderIconBtn"
+            :class="{ active: characterHeaderMoreOpen }"
             title="更多"
             aria-label="更多"
             aria-haspopup="menu"
@@ -866,8 +922,11 @@ defineExpose({
             ref="highlightsHeaderMoreBtnRef"
             type="button"
             class="aiReaderSidebarHeaderIconBtn"
+            :class="{ active: highlightPanelRef?.moreOpen }"
             title="更多"
             aria-label="更多"
+            aria-haspopup="menu"
+            :aria-expanded="!!highlightPanelRef?.moreOpen"
             @click="highlightPanelRef?.openMoreMenu()"
           >
             <span class="svg" v-html="icons.more" />
@@ -878,8 +937,11 @@ defineExpose({
             ref="notesHeaderMoreBtnRef"
             type="button"
             class="aiReaderSidebarHeaderIconBtn"
+            :class="{ active: annotationPanelRef?.moreOpen }"
             title="更多"
             aria-label="更多"
+            aria-haspopup="menu"
+            :aria-expanded="!!annotationPanelRef?.moreOpen"
             @click="annotationPanelRef?.openMoreMenu()"
           >
             <span class="svg" v-html="icons.more" />
@@ -899,12 +961,28 @@ defineExpose({
             ref="aiAssistantHeaderMoreBtnRef"
             type="button"
             class="aiReaderSidebarHeaderIconBtn"
+            :class="{ active: aiAssistantHeaderMoreOpen }"
             title="更多"
             aria-label="更多"
             aria-haspopup="menu"
             :aria-expanded="aiAssistantHeaderMoreOpen"
             :disabled="aiAssistantHeaderMoreDisabled"
             @click="toggleAiAssistantHeaderMoreMenu"
+          >
+            <span class="svg" v-html="icons.more" />
+          </button>
+        </div>
+        <div v-else-if="activeTab === 'search'" class="sidebarHeaderEnd">
+          <button
+            ref="searchHeaderMoreBtnRef"
+            type="button"
+            class="aiReaderSidebarHeaderIconBtn"
+            :class="{ active: searchPanelRef?.moreOpen }"
+            title="更多"
+            aria-label="更多"
+            aria-haspopup="menu"
+            :aria-expanded="!!searchPanelRef?.moreOpen"
+            @click="searchPanelRef?.openMoreMenu()"
           >
             <span class="svg" v-html="icons.more" />
           </button>
@@ -939,17 +1017,20 @@ defineExpose({
         </button>
       </div>
       <ChapterListPanel
+        ref="chapterListPanelRef"
         v-show="activeTab === 'chapters'"
         :current-file-path="currentFilePath"
         :chapters-visible="chaptersVisible"
         :is-chapter-active="isChapterActive"
         :show-chapter-counts="showChapterCounts"
         :format-char-count="formatCharCount"
+        :menu-anchor-el="chaptersHeaderMoreBtnRef"
         @jump-to-chapter="onChapterItemClick"
         @close-current-file="emit('closeCurrentFile')"
         @bind-list-ref="bindChapterListRef"
       />
       <FileListPanel
+        ref="fileListPanelRef"
         v-show="activeTab === 'files'"
         :show-fullscreen-sidebar="showFullscreenSidebar"
         :files="fileRowsEnriched"
@@ -961,6 +1042,7 @@ defineExpose({
         :file-category="fileCategory"
         :file-sort="fileSort"
         :file-category-catalog="fileCategoryCatalog"
+        :menu-anchor-el="filesHeaderMoreBtnRef"
         @update-file-filter-query="fileFilterQuery = $event"
         @update:file-category="emit('update:fileCategory', $event)"
         @update:file-sort="emit('update:fileSort', $event)"
@@ -977,6 +1059,7 @@ defineExpose({
         @rename-file-path="emit('renameFilePath', $event)"
         @open-file-in-new-window="emit('openFileInNewWindow', $event)"
         @import-dropped-paths="emit('importDroppedPaths', $event)"
+        @pick-files="emit('pickFiles')"
         @bind-list-ref="bindFileListRef"
         @update:fullscreen-file-list-popovers-open="
           emit('update:fullscreenFileListPopoversOpen', $event)
@@ -1085,6 +1168,7 @@ defineExpose({
         />
       </div>
       <SearchPanel
+        ref="searchPanelRef"
         v-show="activeTab === 'search'"
         :active="activeTab === 'search'"
         :current-file-path="currentFilePath"
@@ -1095,6 +1179,7 @@ defineExpose({
         :whole-word="searchWholeWord ?? false"
         :use-regex="searchUseRegex ?? false"
         :active-search-result="activeSearchResult ?? null"
+        :menu-anchor-el="searchHeaderMoreBtnRef"
         @update:query="emit('update:searchQuery', $event)"
         @update:match-case="emit('update:searchMatchCase', $event)"
         @update:whole-word="emit('update:searchWholeWord', $event)"
@@ -1116,6 +1201,7 @@ defineExpose({
       :left="aiAssistantHeaderMoreLeft"
       :top="aiAssistantHeaderMoreTop"
       :width="AI_ASSISTANT_HEADER_MORE_MENU_W"
+      caret="end"
       :on-panel-mount="bindAiAssistantHeaderMorePanel"
       aria-label="AI 阅读助手更多"
     >
@@ -1142,6 +1228,7 @@ defineExpose({
       :left="characterHeaderMoreLeft"
       :top="characterHeaderMoreTop"
       :width="CHARACTER_HEADER_MORE_MENU_W"
+      caret="end"
       :on-panel-mount="bindCharacterHeaderMorePanel"
       aria-label="角色卡更多"
     >
@@ -1429,6 +1516,7 @@ defineExpose({
   flex-shrink: 0;
   display: inline-flex;
   align-items: center;
+  gap: 6px;
 }
 
 /**
@@ -1451,7 +1539,8 @@ defineExpose({
   color: var(--tab-fg);
 }
 
-.aiReaderSidebarHeaderIconBtn:hover:not(:disabled) {
+.aiReaderSidebarHeaderIconBtn:hover:not(:disabled),
+.aiReaderSidebarHeaderIconBtn.active:not(:disabled) {
   color: var(--tab-fg-hover);
   background: var(--icon-btn-bg-hover);
 }

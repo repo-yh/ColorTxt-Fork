@@ -26,6 +26,7 @@ import AppDialogHost from "./components/AppDialogHost.vue";
 import AppCaptchaHost from "./components/AppCaptchaHost.vue";
 import AppToastHost from "./components/AppToastHost.vue";
 import AppOverlays from "./components/AppOverlays.vue";
+import WebDavSyncPanel from "./components/WebDavSyncPanel.vue";
 import FullscreenSystemClock from "./components/FullscreenSystemClock.vue";
 import PomodoroBreakOverlay from "./components/PomodoroBreakOverlay.vue";
 import type { SettingsApplyPayload } from "./components/SettingsPanel.vue";
@@ -117,6 +118,10 @@ import {
   defaultMonacoAdvancedWrapping,
   defaultMonacoCustomHighlight,
   defaultMonacoSmoothScrolling,
+  defaultMouseWheelScrollSensitivity,
+  defaultFastScrollSensitivity,
+  clampMouseWheelScrollSensitivity,
+  clampFastScrollSensitivity,
   defaultStickyChapterTitleEnabled,
   defaultChapterNavToolbarEnabled,
   defaultReaderEditShowLineNumbers,
@@ -188,6 +193,8 @@ import {
 } from "./constants/lineationColors";
 import { formatCharCount, formatFileSize } from "./utils/format";
 import { resolveDefaultUnpackedBooksDirSync } from "./utils/defaultCacheDirs";
+import { joinFs } from "./ebook/pathUtils";
+import { buildWebDavAuth } from "./utils/webDavAuth";
 import { READER_EDITOR_DEFAULT_FONT_FAMILY } from "./monaco/readerEditorOptions";
 import {
   createDefaultShortcutBindings,
@@ -303,11 +310,18 @@ const showAboutPanel = ref(false);
 const showShortcutPanel = ref(false);
 const showSettingsPanel = ref(false);
 const showColorSchemePanel = ref(false);
+const showWebDavPanel = ref(false);
 const appOverlaysRef = ref<InstanceType<typeof AppOverlays> | null>(null);
 watch(
-  () => [showSettingsPanel.value, showColorSchemePanel.value] as const,
-  ([settingsOpen, colorOpen]) => {
-    suppressFullscreenSidebarHover.value = settingsOpen || colorOpen;
+  () =>
+    [
+      showSettingsPanel.value,
+      showColorSchemePanel.value,
+      showWebDavPanel.value,
+    ] as const,
+  ([settingsOpen, colorOpen, webDavOpen]) => {
+    suppressFullscreenSidebarHover.value =
+      settingsOpen || colorOpen || webDavOpen;
   },
   { immediate: true },
 );
@@ -329,8 +343,8 @@ function refreshReplaceRulesCache() {
   cachedReplaceRules.value = listReplaceRulesLocal("app");
 }
 
-function onReplaceRulesChanged() {
-  refreshReplaceRulesCache();
+/** 按当前展示设置（替换/转换/压缩空行/缩进等）从物理行重跑管线，并尽量保持视口 */
+function reformatReaderDisplayPreservingViewport() {
   if (!currentFile.value || readerEditMode.value || loading.value) return;
   const anchor =
     captureViewportRestoreAnchor() ?? {
@@ -346,10 +360,44 @@ function onReplaceRulesChanged() {
   });
 }
 
+function onReplaceRulesChanged() {
+  refreshReplaceRulesCache();
+  reformatReaderDisplayPreservingViewport();
+}
+
 const currentFile = ref<string | null>(null);
 const loading = ref(false);
 /** 打开文件时主进程流式读取的字节进度（0–100），无总大小时为 null */
 const loadingProgressPercent = ref<number | null>(null);
+/** 底栏路径旁：WebDAV 书包上传/同步进度 */
+const webDavBookPackProgress = ref<{
+  kind: "upload" | "sync";
+  percent: number;
+} | null>(null);
+let webDavBookPackProgressRequestId: string | null = null;
+let webDavBookPackProgressUnsub: (() => void) | null = null;
+
+function beginWebDavBookPackProgress(kind: "upload" | "sync"): string {
+  const requestId = `webdav-bp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  webDavBookPackProgressRequestId = requestId;
+  webDavBookPackProgress.value = { kind, percent: 0 };
+  webDavBookPackProgressUnsub?.();
+  webDavBookPackProgressUnsub =
+    window.colorTxt?.webdav?.onTransferProgress((p) => {
+      if (p.requestId !== webDavBookPackProgressRequestId) return;
+      const cur = webDavBookPackProgress.value;
+      if (!cur) return;
+      webDavBookPackProgress.value = { ...cur, percent: p.percent };
+    }) ?? null;
+  return requestId;
+}
+
+function endWebDavBookPackProgress() {
+  webDavBookPackProgressUnsub?.();
+  webDavBookPackProgressUnsub = null;
+  webDavBookPackProgressRequestId = null;
+  webDavBookPackProgress.value = null;
+}
 /** 递归扫描目录中的 .txt 时：蒙版 + 当前处理的相对路径 */
 const dirListScanning = ref(false);
 const dirListCurrentName = ref("");
@@ -424,6 +472,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   window.removeEventListener(appReplaceRulesChangedEvent, onReplaceRulesChanged);
+  endWebDavBookPackProgress();
 });
 
 watch(showSettingsPanel, (open, wasOpen) => {
@@ -527,6 +576,8 @@ const chapterMinCharCount = ref(defaultChapterMinCharCount);
 const monacoAdvancedWrapping = ref(defaultMonacoAdvancedWrapping);
 /** Monaco 阅读区平滑滚动（设置可关） */
 const monacoSmoothScrolling = ref(defaultMonacoSmoothScrolling);
+const mouseWheelScrollSensitivity = ref(defaultMouseWheelScrollSensitivity);
+const fastScrollSensitivity = ref(defaultFastScrollSensitivity);
 /** 阅读区顶部粘性章节标题 */
 const stickyChapterTitleEnabled = ref(defaultStickyChapterTitleEnabled);
 const chapterNavToolbarEnabled = ref(defaultChapterNavToolbarEnabled);
@@ -573,6 +624,16 @@ const ebookConvertOutputDir = ref(
 );
 /** 彩读书包解压目录；默认 userData/UnpackedBooks；空串时运行时仍回退该默认 */
 const bookPackUnpackDir = ref(resolveDefaultUnpackedBooksDirSync());
+/** 彩读书包默认密码；空串表示导出不加密 */
+const bookPackPassword = ref("");
+/** 是否启用 WebDAV 同步入口 */
+const webDavEnabled = ref(false);
+/** WebDAV 服务地址 */
+const webDavUrl = ref("");
+/** WebDAV 用户名 */
+const webDavUsername = ref("");
+/** WebDAV 应用根目录名（默认 ColorTxt） */
+const webDavRemoteDir = ref("ColorTxt");
 /** 角色立绘缓存根目录（绝对路径）；出厂默认 userData/CharacterPortrait */
 const characterPortraitCacheDir = ref(
   (() => {
@@ -975,6 +1036,8 @@ const persistence = useAppPersistence({
   chapterMinCharCount,
   monacoAdvancedWrapping,
   monacoSmoothScrolling,
+  mouseWheelScrollSensitivity,
+  fastScrollSensitivity,
   stickyChapterTitleEnabled,
   chapterNavToolbarEnabled,
   readerEditShowLineNumbers,
@@ -1000,6 +1063,11 @@ const persistence = useAppPersistence({
   lineationLastColors,
   ebookConvertOutputDir,
   bookPackUnpackDir,
+  bookPackPassword,
+  webDavEnabled,
+  webDavUrl,
+  webDavUsername,
+  webDavRemoteDir,
   characterPortraitCacheDir,
   characterCardTextureEffect,
   fileCategory,
@@ -1021,6 +1089,7 @@ const persistence = useAppPersistence({
 });
 const {
   persistSettings,
+  persistSidebarWidth,
   persistVoiceReadSecretsToVault,
   clearRecentFiles,
   persistWindowUnloadState,
@@ -1035,6 +1104,7 @@ const {
   applyRecentFilesHistoryLimitFromSettings,
   clearPersistedSession,
   metaProgressByPathKey,
+  loadPersistedSettings,
 } = persistence;
 
 watch(fileListEditing, (editing, wasEditing) => {
@@ -1297,29 +1367,40 @@ function metaHasClearableReadingData(rec: FileMetaRecord | undefined): boolean {
   return false;
 }
 
-async function clearCurrentFileReadingData() {
-  const path = currentFile.value?.trim();
-  if (!path) {
-    await appAlert("请先打开文件");
-    return;
-  }
-  const ok = await appConfirm(
-    "将清除当前文件的阅读进度、书签、高亮词、笔记、角色卡及立绘等数据，不会删除书籍文件本身。",
-    "清除阅读数据",
-  );
-  if (!ok) return;
+const showReadingDataPanel = ref(false);
 
-  const key = fileHistoryKey(path);
-  const pathKey = normalizeFileMetaPathKey(path);
-  // UI 可能经同文件名回退读到其它路径的 meta，以「当前展示的」为准判断是否有数据
-  const shown = findFileMetaRecord(fileMetaRecords.value, path);
-  const hadProgress = metaProgressByPathKey.value.has(key);
-  if (!metaHasClearableReadingData(shown) && !hadProgress) {
-    appToast("没有可清除的阅读数据", { kind: "info" });
-    return;
-  }
+const readingDataItems = computed(() => {
+  const live = liveReadingProgressForUi.value;
+  const cur = currentFile.value;
+  const curKey = cur ? fileHistoryKey(cur) : "";
+  const progressMap = metaProgressByPathKey.value;
+  const rows = fileMetaRecords.value
+    .filter((m) => metaHasClearableReadingData(m))
+    .map((m) => {
+      const k = fileHistoryKey(m.path);
+      let progress: number | undefined;
+      if (curKey && k === curKey && typeof live === "number") {
+        progress = live;
+      } else if (typeof m.progress === "number" && Number.isFinite(m.progress)) {
+        progress = m.progress;
+      } else {
+        progress = progressMap.get(k);
+      }
+      const normalized = m.path.replace(/\\/g, "/");
+      const slash = normalized.lastIndexOf("/");
+      const fileName =
+        slash >= 0 ? normalized.slice(slash + 1) : normalized || m.path;
+      return {
+        path: m.path,
+        fileName,
+        progress,
+        lastOpenedAt: m.lastOpenedAt,
+      };
+    });
+  return rows;
+});
 
-  // 删除本书角色立绘缓存目录（含立绘与草稿）
+async function removePortraitCacheForBook(bookPath: string) {
   try {
     const rootRaw = characterPortraitCacheDir.value.trim();
     const root =
@@ -1328,47 +1409,156 @@ async function clearCurrentFileReadingData() {
     if (root?.trim()) {
       const bookDir = characterPortraitBookDirAbs(
         root.trim(),
-        sanitizeBookFolderSegment(path),
+        sanitizeBookFolderSegment(bookPath),
       );
       await window.colorTxt.removePath(bookDir);
     }
   } catch {
     /* 目录不存在或删除失败不阻断清除 meta */
   }
+}
 
-  // 只替换当前路径的精确记录；写入空壳挡住同名回退，避免误删其它同名路径的 meta
-  const prevExact =
-    fileMetaRecords.value.find(
-      (m) => normalizeFileMetaPathKey(m.path) === pathKey,
-    ) ?? null;
-  const withoutExact = fileMetaRecords.value.filter(
-    (m) => normalizeFileMetaPathKey(m.path) !== pathKey,
-  );
-  const cleared: FileMetaRecord = {
-    path,
-    fileName: fileNameKey(path),
-    bookmarks: [],
-    updatedAt: Date.now(),
-  };
-  if (prevExact?.convertedMdPath)
-    cleared.convertedMdPath = prevExact.convertedMdPath;
-  if (prevExact?.sourceMtimeMsAtConvert != null) {
-    cleared.sourceMtimeMsAtConvert = prevExact.sourceMtimeMsAtConvert;
+/**
+ * 清除若干路径的阅读数据（进度/书签/高亮/笔记/角色卡及立绘）。
+ * 保留电子书转换路径等空壳 meta；不关闭当前打开的文件。
+ */
+async function clearReadingDataForPaths(
+  paths: string[],
+  options?: { toast?: boolean },
+): Promise<boolean> {
+  const unique: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of paths) {
+    const p = raw?.trim();
+    if (!p) continue;
+    const k = normalizeFileMetaPathKey(p);
+    if (seen.has(k)) continue;
+    seen.add(k);
+    unique.push(p);
   }
-  if (prevExact?.lastOpenedAt != null) {
-    cleared.lastOpenedAt = prevExact.lastOpenedAt;
-  }
-  fileMetaRecords.value = [cleared, ...withoutExact];
+  if (unique.length === 0) return false;
 
-  if (metaProgressByPathKey.value.has(key)) {
-    const m = new Map(metaProgressByPathKey.value);
-    m.delete(key);
-    metaProgressByPathKey.value = m;
+  let anyCleared = false;
+  let touchedCurrent = false;
+  const cur = currentFile.value?.trim() ?? "";
+  const curKey = cur ? normalizeFileMetaPathKey(cur) : "";
+
+  for (const path of unique) {
+    const key = fileHistoryKey(path);
+    const pathKey = normalizeFileMetaPathKey(path);
+    const shown = findFileMetaRecord(fileMetaRecords.value, path);
+    const hadProgress = metaProgressByPathKey.value.has(key);
+    if (!metaHasClearableReadingData(shown) && !hadProgress) continue;
+
+    await removePortraitCacheForBook(path);
+
+    const prevExact =
+      fileMetaRecords.value.find(
+        (m) => normalizeFileMetaPathKey(m.path) === pathKey,
+      ) ?? null;
+    const withoutExact = fileMetaRecords.value.filter(
+      (m) => normalizeFileMetaPathKey(m.path) !== pathKey,
+    );
+    const cleared: FileMetaRecord = {
+      path: prevExact?.path ?? path,
+      fileName: fileNameKey(prevExact?.path ?? path),
+      bookmarks: [],
+      updatedAt: Date.now(),
+    };
+    if (prevExact?.convertedMdPath)
+      cleared.convertedMdPath = prevExact.convertedMdPath;
+    if (prevExact?.sourceMtimeMsAtConvert != null) {
+      cleared.sourceMtimeMsAtConvert = prevExact.sourceMtimeMsAtConvert;
+    }
+    if (prevExact?.lastOpenedAt != null) {
+      cleared.lastOpenedAt = prevExact.lastOpenedAt;
+    }
+    fileMetaRecords.value = [cleared, ...withoutExact];
+
+    if (metaProgressByPathKey.value.has(key)) {
+      const m = new Map(metaProgressByPathKey.value);
+      m.delete(key);
+      metaProgressByPathKey.value = m;
+    }
+    anyCleared = true;
+    if (curKey && pathKey === curKey) touchedCurrent = true;
   }
+
+  if (!anyCleared) {
+    if (options?.toast !== false) {
+      appToast("没有可清除的阅读数据", { kind: "info" });
+    }
+    return false;
+  }
+
   persistFileMeta();
-  void refreshReaderHighlightDisplayLayer();
-  bumpAnnotationDisplayEpoch();
-  appToast("已清除阅读数据", { kind: "success" });
+  if (touchedCurrent) {
+    void refreshReaderHighlightDisplayLayer();
+    bumpAnnotationDisplayEpoch();
+  }
+  if (options?.toast !== false) {
+    appToast("已清除阅读数据", { kind: "success" });
+  }
+  return true;
+}
+
+async function clearCurrentFileReadingData() {
+  const path = currentFile.value?.trim();
+  if (!path) {
+    await appAlert("请先打开文件");
+    return;
+  }
+  const ok = await appConfirm(
+    "将清除当前文件的阅读进度、书签、高亮词、笔记、角色卡（含立绘）等数据；不会删除文件本身。",
+    "清除阅读数据",
+  );
+  if (!ok) return;
+  await clearReadingDataForPaths([path]);
+}
+
+async function onClearReadingDataPaths(paths: string[]) {
+  await clearReadingDataForPaths(paths);
+}
+
+async function onClearAllReadingData() {
+  const paths = readingDataItems.value.map((i) => i.path);
+  if (paths.length === 0) {
+    appToast("没有可清除的阅读数据", { kind: "info" });
+    return;
+  }
+  const ok = await appConfirm(
+    "将清除全部文件的阅读进度、书签、高亮词、笔记、角色卡（含立绘）等数据；不会删除文件本身。",
+    "清空阅读数据",
+  );
+  if (!ok) return;
+  await clearReadingDataForPaths(paths);
+}
+
+async function onRemoveMissingReadingDataFiles() {
+  const paths = readingDataItems.value.map((i) => i.path);
+  if (paths.length === 0) {
+    appToast("没有可清除的阅读数据", { kind: "info" });
+    return;
+  }
+  const missing: string[] = [];
+  for (const p of paths) {
+    try {
+      // file:stat 对 ENOENT 返回 isFile/isDirectory 均为 false，不抛错
+      const st = await window.colorTxt.stat(p);
+      if (!st.isFile) missing.push(p);
+    } catch {
+      missing.push(p);
+    }
+  }
+  if (missing.length === 0) {
+    appToast("没有失效文件", { kind: "info" });
+    return;
+  }
+  await clearReadingDataForPaths(missing);
+}
+
+function openReadingDataPanel() {
+  showReadingDataPanel.value = true;
 }
 
 /** 顶栏「更多」里最近文件：仅路径来自 recent，进度来自 meta（当前书用 live） */
@@ -1483,6 +1673,7 @@ const fileSession = useAppFileSession({
   ebookConversionSourcePath,
   fileMetaRecords,
   bookPackUnpackDir,
+  bookPackPassword,
   characterPortraitCacheDir,
   applyCurrentFileCategoryIfConcrete: applyCurrentFileCategoryToNewPaths,
   readerEditMode,
@@ -1498,6 +1689,7 @@ const {
   openFileViaDialog,
   openFileFromSidebar,
   pickTxtDirectory,
+  pickTxtFilesIntoFileList,
   importPathsIntoFileList,
   openFilePath,
   openRecentFileFromHistory,
@@ -2224,9 +2416,14 @@ async function exportCurrentReaderBookPack(includeReadingProgress: boolean) {
       portraitCacheDir: characterPortraitCacheDir.value,
       includeReadingProgress,
       viewportTopPhysicalLine,
+      password: bookPackPassword.value,
     });
-    const name = buildReaderBookPackDefaultName(fileNameKey(sessionPath));
-    const r = await saveReaderBookPackFile(name, zipBuffer);
+    const encrypted = Boolean(bookPackPassword.value.trim());
+    const name = buildReaderBookPackDefaultName(
+      fileNameKey(sessionPath),
+      encrypted,
+    );
+    const r = await saveReaderBookPackFile(name, zipBuffer, encrypted);
     if (!r.ok) {
       if ("error" in r) await appAlert(r.error);
       return;
@@ -2240,6 +2437,205 @@ async function exportCurrentReaderBookPack(includeReadingProgress: boolean) {
   }
 }
 
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  const chunk = 0x8000;
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += chunk) {
+    const sub = bytes.subarray(i, Math.min(i + chunk, bytes.length));
+    binary += String.fromCharCode(...sub);
+  }
+  return btoa(binary);
+}
+
+async function uploadCurrentReaderBookPackToWebDav() {
+  if (webDavBookPackProgress.value) return;
+  const sessionPath = currentFile.value?.trim();
+  const physicalPath =
+    physicalReaderPath.value?.trim() || sessionPath || "";
+  if (!sessionPath || !physicalPath) {
+    await appAlert("请先打开文件");
+    return;
+  }
+  const auth = buildWebDavAuth({
+    webDavEnabled: webDavEnabled.value,
+    webDavUrl: webDavUrl.value,
+    webDavUsername: webDavUsername.value,
+    webDavRemoteDir: webDavRemoteDir.value,
+  });
+  if (!auth || !window.colorTxt?.webdav) {
+    appToast("请先在设置中配置 WebDAV", { kind: "warning" });
+    return;
+  }
+  const requestId = beginWebDavBookPackProgress("upload");
+  const {
+    buildReaderBookPackDefaultName,
+    buildReaderBookPackZip,
+  } = await import("./utils/readerBookPack");
+  let viewportTopPhysicalLine: number | undefined;
+  const top = readerRef.value?.getViewportTopLine?.();
+  if (typeof top === "number" && Number.isFinite(top)) {
+    viewportTopPhysicalLine = readerEditMode.value
+      ? Math.max(1, Math.floor(top))
+      : stream.viewportDisplayLineToPhysicalLine(top);
+  }
+  try {
+    const zipBuffer = await buildReaderBookPackZip({
+      physicalContentPath: physicalPath,
+      sessionFilePath: sessionPath,
+      meta: findFileMetaRecord(fileMetaRecords.value, sessionPath),
+      portraitCacheDir: characterPortraitCacheDir.value,
+      includeReadingProgress: true,
+      viewportTopPhysicalLine,
+      password: bookPackPassword.value,
+    });
+    const encrypted = Boolean(bookPackPassword.value.trim());
+    const name = buildReaderBookPackDefaultName(
+      fileNameKey(sessionPath),
+      encrypted,
+    );
+    const tempRoot = await window.colorTxt.getPath("temp");
+    if (!tempRoot) {
+      await appAlert("无法获取临时目录");
+      return;
+    }
+    const tempDir = joinFs(tempRoot, "colortxt-webdav-upload");
+    await window.colorTxt.mkdir(tempDir);
+    const tempPath = joinFs(tempDir, name);
+    await window.colorTxt.writeBinaryFile(
+      tempPath,
+      arrayBufferToBase64(zipBuffer),
+    );
+    const ensure = await window.colorTxt.webdav.ensureLayout(auth);
+    if (!ensure.ok) {
+      appToast(ensure.error, { kind: "danger" });
+      return;
+    }
+    const put = await window.colorTxt.webdav.putFile(
+      auth,
+      `Books/${name}`,
+      tempPath,
+      "application/octet-stream",
+      requestId,
+    );
+    try {
+      await window.colorTxt.removePath(tempPath);
+    } catch {
+      /* ignore */
+    }
+    if (!put.ok) {
+      appToast(put.error, { kind: "danger" });
+      return;
+    }
+    appToast(`已上传书包：${name}`, { kind: "success" });
+  } catch (e) {
+    await appAlert(e instanceof Error ? e.message : String(e));
+  } finally {
+    endWebDavBookPackProgress();
+  }
+}
+
+async function updateCurrentReaderBookPackFromWebDav() {
+  if (webDavBookPackProgress.value) return;
+  const sessionPath = currentFile.value?.trim();
+  if (!sessionPath) {
+    await appAlert("请先打开文件");
+    return;
+  }
+  const auth = buildWebDavAuth({
+    webDavEnabled: webDavEnabled.value,
+    webDavUrl: webDavUrl.value,
+    webDavUsername: webDavUsername.value,
+    webDavRemoteDir: webDavRemoteDir.value,
+  });
+  if (!auth || !window.colorTxt?.webdav) {
+    appToast("请先在设置中配置 WebDAV", { kind: "warning" });
+    return;
+  }
+  const requestId = beginWebDavBookPackProgress("sync");
+  const { buildReaderBookPackDefaultName } = await import(
+    "./utils/readerBookPack"
+  );
+  const encrypted = Boolean(bookPackPassword.value.trim());
+  const preferred = buildReaderBookPackDefaultName(
+    fileNameKey(sessionPath),
+    encrypted,
+  );
+  const fallback = buildReaderBookPackDefaultName(
+    fileNameKey(sessionPath),
+    !encrypted,
+  );
+  const names = preferred === fallback ? [preferred] : [preferred, fallback];
+  let downloadedPath: string | null = null;
+  let lastError = "";
+  try {
+    for (const name of names) {
+      const r = await window.colorTxt.webdav.getToFile(
+        auth,
+        `Books/${name}`,
+        name,
+        requestId,
+      );
+      if (r.ok) {
+        downloadedPath = r.filePath;
+        break;
+      }
+      lastError = r.error;
+    }
+    if (!downloadedPath) {
+      appToast(lastError || "远端未找到对应书包", { kind: "danger" });
+      return;
+    }
+    endWebDavBookPackProgress();
+    const opened = await openFilePath(downloadedPath);
+    if (opened) {
+      appToast("已从 WebDAV 同步书包", { kind: "success" });
+    }
+  } catch (e) {
+    await appAlert(e instanceof Error ? e.message : String(e));
+  } finally {
+    endWebDavBookPackProgress();
+  }
+}
+
+async function onWebDavImportPackPaths(
+  paths: string[],
+  opts?: {
+    silent?: boolean;
+    passwordBook?: string[];
+    skipOnDecryptFail?: boolean;
+  },
+): Promise<{
+  imported: Array<{ packPath: string; openPath: string }>;
+  okCount: number;
+  skipCount: number;
+  failCount: number;
+  passwordBook: string[];
+  skipOnDecryptFail: boolean;
+}> {
+  if (!paths.length) {
+    return {
+      imported: [],
+      okCount: 0,
+      skipCount: 0,
+      failCount: 0,
+      passwordBook: opts?.passwordBook ? [...opts.passwordBook] : [],
+      skipOnDecryptFail: opts?.skipOnDecryptFail ?? false,
+    };
+  }
+  return await importPathsIntoFileList(paths, opts);
+}
+
+function onWebDavConfigDownloaded() {
+  loadPersistedSettings();
+  refreshReplaceRulesCache();
+  // loadPersistedSettings 只写 ref；字号/行高/字体等需推到 Monaco 才生效
+  applyReaderAppearanceFromSettings();
+  applyRecentFilesHistoryLimitFromSettings();
+  // 替换、转换、压缩空行、行首缩进、章节字数等可能已变，按物理行重跑展示
+  reformatReaderDisplayPreservingViewport();
+}
+
 function quitApp() {
   void (async () => {
     if (readerEditMode.value && readerEditorDirty.value) {
@@ -2247,6 +2643,19 @@ function quitApp() {
     }
     window.colorTxt.quitApp();
   })();
+}
+
+function applyReaderAppearanceFromSettings() {
+  applyReaderSurfaceToDocument(
+    currentTheme.value,
+    readerSurfaceLight.value,
+    readerSurfaceDark.value,
+  );
+  readerRef.value?.setTheme(currentTheme.value);
+  readerRef.value?.setFontSize(readerFontSize.value);
+  readerRef.value?.setLineHeightMultiple(readerLineHeightMultiple.value);
+  readerRef.value?.setFontFamily(monacoFontFamily.value);
+  readerRef.value?.setWrappingStrategyAdvanced(monacoAdvancedWrapping.value);
 }
 
 function refreshReaderSurfaceAfterPaletteChange() {
@@ -2427,6 +2836,12 @@ async function applySettings(payload: SettingsApplyPayload) {
   const prevCompressBlankKeepOneBlank = compressBlankKeepOneBlank.value;
   const prevChapterMinCharCount = chapterMinCharCount.value;
   monacoSmoothScrolling.value = payload.monacoSmoothScrolling;
+  mouseWheelScrollSensitivity.value = clampMouseWheelScrollSensitivity(
+    payload.mouseWheelScrollSensitivity,
+  );
+  fastScrollSensitivity.value = clampFastScrollSensitivity(
+    payload.fastScrollSensitivity,
+  );
   stickyChapterTitleEnabled.value = payload.stickyChapterTitleEnabled;
   chapterNavToolbarEnabled.value = payload.chapterNavToolbarEnabled;
   chapterCharCountExact.value = payload.chapterCharCountExact;
@@ -2461,6 +2876,12 @@ async function applySettings(payload: SettingsApplyPayload) {
   fullscreenShowSystemTime.value = payload.fullscreenShowSystemTime;
   ebookConvertOutputDir.value = payload.ebookConvertOutputDir;
   bookPackUnpackDir.value = payload.bookPackUnpackDir.trim();
+  bookPackPassword.value = payload.bookPackPassword ?? "";
+  webDavEnabled.value = payload.webDavEnabled === true;
+  webDavUrl.value = payload.webDavUrl ?? "";
+  webDavUsername.value = payload.webDavUsername ?? "";
+  webDavRemoteDir.value =
+    (payload.webDavRemoteDir ?? "").trim() || "ColorTxt";
   const prevPortraitCache = characterPortraitCacheDir.value.trim();
   const nextPortraitCache = payload.characterPortraitCacheDir.trim();
   if (
@@ -2570,7 +2991,7 @@ useAppWindowBindings({
   fileSession,
   persistWindowUnloadState,
   persistFileListCache,
-  persistSettings,
+  persistSidebarWidth,
   isFullscreenView,
   showSidebar,
   sidebarWidth,
@@ -2843,6 +3264,7 @@ useAppShellThemeWatch({
           :format-char-count="formatChapterCharCount"
           :show-edit-chapter-refresh-button="showEditChapterRefreshButton"
           @pick-directory="pickTxtDirectory"
+          @pick-files="pickTxtFilesIntoFileList"
           @import-dropped-paths="onImportDroppedPathsFromList"
           @open-file="openFileFromSidebar"
           @jump-to-chapter="onJumpToChapterFromSidebar"
@@ -2909,6 +3331,8 @@ useAppShellThemeWatch({
           @request-expand-panel="showSidebar = true"
           @request-collapse-panel="showSidebar = false"
           @add-highlight-term="(text, isRegex) => onAddHighlightTermFromSidebar(text, isRegex)"
+          :web-dav-enabled="webDavEnabled"
+          @open-web-dav="showWebDavPanel = true"
           @open-color-scheme="showColorSchemePanel = true"
         @open-find-book="openFindBookWindow"
           @open-settings="showSettingsPanel = true"
@@ -2955,6 +3379,8 @@ useAppShellThemeWatch({
           :chapter-min-char-count="chapterMinCharCount"
           :monaco-advanced-wrapping="monacoAdvancedWrapping"
           :monaco-smooth-scrolling="monacoSmoothScrolling"
+          :mouse-wheel-scroll-sensitivity="mouseWheelScrollSensitivity"
+          :fast-scroll-sensitivity="fastScrollSensitivity"
           :sticky-chapter-title-enabled="stickyChapterTitleEnabled"
           :reader-edit-show-line-numbers="readerEditShowLineNumbers"
           :reader-edit-minimap="readerEditMinimap"
@@ -3107,6 +3533,8 @@ useAppShellThemeWatch({
         :path-menu-reload-enabled="footerPathMenuReloadEnabled"
         :path-menu-reconvert-enabled="footerPathMenuReconvertEnabled"
         :path-menu-close-enabled="footerPathMenuCloseEnabled"
+        :web-dav-menu-enabled="webDavEnabled"
+        :web-dav-book-pack-progress="webDavBookPackProgress"
         :edit-cursor-label="readerEditCursorFooterLabel"
         :pomodoro-enabled="pomodoroSettings.enabled"
         :pomodoro-phase="pomodoroPhase"
@@ -3118,6 +3546,8 @@ useAppShellThemeWatch({
         @path-reveal-in-folder="revealCurrentFileInFolder"
         @path-reload="reloadCurrentFileFromDisk"
         @path-reconvert="reconvertCurrentEbookFromDisk"
+        @path-upload-book-pack-web-dav="uploadCurrentReaderBookPackToWebDav"
+        @path-update-book-pack-web-dav="updateCurrentReaderBookPackFromWebDav"
         @path-export-book-pack="exportCurrentReaderBookPack(false)"
         @path-export-book-pack-with-progress="exportCurrentReaderBookPack(true)"
         @path-clear-reading-data="clearCurrentFileReadingData"
@@ -3149,6 +3579,19 @@ useAppShellThemeWatch({
       @stop="stopAiSmartFormat()"
     />
 
+    <WebDavSyncPanel
+      v-model="showWebDavPanel"
+      :web-dav="{
+        webDavEnabled,
+        webDavUrl,
+        webDavUsername,
+        webDavRemoteDir,
+      }"
+      :import-pack-paths="onWebDavImportPackPaths"
+      @open-file="(p) => void openFilePath(p)"
+      @config-downloaded="onWebDavConfigDownloaded"
+    />
+
     <AppOverlays
       ref="appOverlaysRef"
       v-model:show-about-panel="showAboutPanel"
@@ -3156,6 +3599,7 @@ useAppShellThemeWatch({
       v-model:show-settings-panel="showSettingsPanel"
       v-model:show-color-scheme-panel="showColorSchemePanel"
       v-model:show-chapter-rule-panel="showChapterRulePanel"
+      v-model:show-reading-data-panel="showReadingDataPanel"
       v-model:show-replace-rule-panel="showReplaceRulePanel"
       v-model:add-bookmark-open="addBookmarkOpen"
       v-model:remove-bookmark-open="removeBookmarkOpen"
@@ -3170,6 +3614,8 @@ useAppShellThemeWatch({
       :reader-line-height-multiple="readerLineHeightMultiple"
       :compress-blank-keep-one-blank="compressBlankKeepOneBlank"
       :monaco-smooth-scrolling="monacoSmoothScrolling"
+      :mouse-wheel-scroll-sensitivity="mouseWheelScrollSensitivity"
+      :fast-scroll-sensitivity="fastScrollSensitivity"
       :sticky-chapter-title-enabled="stickyChapterTitleEnabled"
       :chapter-nav-toolbar-enabled="chapterNavToolbarEnabled"
       :chapter-char-count-exact="chapterCharCountExact"
@@ -3206,6 +3652,11 @@ useAppShellThemeWatch({
       :lineation-colors-dark="lineationColorsDark"
       :ebook-convert-output-dir="ebookConvertOutputDir"
       :book-pack-unpack-dir="bookPackUnpackDir"
+      :book-pack-password="bookPackPassword"
+      :web-dav-enabled="webDavEnabled"
+      :web-dav-url="webDavUrl"
+      :web-dav-username="webDavUsername"
+      :web-dav-remote-dir="webDavRemoteDir"
       :character-portrait-cache-dir="characterPortraitCacheDir"
       :voice-read-settings="voiceReadSettings"
       :voice-read-profiles="voiceReadProfiles"
@@ -3214,6 +3665,7 @@ useAppShellThemeWatch({
       :ai-skills-enabled="aiSkillsEnabled"
       :ai-skill-overrides="aiSkillOverrides"
       :ai-custom-skills="aiCustomSkills"
+      :reading-data-items="readingDataItems"
       @apply-settings="applySettings"
       @apply-shortcut-bindings="applyShortcutBindings"
       @apply-chapter-rules="applyChapterMatchRules"
@@ -3225,6 +3677,10 @@ useAppShellThemeWatch({
       @apply-reader-palettes="onApplyReaderPalettes"
       @apply-highlight-colors="onApplyHighlightColors"
       @apply-lineation-colors="onApplyLineationColors"
+      @open-reading-data="openReadingDataPanel"
+      @clear-reading-data-paths="onClearReadingDataPaths"
+      @clear-all-reading-data="onClearAllReadingData"
+      @remove-missing-reading-data-files="onRemoveMissingReadingDataFiles"
       @apply-replace-rule-format="onApplyReplaceRuleFormat"
     />
   </div>

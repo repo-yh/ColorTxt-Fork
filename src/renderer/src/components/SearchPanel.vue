@@ -1,7 +1,13 @@
 <script setup lang="ts">
-import { nextTick, ref, watch } from "vue";
+import { computed, nextTick, ref, watch } from "vue";
+import { icons } from "../icons";
+import { useAnchoredAppShellMenu } from "../composables/useAnchoredAppShellMenu";
+import { appToast } from "../services/appToast";
 import VirtualList from "./VirtualList.vue";
+import AppShellMenuTeleport from "./AppShellMenuTeleport.vue";
 import { READER_SIDEBAR_ROW_STRIDE } from "../composables/useReaderSidebarLists";
+
+const SEARCH_HEADER_MORE_MENU_W = 160;
 
 type SearchRange = { start: number; end: number };
 type SearchResultItem = {
@@ -9,6 +15,7 @@ type SearchResultItem = {
   displayLine: number;
   text: string;
   range: SearchRange;
+  physicalStartColumn: number;
 };
 
 const props = withDefaults(
@@ -22,6 +29,8 @@ const props = withDefaults(
     wholeWord?: boolean;
     useRegex?: boolean;
     activeSearchResult?: { displayLine: number; rangeStart: number } | null;
+    /** 侧栏标题行「更多」按钮（锚定菜单） */
+    menuAnchorEl?: HTMLButtonElement | null;
   }>(),
   {
     loading: false,
@@ -30,6 +39,7 @@ const props = withDefaults(
     wholeWord: false,
     useRegex: false,
     activeSearchResult: null,
+    menuAnchorEl: null,
   },
 );
 
@@ -51,6 +61,76 @@ const emit = defineEmits<{
   "update:useRegex": [value: boolean];
   jumpToResult: [item: SearchResultItem];
 }>();
+
+const moreBtnRef = ref<HTMLButtonElement | null>(null);
+const moreAnchorRef = ref<HTMLButtonElement | null>(null);
+watch(
+  () => props.menuAnchorEl ?? moreBtnRef.value,
+  (el) => {
+    moreAnchorRef.value = el;
+  },
+  { immediate: true },
+);
+const moreMenu = useAnchoredAppShellMenu({
+  anchor: moreAnchorRef,
+  placement: "below-end",
+  widthPx: SEARCH_HEADER_MORE_MENU_W,
+  gap: 6,
+});
+const {
+  open: moreOpen,
+  left: moreLeft,
+  top: moreTop,
+  panelRef: morePanelRef,
+  toggleMenu: toggleMoreMenu,
+  closeMenu: closeMoreMenu,
+} = moreMenu;
+
+function bindMorePanel(el: HTMLElement | null) {
+  morePanelRef.value = el;
+}
+
+defineExpose({
+  openMoreMenu: toggleMoreMenu,
+  moreOpen,
+});
+
+const copyResultsDisabled = computed(
+  () =>
+    !props.currentFilePath ||
+    !props.query.trim() ||
+    props.results.length === 0 ||
+    props.loading,
+);
+
+function formatSearchResultsCopyText(withLineCol: boolean): string {
+  const path = props.currentFilePath ?? "";
+  const query = props.query.trim();
+  const lines = props.results.map((item) => {
+    const content = linePreview(item.text);
+    if (!withLineCol) return `  ${content}`;
+    const col = Math.max(1, item.physicalStartColumn);
+    return `  ${item.physicalLine},${col}: ${content}`;
+  });
+  return [`路径：${path}`, `搜索：${query}`, "结果：", ...lines].join("\n");
+}
+
+async function onCopyResults(withLineCol: boolean) {
+  closeMoreMenu();
+  if (copyResultsDisabled.value) {
+    appToast("没有可复制的搜索结果", { kind: "info" });
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(formatSearchResultsCopyText(withLineCol));
+    appToast(withLineCol ? "已复制（带行列号）" : "已复制", {
+      kind: "success",
+      duration: 1200,
+    });
+  } catch {
+    appToast("复制失败", { kind: "warning" });
+  }
+}
 
 const searchInputRef = ref<HTMLInputElement | null>(null);
 
@@ -234,6 +314,36 @@ function buildSegmentsByRanges(text: string, ranges: SearchRange[]) {
     <div v-if="props.query.trim()" class="sidebarTabFooter">
       <span class="sidebarTabFooterStat">共 {{ props.results.length }} 个结果</span>
     </div>
+    <AppShellMenuTeleport
+      v-model:open="moreOpen"
+      :left="moreLeft"
+      :top="moreTop"
+      :width="SEARCH_HEADER_MORE_MENU_W"
+      caret="end"
+      :on-panel-mount="bindMorePanel"
+      aria-label="搜索更多"
+    >
+      <button
+        type="button"
+        class="appShellMenuItem"
+        role="menuitem"
+        :disabled="copyResultsDisabled"
+        @click="onCopyResults(false)"
+      >
+        <span class="appShellMenuIconSlot" v-html="icons.copy" />
+        <span class="appShellMenuLabel">复制</span>
+      </button>
+      <button
+        type="button"
+        class="appShellMenuItem"
+        role="menuitem"
+        :disabled="copyResultsDisabled"
+        @click="onCopyResults(true)"
+      >
+        <span class="appShellMenuIconSlot" v-html="icons.copy" />
+        <span class="appShellMenuLabel">复制（带行列号）</span>
+      </button>
+    </AppShellMenuTeleport>
   </div>
 </template>
 

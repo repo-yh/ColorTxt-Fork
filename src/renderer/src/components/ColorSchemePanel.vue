@@ -9,7 +9,9 @@ import ColorSchemeLineationPanel, {
   type LineationColorRow,
 } from "./ColorSchemeLineationPanel.vue";
 import ColorSchemeReaderPanel from "./ColorSchemeReaderPanel.vue";
-import ColorSchemeTabBar from "./ColorSchemeTabBar.vue";
+import ColorSchemeTabBar, {
+  type ColorSchemeTabId,
+} from "./ColorSchemeTabBar.vue";
 import {
   defaultReaderPaletteColorEnabled,
   defaultReaderPaletteDark,
@@ -30,18 +32,29 @@ import {
   MIN_LINEATION_COLORS,
 } from "../constants/lineationColors";
 
-const props = defineProps<{
-  currentTheme: string;
-  readerSurfaceLight: ReaderSurfacePalette;
-  readerSurfaceDark: ReaderSurfacePalette;
-  readerPaletteColorEnabledLight: ReaderSurfaceColorEnabled;
-  readerPaletteColorEnabledDark: ReaderSurfaceColorEnabled;
-  monacoFontFamily: string;
-  highlightColorsLight: string[];
-  highlightColorsDark: string[];
-  lineationColorsLight: string[];
-  lineationColorsDark: string[];
-}>();
+const props = withDefaults(
+  defineProps<{
+    currentTheme: string;
+    readerSurfaceLight: ReaderSurfacePalette;
+    readerSurfaceDark: ReaderSurfacePalette;
+    readerPaletteColorEnabledLight: ReaderSurfaceColorEnabled;
+    readerPaletteColorEnabledDark: ReaderSurfaceColorEnabled;
+    monacoFontFamily: string;
+    highlightColorsLight?: string[];
+    highlightColorsDark?: string[];
+    lineationColorsLight?: string[];
+    lineationColorsDark?: string[];
+    /** 显示的标签；找书窗口仅传 `['reader']` */
+    visibleTabs?: ColorSchemeTabId[];
+  }>(),
+  {
+    highlightColorsLight: () => [...DEFAULT_HIGHLIGHT_COLORS_LIGHT],
+    highlightColorsDark: () => [...DEFAULT_HIGHLIGHT_COLORS_DARK],
+    lineationColorsLight: () => [...DEFAULT_LINEATION_COLORS_LIGHT],
+    lineationColorsDark: () => [...DEFAULT_LINEATION_COLORS_DARK],
+    visibleTabs: () => ["reader", "highlight", "lineation"],
+  },
+);
 
 const emit = defineEmits<{
   applyReaderPalettes: [
@@ -58,7 +71,13 @@ const emit = defineEmits<{
 
 const modelValue = defineModel<boolean>({ default: false });
 
-const activeTab = ref<"reader" | "highlight" | "lineation">("reader");
+const activeTab = ref<ColorSchemeTabId>("reader");
+
+function ensureActiveTabInVisible() {
+  if (!props.visibleTabs.includes(activeTab.value)) {
+    activeTab.value = props.visibleTabs[0] ?? "reader";
+  }
+}
 
 const draftLight = ref<ReaderSurfacePalette>({ ...defaultReaderPaletteLight });
 const draftDark = ref<ReaderSurfacePalette>({ ...defaultReaderPaletteDark });
@@ -228,20 +247,26 @@ function onColorEnabledUpdate(
 }
 
 function onApplyAll() {
-  emit("applyReaderPalettes", {
-    light: { ...draftLight.value },
-    dark: { ...draftDark.value },
-    colorEnabledLight: { ...draftColorEnabledLight.value },
-    colorEnabledDark: { ...draftColorEnabledDark.value },
-  });
-  emit("applyHighlightColors", {
-    light: draftHighlightLight.value.map((r) => r.color),
-    dark: draftHighlightDark.value.map((r) => r.color),
-  });
-  emit("applyLineationColors", {
-    light: draftLineationLight.value.map((r) => r.color),
-    dark: draftLineationDark.value.map((r) => r.color),
-  });
+  if (props.visibleTabs.includes("reader")) {
+    emit("applyReaderPalettes", {
+      light: { ...draftLight.value },
+      dark: { ...draftDark.value },
+      colorEnabledLight: { ...draftColorEnabledLight.value },
+      colorEnabledDark: { ...draftColorEnabledDark.value },
+    });
+  }
+  if (props.visibleTabs.includes("highlight")) {
+    emit("applyHighlightColors", {
+      light: draftHighlightLight.value.map((r) => r.color),
+      dark: draftHighlightDark.value.map((r) => r.color),
+    });
+  }
+  if (props.visibleTabs.includes("lineation")) {
+    emit("applyLineationColors", {
+      light: draftLineationLight.value.map((r) => r.color),
+      dark: draftLineationDark.value.map((r) => r.color),
+    });
+  }
   modelValue.value = false;
 }
 
@@ -390,15 +415,16 @@ function onResetLineationDefaults() {
 
 watch(modelValue, (open) => {
   if (!open) {
-    activeTab.value = "reader";
+    activeTab.value = props.visibleTabs[0] ?? "reader";
     pickerLive.value = {};
     highlightPickerLive.value = {};
     lineationPickerLive.value = {};
     return;
   }
+  ensureActiveTabInVisible();
   syncDraftFromProps();
-  syncHighlightDraftFromProps();
-  syncLineationDraftFromProps();
+  if (props.visibleTabs.includes("highlight")) syncHighlightDraftFromProps();
+  if (props.visibleTabs.includes("lineation")) syncLineationDraftFromProps();
 });
 
 watch(activeTab, (tab) => {
@@ -420,6 +446,7 @@ watch(activeTab, (tab) => {
     <div class="colorSchemeLayout">
       <ColorSchemeTabBar
         :active-tab="activeTab"
+        :visible-tabs="visibleTabs"
         @update:active-tab="activeTab = $event"
       />
 

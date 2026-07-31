@@ -4,10 +4,7 @@ import {
   buildAnnotationListRows,
   groupAnnotationListRowsByChapter,
 } from "./readerAnnotations";
-import {
-  chatExportDateSlug,
-  sanitizeChatExportTitleForFilename,
-} from "../aiAssistant/aiAssistantExport";
+import { sanitizeChatExportTitleForFilename } from "../aiAssistant/aiAssistantExport";
 
 export type ReaderAnnotationsExportV1 = {
   schemaVersion: 1;
@@ -19,7 +16,10 @@ export type ReaderAnnotationsExportV1 = {
 
 export function bookTitleForExport(bookName: string): string {
   const trimmed = bookName.trim();
-  const withoutExt = trimmed.replace(/\.txt$/i, "").trim();
+  // 去掉末尾常见正文书后缀（可连续，如 foo.epub.md → foo）
+  const withoutExt = trimmed
+    .replace(/(\.(txt|md|epub|mobi|azw3|fb2|fbz|pdf|chm))+$/i, "")
+    .trim();
   return withoutExt || trimmed || "未命名";
 }
 
@@ -27,11 +27,10 @@ export function buildAnnotationExportDefaultName(
   bookName: string,
   ext: "md" | "json",
 ): string {
-  const slug = chatExportDateSlug();
   const titlePart = sanitizeChatExportTitleForFilename(
     bookTitleForExport(bookName || "笔记"),
   );
-  return `${titlePart}-${slug}.colortxt-notes.${ext}`;
+  return `${titlePart}.notes.${ext}`;
 }
 
 export function buildReaderAnnotationsExportJson(

@@ -13,6 +13,11 @@ import {
   type TxtFileItem,
 } from "../services/fileListService";
 import { persistedSettingsChangedEvent, persistKey } from "../constants/appUi";
+import {
+  applyBaselineUpdates,
+  mergeLocalPatchOntoDiskSettings,
+  readPersistedMainSettingsObject,
+} from "../services/settingsPersistMerge";
 
 export type { TxtFileItem };
 import { parseHighlightColorsArray } from "../constants/highlightColors";
@@ -87,6 +92,10 @@ export type PersistedSettingsData = {
   monacoAdvancedWrapping?: boolean;
   /** Monaco 阅读区平滑滚动（滚轮、程序性 setScrollTop/revealLine 等） */
   monacoSmoothScrolling?: boolean;
+  /** Monaco 滚轮滚动倍率（`mouseWheelScrollSensitivity`） */
+  mouseWheelScrollSensitivity?: number;
+  /** Monaco 按住 Alt 时的滚轮加速倍率（`fastScrollSensitivity`） */
+  fastScrollSensitivity?: number;
   /** 阅读区顶部粘性章节标题（Monaco stickyScroll） */
   stickyChapterTitleEnabled?: boolean;
   /** 阅读区底部「上一章 / 下一章」工具栏 */
@@ -142,6 +151,19 @@ export type PersistedSettingsData = {
    * 若设置 JSON 中无此键，首次启动写入默认路径。
    */
   bookPackUnpackDir?: string;
+  /**
+   * 彩读书包默认密码。
+   * 空串表示导出不加密、导入明文 ZIP；非空时导出为 CTZE 加密包，导入需相同密码。
+   */
+  bookPackPassword?: string;
+  /** 是否启用 WebDAV 同步入口（默认 false） */
+  webDavEnabled?: boolean;
+  /** WebDAV 服务地址 */
+  webDavUrl?: string;
+  /** WebDAV 用户名 */
+  webDavUsername?: string;
+  /** WebDAV 应用根目录名（默认 ColorTxt）；密码存 secrets vault */
+  webDavRemoteDir?: string;
   /** 文件列表分类筛选：`__all__` | `__uncategorized__` | 分类名 */
   fileCategory?: string;
   /** 文件列表排序方式 */
@@ -340,6 +362,18 @@ export function loadPersistedSettingsData(
   if (typeof obj.monacoSmoothScrolling === "boolean") {
     data.monacoSmoothScrolling = obj.monacoSmoothScrolling;
   }
+  if (
+    typeof obj.mouseWheelScrollSensitivity === "number" &&
+    Number.isFinite(obj.mouseWheelScrollSensitivity)
+  ) {
+    data.mouseWheelScrollSensitivity = obj.mouseWheelScrollSensitivity;
+  }
+  if (
+    typeof obj.fastScrollSensitivity === "number" &&
+    Number.isFinite(obj.fastScrollSensitivity)
+  ) {
+    data.fastScrollSensitivity = obj.fastScrollSensitivity;
+  }
   if (typeof obj.stickyChapterTitleEnabled === "boolean") {
     data.stickyChapterTitleEnabled = obj.stickyChapterTitleEnabled;
   }
@@ -445,6 +479,21 @@ export function loadPersistedSettingsData(
   }
   if (typeof obj.bookPackUnpackDir === "string") {
     data.bookPackUnpackDir = obj.bookPackUnpackDir.trim();
+  }
+  if (typeof obj.bookPackPassword === "string") {
+    data.bookPackPassword = obj.bookPackPassword;
+  }
+  if (typeof obj.webDavEnabled === "boolean") {
+    data.webDavEnabled = obj.webDavEnabled;
+  }
+  if (typeof obj.webDavUrl === "string") {
+    data.webDavUrl = obj.webDavUrl;
+  }
+  if (typeof obj.webDavUsername === "string") {
+    data.webDavUsername = obj.webDavUsername;
+  }
+  if (typeof obj.webDavRemoteDir === "string") {
+    data.webDavRemoteDir = obj.webDavRemoteDir;
   }
   if (typeof obj.fileCategory === "string" && obj.fileCategory.trim()) {
     data.fileCategory = obj.fileCategory.trim();
@@ -591,6 +640,44 @@ export function persistSettingsData(
   } catch {
     // ignore
   }
+}
+
+/**
+ * 合并写入主设置 JSON（保留未在 patch 中出现的键）。
+ * 传入 baseline 时：window-local 且相对基线未变的字段保留磁盘值，且不把磁盘合并进调用方内存。
+ */
+export function patchPersistedMainSettings(
+  patch: Record<string, unknown>,
+  options?: {
+    baseline?: Record<string, unknown>;
+    windowLocalKeys?: ReadonlySet<string>;
+    skipKeys?: ReadonlySet<string>;
+  },
+) {
+  const disk = readPersistedMainSettingsObject();
+  let next: Record<string, unknown>;
+  if (options?.baseline) {
+    const merged = mergeLocalPatchOntoDiskSettings({
+      disk,
+      patch,
+      baseline: options.baseline,
+      windowLocalKeys: options.windowLocalKeys,
+      skipKeys: options.skipKeys,
+    });
+    next = merged.next;
+    applyBaselineUpdates(options.baseline, patch, merged.writtenKeys);
+  } else {
+    next = { ...disk };
+    for (const [key, value] of Object.entries(patch)) {
+      if (value === undefined) continue;
+      next[key] = value;
+    }
+  }
+  persistSettingsData(
+    typeof localStorage !== "undefined" ? localStorage : undefined,
+    persistKey,
+    next as PersistedSettingsData,
+  );
 }
 
 export function loadSessionSnapshot(

@@ -1,10 +1,3 @@
-import type { TimedScrollSettings } from "../../constants/timedScroll";
-import type { PomodoroSettings } from "../../constants/pomodoro";
-import type {
-  TextConvertWidthMode,
-  TextConvertZhMode,
-} from "@shared/textConvertTypes";
-
 export const findBookSettingsKey = "colortxt.findBook.settings";
 
 export const DEFAULT_FIND_BOOK_DOWNLOAD_CATEGORY = "下载";
@@ -13,9 +6,6 @@ export type FindBookDownloadAfterAction = "none" | "openMain" | "openNewWindow";
 
 export const DEFAULT_FIND_BOOK_DOWNLOAD_AFTER_ACTION: FindBookDownloadAfterAction =
   "none";
-
-/** 找书阅读器底部「上一章 / 下一章」工具栏（默认开启） */
-export const defaultFindBookChapterNavToolbarEnabled = true;
 
 /** 目录章名下附加信息（ruleToc.updateTime → tag；默认关闭） */
 export const defaultFindBookShowChapterTag = false;
@@ -123,7 +113,10 @@ export function buildFindBookProxyUrl(settings: FindBookProxySettings): string {
   return `${scheme}://${host}:${port}${auth}`;
 }
 
-/** 找书窗口独立持久化的设置（主题色、语音朗读仍走主应用设置） */
+/**
+ * 找书窗口独立持久化的设置。
+ * 阅读 / 编辑 / 语音朗读与主界面共用 `colorTxt.ui.settings`。
+ */
 export type PersistedFindBookSettings = {
   /** 章节正文离线缓存根目录 */
   cacheDir?: string;
@@ -133,33 +126,9 @@ export type PersistedFindBookSettings = {
   downloadDefaultCategory?: string;
   /** 找书全局网络代理（书源 header `proxy` 优先） */
   proxy?: FindBookProxySettings;
-  fontSize?: number;
-  lineHeightMultiple?: number;
-  fontFamily?: string;
-  pinnedOtherFonts?: string[];
-  monacoCustomHighlight?: boolean;
-  txtrDelimitedMatchCrossLine?: boolean;
-  compressBlankLines?: boolean;
-  compressBlankKeepOneBlank?: boolean;
-  leadIndentFullWidth?: boolean;
-  textConvertZh?: TextConvertZhMode;
-  textConvertLetter?: TextConvertWidthMode;
-  textConvertDigit?: TextConvertWidthMode;
-  monacoAdvancedWrapping?: boolean;
-  monacoSmoothScrolling?: boolean;
-  stickyChapterTitleEnabled?: boolean;
-  chapterNavToolbarEnabled?: boolean;
-  /** 编辑模式：显示行号（默认关闭） */
-  readerEditShowLineNumbers?: boolean;
-  /** 编辑模式：启用小地图（默认关闭） */
-  readerEditMinimap?: boolean;
-  fullscreenReaderWidthPercent?: number;
-  fullscreenShowSystemTime?: boolean;
   /** 阅读器侧栏是否展开（非全屏） */
   showSidebar?: boolean;
   sidebarWidth?: number;
   /** 目录是否显示章节附加信息（BookChapter.tag） */
   showChapterTag?: boolean;
-  timedScroll?: Partial<TimedScrollSettings>;
-  pomodoro?: Partial<PomodoroSettings>;
 };

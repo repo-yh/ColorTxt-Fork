@@ -10,14 +10,23 @@ import {
 import AppCustomSelect, { type CustomSelectItem } from "./AppCustomSelect.vue";
 import SwitchToggle from "./SwitchToggle.vue";
 
-defineProps<{
-  draftReaderEditShowLineNumbers: boolean;
-  draftReaderEditMinimap: boolean;
-  draftEditAutoRefreshChapterList: boolean;
-  /** 与 AI 阅读助手总开关联动：为 false 时不展示智能排版配置 */
-  aiFeaturesEnabled: boolean;
-  draftAiSmartFormat: AiSmartFormatSettings;
-}>();
+withDefaults(
+  defineProps<{
+    draftReaderEditShowLineNumbers: boolean;
+    draftReaderEditMinimap: boolean;
+    draftEditAutoRefreshChapterList?: boolean;
+    /** 与 AI 阅读助手总开关联动：为 false 时不展示智能排版配置 */
+    aiFeaturesEnabled?: boolean;
+    draftAiSmartFormat?: AiSmartFormatSettings;
+    /** 为 false 时隐藏「自动刷新章节列表」与「AI 智能排版」（找书设置） */
+    showMainOnlyEditOptions?: boolean;
+  }>(),
+  {
+    draftEditAutoRefreshChapterList: false,
+    aiFeaturesEnabled: false,
+    showMainOnlyEditOptions: true,
+  },
+);
 
 const emit = defineEmits<{
   "update:draftReaderEditShowLineNumbers": [v: boolean];
@@ -71,7 +80,7 @@ function updateSmart<K extends keyof AiSmartFormatSettings>(
         </div>
       </div>
 
-      <div class="settingsRow">
+      <div v-if="showMainOnlyEditOptions" class="settingsRow">
         <div class="settingsRowMain">
           <span class="settingsLabel">自动刷新章节列表</span>
           <SwitchToggle
@@ -88,7 +97,10 @@ function updateSmart<K extends keyof AiSmartFormatSettings>(
       </div>
     </div>
 
-    <div v-if="aiFeaturesEnabled" class="settingsBody">
+    <div
+      v-if="showMainOnlyEditOptions && aiFeaturesEnabled && draftAiSmartFormat"
+      class="settingsBody"
+    >
       <h3 class="settingsSectionTitle">AI 智能排版</h3>
 
       <div class="settingsSubsectionDivider" role="separator">

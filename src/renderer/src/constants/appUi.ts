@@ -80,6 +80,9 @@ export const APP_TOAST_Z_INDEX = MODAL_STACK_BASE_Z_INDEX + 500;
 export const persistKey = "colorTxt.ui.settings";
 /** 同窗口内 localStorage 写入 {@link persistKey} 后派发，供找书阅读器等同步主界面设置 */
 export const persistedSettingsChangedEvent = "colortxt:persisted-settings-changed";
+/** 「书包密码」弹框「显示密码」勾选（`"1"` / 其它） */
+export const bookPackPromptShowPasswordKey =
+  "colorTxt.ui.bookPackPromptShowPassword";
 export const sessionKey = "colorTxt.session";
 export const fileListKey = "colorTxt.file.list";
 export const recentFilesKey = "colorTxt.recent.files";
@@ -92,8 +95,8 @@ export const fileMetaKey = "colorTxt.file.meta";
 export const skipUnloadPersistenceSessionKey = "colorTxt.skipUnloadPersistence";
 
 /**
- * 恢复界面默认并刷新前写入 sessionStorage；卸载时若存在则跳过写入 {@link persistKey}，
- * 避免 `beforeunload` / `pagehide` 把内存中的旧界面设置写回已清除项。
+ * 恢复界面默认并刷新前写入 sessionStorage；若存在则 {@link persistSettings} 直接跳过，
+ * 避免删除 {@link persistKey} 后其它变更路径把内存中的旧界面设置写回。
  */
 export const skipSettingsPersistenceSessionKey = "colorTxt.skipSettingsPersistence";
 
@@ -135,6 +138,31 @@ export const defaultSyncCurrentFile = false;
 export const defaultMonacoAdvancedWrapping = false;
 /** Monaco 阅读区：滚轮/跳转等是否使用平滑滚动动画 */
 export const defaultMonacoSmoothScrolling = true;
+/** Monaco `mouseWheelScrollSensitivity`：滚轮 delta 倍率 */
+export const defaultMouseWheelScrollSensitivity = 1;
+export const minMouseWheelScrollSensitivity = 0.1;
+export const maxMouseWheelScrollSensitivity = 10;
+/** Monaco `fastScrollSensitivity`：按住 Alt 时的滚轮加速倍率 */
+export const defaultFastScrollSensitivity = 5;
+export const minFastScrollSensitivity = 1;
+export const maxFastScrollSensitivity = 20;
+
+export function clampMouseWheelScrollSensitivity(n: number): number {
+  if (!Number.isFinite(n)) return defaultMouseWheelScrollSensitivity;
+  return Math.min(
+    maxMouseWheelScrollSensitivity,
+    Math.max(minMouseWheelScrollSensitivity, n),
+  );
+}
+
+export function clampFastScrollSensitivity(n: number): number {
+  if (!Number.isFinite(n)) return defaultFastScrollSensitivity;
+  return Math.min(
+    maxFastScrollSensitivity,
+    Math.max(minFastScrollSensitivity, n),
+  );
+}
+
 /** 阅读区顶部是否显示粘性章节标题（Monaco stickyScroll + outlineModel） */
 export const defaultStickyChapterTitleEnabled = true;
 /** 主界面阅读区底部「上一章 / 下一章」工具栏（默认关闭） */

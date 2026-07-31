@@ -16,8 +16,20 @@ withDefaults(
     large?: boolean;
     /** 编辑态「格式化」类操作：图标使用主题色，与只读切换按钮区分 */
     primary?: boolean;
+    /**
+     * 危险操作（删除/移除等）：默认 muted，悬停 danger 色 + 浅红底。
+     * 与 `primary` 互斥使用。
+     */
+    danger?: boolean;
   }>(),
-  { active: false, multicolor: false, disabled: false, large: false, primary: false },
+  {
+    active: false,
+    multicolor: false,
+    disabled: false,
+    large: false,
+    primary: false,
+    danger: false,
+  },
 );
 
 defineEmits<{ click: [e: MouseEvent] }>();
@@ -27,7 +39,7 @@ defineEmits<{ click: [e: MouseEvent] }>();
   <button
     type="button"
     class="iconBtn"
-    :class="{ active, large, primary }"
+    :class="{ active, large, primary, danger }"
     :title="title"
     :aria-label="ariaLabel"
     :aria-pressed="pressed"
@@ -58,7 +70,9 @@ defineEmits<{ click: [e: MouseEvent] }>();
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: background 0.16s ease;
+  transition:
+    background 0.16s ease,
+    color 0.16s ease;
 }
 
 .iconBtn:hover:not(:disabled) {
@@ -114,5 +128,41 @@ defineEmits<{ click: [e: MouseEvent] }>();
 }
 .iconBtn.primary:hover:not(:disabled) .icon:not(.icon--multicolor) {
   color: #ffffff;
+}
+
+.iconBtn.large {
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+}
+.iconBtn.large .icon {
+  width: 18px;
+  height: 18px;
+}
+.iconBtn.large .icon :deep(svg) {
+  width: 18px;
+  height: 18px;
+}
+
+/** 删除/移除：默认 --icon-btn-fg，悬停 --danger（书架管理、阅读数据等） */
+.iconBtn.danger {
+  border-radius: 6px;
+  color: var(--icon-btn-fg);
+}
+.iconBtn.danger .icon:not(.icon--multicolor) {
+  color: var(--icon-btn-fg);
+}
+.iconBtn.danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  color: var(--danger);
+}
+.iconBtn.danger:hover:not(:disabled) .icon:not(.icon--multicolor) {
+  color: var(--danger);
+}
+.iconBtn.danger.active {
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+.iconBtn.danger.active .icon:not(.icon--multicolor) {
+  color: var(--danger);
 }
 </style>
