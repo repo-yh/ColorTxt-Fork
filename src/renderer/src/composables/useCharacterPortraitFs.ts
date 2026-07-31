@@ -2,8 +2,11 @@ import { computed, reactive, ref, watch, type Ref } from "vue";
 import type { CharacterRosterEntry } from "@shared/characterTypes";
 import {
   characterPortraitImageAbs,
+  characterPortraitImageAbsCandidates,
   characterPortraitSessionDraftImageAbs,
+  characterPortraitSessionDraftImageAbsCandidates,
   characterPortraitTmpImageAbs,
+  normalizePortraitImageExtension,
   sanitizeBookFolderSegment,
 } from "@shared/characterPortraitPaths";
 
@@ -16,9 +19,11 @@ import {
  *    - 仅用于定位「待保存」会话草稿文件；关闭抽屉 / 换书时清空，并删除对应草稿
  *
  * 2. **canonical portrait path**（正式立绘）
- *    - `{cacheRoot}/{bookFolderSegment}/{sanitize(displayName)}.png`
+ *    - `{cacheRoot}/{bookFolderSegment}/{sanitize(displayName)}.{ext}`
+ *    - `ext` 与源图一致（文生图固定 `png`）；只改主干文件名，不改写后缀
  *    - 由 `characterPortraitImageAbs` 生成；roster 卡片 URL、保存入库、导入导出读写此路径
  *    - 仅在「保存角色」或包导入时写入；生成预览与抽屉上传不得直接覆盖
+ *    - 换后缀保存时须删除同主干的其它扩展名文件，避免残留
  *
  * 3. **`_tmp` portrait path**（文生图临时预览）
  *    - `{cacheRoot}/{bookFolderSegment}/{sanitize(displayName)}_tmp.png`
@@ -26,7 +31,7 @@ import {
  *    - 「应用」时复制到 session-draft，再删除 `_tmp`；打开/关闭生成弹窗时清理残留
  *
  * 4. **session-draft portrait path**（编辑抽屉待保存）
- *    - `{cacheRoot}/{bookFolderSegment}/_char_draft_{sessionKey}.png`
+ *    - `{cacheRoot}/{bookFolderSegment}/_char_draft_{sessionKey}.{ext}`
  *    - 由 `characterPortraitSessionDraftImageAbs` 生成；上传/拖放/生成「应用」写入此路径
  *    - 预览优先读草稿，再回落 canonical；「保存角色」时复制到 canonical 并删除草稿
  */
@@ -44,6 +49,31 @@ function rosterPortraitFingerprint(
     .map((e) => `${e.id}\0${e.displayName.trim()}`)
     .sort()
     .join("\n");
+}
+
+async function firstExistingFileAbs(
+  candidates: readonly string[],
+): Promise<string | null> {
+  for (const p of candidates) {
+    try {
+      const st = await window.colorTxt.stat(p);
+      if (st.isFile) return p;
+    } catch {
+      /* try next */
+    }
+  }
+  return null;
+}
+
+async function removeFilesIfExist(paths: readonly string[]): Promise<void> {
+  for (const p of paths) {
+    try {
+      const st = await window.colorTxt.stat(p);
+      if (st.isFile) await window.colorTxt.removePath(p);
+    } catch {
+      /* ignore */
+    }
+  }
 }
 
 export function useCharacterPortraitFs(opts: {
@@ -69,12 +99,29 @@ export function useCharacterPortraitFs(opts: {
     return window.colorTxt.getDefaultCharacterPortraitCacheDir();
   }
 
-  async function portraitAbsForDisplayName(displayName: string): Promise<string> {
+  /** 写入用正式立绘路径（指定后缀） */
+  async function portraitAbsForDisplayName(
+    displayName: string,
+    ext = "png",
+  ): Promise<string> {
     const root = await resolveCacheRootAbs();
     return characterPortraitImageAbs(
       root,
       bookFolderSegment.value,
       displayName,
+      ext,
+    );
+  }
+
+  /** 解析已存在的正式立绘（任一允许后缀）；无则 null */
+  async function resolvePortraitAbsForDisplayName(
+    displayName: string,
+  ): Promise<string | null> {
+    const name = displayName.trim();
+    if (!name) return null;
+    const root = await resolveCacheRootAbs();
+    return firstExistingFileAbs(
+      characterPortraitImageAbsCandidates(root, bookFolderSegment.value, name),
     );
   }
 
@@ -89,12 +136,31 @@ export function useCharacterPortraitFs(opts: {
     );
   }
 
-  async function portraitSessionDraftAbs(sessionKey: string): Promise<string> {
+  /** 写入用 session-draft 路径（指定后缀） */
+  async function portraitSessionDraftAbs(
+    sessionKey: string,
+    ext = "png",
+  ): Promise<string> {
     const root = await resolveCacheRootAbs();
     return characterPortraitSessionDraftImageAbs(
       root,
       bookFolderSegment.value,
       sessionKey,
+      ext,
+    );
+  }
+
+  /** 解析已存在的 session-draft（任一允许后缀） */
+  async function resolvePortraitSessionDraftAbs(
+    sessionKey: string,
+    bookSegment?: string,
+  ): Promise<string | null> {
+    const sk = sessionKey.trim();
+    const seg = (bookSegment ?? bookFolderSegment.value).trim();
+    if (!sk || !seg) return null;
+    const root = await resolveCacheRootAbs();
+    return firstExistingFileAbs(
+      characterPortraitSessionDraftImageAbsCandidates(root, seg, sk),
     );
   }
 
@@ -106,9 +172,13 @@ export function useCharacterPortraitFs(opts: {
     if (!sk || !bookSegment.trim()) return;
     try {
       const root = await resolveCacheRootAbs();
-      const p = characterPortraitSessionDraftImageAbs(root, bookSegment, sk);
-      const st = await window.colorTxt.stat(p);
-      if (st.isFile) await window.colorTxt.removePath(p);
+      await removeFilesIfExist(
+        characterPortraitSessionDraftImageAbsCandidates(
+          root,
+          bookSegment,
+          sk,
+        ),
+      );
     } catch {
       /* ignore */
     }
@@ -120,19 +190,42 @@ export function useCharacterPortraitFs(opts: {
     await deletePortraitSessionDraftFileAt(sessionKey, bookFolderSegment.value);
   }
 
-  /** 按角色显示名删除正式立绘与文生图临时 `_tmp` 文件（不存在则忽略） */
+  /**
+   * 删除同角色主干下除保留路径以外的正式立绘（换后缀保存时清理旧文件）。
+   * `keepExt` 为空则删除全部允许后缀。
+   */
+  async function removeSiblingPortraitFilesByDisplayName(
+    displayName: string,
+    keepExt?: string,
+  ): Promise<void> {
+    const name = displayName.trim();
+    if (!name) return;
+    const root = await resolveCacheRootAbs();
+    const candidates = characterPortraitImageAbsCandidates(
+      root,
+      bookFolderSegment.value,
+      name,
+    );
+    if (!keepExt) {
+      await removeFilesIfExist(candidates);
+      return;
+    }
+    const keepPath = characterPortraitImageAbs(
+      root,
+      bookFolderSegment.value,
+      name,
+      keepExt,
+    );
+    await removeFilesIfExist(candidates.filter((p) => p !== keepPath));
+  }
+
+  /** 按角色显示名删除正式立绘（全部后缀）与文生图临时 `_tmp` 文件 */
   async function removeCharacterPortraitFilesByDisplayName(
     displayName: string,
   ): Promise<void> {
     const name = displayName.trim();
     if (!name) return;
-    try {
-      const abs = await portraitAbsForDisplayName(name);
-      const st = await window.colorTxt.stat(abs);
-      if (st.isFile) await window.colorTxt.removePath(abs);
-    } catch {
-      /* ignore */
-    }
+    await removeSiblingPortraitFilesByDisplayName(name);
     try {
       const tmpAbs = await portraitTmpAbsForDisplayName(name);
       const st = await window.colorTxt.stat(tmpAbs);
@@ -148,9 +241,8 @@ export function useCharacterPortraitFs(opts: {
     const trimmed = displayName.trim();
     if (!trimmed) return null;
     try {
-      const p = await portraitAbsForDisplayName(trimmed);
-      const st = await window.colorTxt.stat(p);
-      if (!st.isFile) return null;
+      const p = await resolvePortraitAbsForDisplayName(trimmed);
+      if (!p) return null;
       const raw = await window.colorTxt.pathToReadableLocalUrl(p);
       if (!raw) return null;
       return withUrlCacheBust(raw);
@@ -168,9 +260,8 @@ export function useCharacterPortraitFs(opts: {
     const sk = optsReadable.sessionKey.trim();
     if (sk) {
       try {
-        const draftP = await portraitSessionDraftAbs(sk);
-        const st = await window.colorTxt.stat(draftP);
-        if (st.isFile) {
+        const draftP = await resolvePortraitSessionDraftAbs(sk);
+        if (draftP) {
           const raw = await window.colorTxt.pathToReadableLocalUrl(draftP);
           if (raw) return withUrlCacheBust(raw);
         }
@@ -191,10 +282,9 @@ export function useCharacterPortraitFs(opts: {
       delete portraitUrlById[e.id];
       return;
     }
-    const p = await portraitAbsForDisplayName(name);
+    const p = await resolvePortraitAbsForDisplayName(name);
     try {
-      const st = await window.colorTxt.stat(p);
-      if (st.isFile) {
+      if (p) {
         const url = await window.colorTxt.pathToReadableLocalUrl(p);
         if (url) {
           const existing = portraitUrlById[e.id];
@@ -222,22 +312,38 @@ export function useCharacterPortraitFs(opts: {
   }
 
   /**
-   * 将本地图片复制到当前 edit session 的 session-draft。
-   * @returns 是否写入成功（失败时已弹窗提示）
+   * 将本地图片复制到当前 edit session 的 session-draft（保留源后缀）。
+   * @returns 是否写入成功（失败时默认弹窗提示；`quiet` 时由调用方自行提示）
    */
-  async function applyPortraitFromFilePath(fromPath: string): Promise<boolean> {
+  async function applyPortraitFromFilePath(
+    fromPath: string,
+    options?: { quiet?: boolean },
+  ): Promise<boolean> {
     const sk = portraitEditSessionKey.value.trim();
     if (!sk) {
-      await window.colorTxt.alert("请关闭并重新打开编辑面板后再试。");
+      if (!options?.quiet) {
+        await window.colorTxt.alert("请关闭并重新打开编辑面板后再试。");
+      }
       return false;
     }
-    const dest = await portraitSessionDraftAbs(sk);
+    const src = fromPath.trim();
+    const ext = normalizePortraitImageExtension(src);
+    const dest = await portraitSessionDraftAbs(sk, ext);
+    const root = await resolveCacheRootAbs();
+    const allDrafts = characterPortraitSessionDraftImageAbsCandidates(
+      root,
+      bookFolderSegment.value,
+      sk,
+    );
+    await removeFilesIfExist(allDrafts.filter((p) => p !== dest));
     const cp = await window.colorTxt.characterPortrait.copyFileTo({
-      from: fromPath.trim(),
+      from: src,
       to: dest,
     });
     if (!cp.ok) {
-      await window.colorTxt.alert(cp.error ?? "上传失败");
+      if (!options?.quiet) {
+        await window.colorTxt.alert(cp.error ?? "上传失败");
+      }
       return false;
     }
     return true;
@@ -262,10 +368,13 @@ export function useCharacterPortraitFs(opts: {
     bookFolderSegment,
     resolveCacheRootAbs,
     portraitAbsForDisplayName,
+    resolvePortraitAbsForDisplayName,
     portraitTmpAbsForDisplayName,
     portraitSessionDraftAbs,
+    resolvePortraitSessionDraftAbs,
     deletePortraitSessionDraftFileAt,
     deletePortraitSessionDraftFile,
+    removeSiblingPortraitFilesByDisplayName,
     removeCharacterPortraitFilesByDisplayName,
     portraitPreviewReadableUrl,
     readablePortraitDraftThenCanonical,

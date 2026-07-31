@@ -14,8 +14,9 @@ import type {
 } from "@shared/characterTypes";
 import {
   characterPortraitBookDirAbs,
-  characterPortraitImageAbs,
-  portraitPngFileNameForCharacterName,
+  normalizePortraitImageExtension,
+  portraitImageExtensionFromPath,
+  portraitStemForCharacterName,
   sanitizeBookFolderSegment,
 } from "@shared/characterPortraitPaths";
 import type { Chapter } from "../chapter";
@@ -45,7 +46,7 @@ import {
   buildCharacterRosterPackDefaultName,
   buildCharacterRosterPackZip,
   joinBookDirPortraitPath,
-  mergeCharacterRosterById,
+  mergeCharacterRosterByDisplayName,
   parseCharacterRosterPackZip,
   pickAndReadCharacterRosterPackFile,
   saveCharacterRosterPackFile,
@@ -144,10 +145,12 @@ const {
   bookFolderSegment,
   resolveCacheRootAbs,
   portraitAbsForDisplayName,
+  resolvePortraitAbsForDisplayName,
   portraitTmpAbsForDisplayName,
-  portraitSessionDraftAbs,
+  resolvePortraitSessionDraftAbs,
   deletePortraitSessionDraftFileAt,
   deletePortraitSessionDraftFile,
+  removeSiblingPortraitFilesByDisplayName,
   removeCharacterPortraitFilesByDisplayName,
   readablePortraitDraftThenCanonical,
   refreshPortraitUrlForEntry,
@@ -430,17 +433,17 @@ async function exportCharacterRosterPack() {
     await appAlert("请先打开文件");
     return;
   }
-  const root = await resolveCacheRootAbs();
-  const bookSeg = bookFolderSegment.value;
   const portraits = new Map<string, ArrayBuffer>();
   for (const entry of props.characterRoster) {
     const name = entry.displayName.trim();
     if (!name) continue;
-    const abs = characterPortraitImageAbs(root, bookSeg, name);
-    const basename = portraitPngFileNameForCharacterName(name);
+    const abs = await resolvePortraitAbsForDisplayName(name);
+    if (!abs) continue;
+    const ext = portraitImageExtensionFromPath(abs);
+    const basename = `${portraitStemForCharacterName(name)}.${
+      normalizePortraitImageExtension(ext || "png")
+    }`;
     try {
-      const st = await window.colorTxt.stat(abs);
-      if (!st.isFile) continue;
       const buf = await window.colorTxt.readFileAsArrayBuffer(abs);
       portraits.set(basename, buf);
     } catch {
@@ -487,7 +490,7 @@ async function importCharacterRosterPack() {
     return;
   }
   const { manifest, portraits } = parsed.pack;
-  const merged = mergeCharacterRosterById(
+  const merged = mergeCharacterRosterByDisplayName(
     props.characterRoster,
     manifest.characterRoster,
   );
@@ -496,9 +499,15 @@ async function importCharacterRosterPack() {
   await window.colorTxt.mkdir(bookDir);
   let portraitWritten = 0;
   for (const [basename, buf] of portraits) {
-    const dest = joinBookDirPortraitPath(bookDir, basename);
+    const rawExt = portraitImageExtensionFromPath(basename);
+    const keepExt = normalizePortraitImageExtension(rawExt || "png");
+    const stem = basename.slice(0, basename.length - rawExt.length - 1);
+    if (!stem) continue;
+    const normalizedBase = `${stem}.${keepExt}`;
+    const dest = joinBookDirPortraitPath(bookDir, normalizedBase);
     try {
       await window.colorTxt.writeBinaryFile(dest, arrayBufferToBase64(buf));
+      await removeSiblingPortraitFilesByDisplayName(stem, keepExt);
       portraitWritten += 1;
     } catch {
       /* 单张失败不中断 */
@@ -654,11 +663,14 @@ defineExpose({
       :ai-config-sync-nonce="aiConfigSyncNonce"
       :voice-read-settings="voiceReadSettings"
       :portrait-tmp-abs-for-display-name="portraitTmpAbsForDisplayName"
-      :portrait-session-draft-abs="portraitSessionDraftAbs"
       :portrait-abs-for-display-name="portraitAbsForDisplayName"
+      :resolve-portrait-session-draft-abs="resolvePortraitSessionDraftAbs"
       :readable-portrait-draft-then-canonical="readablePortraitDraftThenCanonical"
       :apply-portrait-from-file-path="applyPortraitFromFilePath"
       :delete-portrait-session-draft-file="deletePortraitSessionDraftFile"
+      :remove-sibling-portrait-files-by-display-name="
+        removeSiblingPortraitFilesByDisplayName
+      "
       :remove-character-portrait-files-by-display-name="
         removeCharacterPortraitFilesByDisplayName
       "

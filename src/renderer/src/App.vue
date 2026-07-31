@@ -85,7 +85,7 @@ import { useAppSidebarSearch } from "./composables/useAppSidebarSearch";
 import { useAppSyncCurrentFileWatch } from "./composables/useAppSyncCurrentFileWatch";
 import { useAppWindowBindings } from "./composables/useAppWindowBindings";
 import { useAiChapterPlainTextBridge } from "./composables/useAiChapterPlainTextBridge";
-import { isEbookFilePath, isMarkdownFilePath } from "./ebook/ebookFormat";
+import { isEbookFilePath, isMarkdownFilePath, isPlainTextBookPath } from "./ebook/ebookFormat";
 import { useAppVoiceRead } from "./composables/useAppVoiceRead";
 import { useAppTimedScroll } from "./composables/useAppTimedScroll";
 import { useTxtStreamPipeline } from "./composables/useTxtStreamPipeline";
@@ -414,7 +414,7 @@ const activeChapterIdx = ref<number>(-1);
 useAiChapterPlainTextBridge(readerRef, chapters);
 const showChapterCounts = ref(defaultShowChapterCounts);
 const chapterCharCountExact = ref(defaultChapterCharCountExact);
-/** 依赖 exact 开关，变更时更新函数引用以刷新章节列表字数展示 */
+/** 依赖 exact 开关，变更时更新函数引用以刷新章节列表字数展示（底栏总字数直接读同一开关） */
 const formatChapterCharCount = computed(
   () => (n: number) => formatCharCount(n, chapterCharCountExact.value),
 );
@@ -1331,6 +1331,191 @@ async function onRenameFilePath(payload: { oldPath: string; newName: string }) {
   persistRecentFiles();
   // 落盘时机保持原有策略：走现有防抖 + 门控；窗口卸载仍会兜底立即落盘。
   persistFileMeta();
+}
+
+async function migratePortraitBookDirIfNeeded(
+  oldPath: string,
+  newPath: string,
+): Promise<void> {
+  const oldSeg = sanitizeBookFolderSegment(oldPath);
+  const newSeg = sanitizeBookFolderSegment(newPath);
+  if (!oldSeg || oldSeg === newSeg) return;
+  try {
+    const rootRaw = characterPortraitCacheDir.value.trim();
+    const root =
+      rootRaw ||
+      (await window.colorTxt.getDefaultCharacterPortraitCacheDir());
+    if (!root?.trim()) return;
+    const from = characterPortraitBookDirAbs(root.trim(), oldSeg);
+    const to = characterPortraitBookDirAbs(root.trim(), newSeg);
+    let st;
+    try {
+      st = await window.colorTxt.stat(from);
+    } catch {
+      return;
+    }
+    if (!st.isDirectory) return;
+    const mig = await window.colorTxt.characterPortrait.migrateCacheRoot({
+      from,
+      to,
+    });
+    if (!mig.ok) {
+      console.warn("migrate portrait book dir failed", mig.error);
+    }
+  } catch (e) {
+    console.warn("migrate portrait book dir failed", e);
+  }
+}
+
+/**
+ * 侧栏「替换文件」：用另一个 txt/md 路径替换列表项，继承原阅读数据（书签/高亮/笔记/角色卡/进度等）。
+ */
+async function onReplaceFilePath(oldPathRaw: string) {
+  const oldPath = oldPathRaw.trim();
+  if (!oldPath || !isPlainTextBookPath(oldPath)) return;
+  if (!window.colorTxt) {
+    await appAlert("preload 未注入：请重启应用（或检查主进程 preload 路径）");
+    return;
+  }
+
+  const r = await window.colorTxt.showOpenDialog({
+    title: "选择替换文件",
+    properties: ["openFile"],
+    filters: [
+      { name: "文本", extensions: ["txt", "md"] },
+      { name: "所有文件", extensions: ["*"] },
+    ],
+  });
+  if (r.canceled || r.filePaths.length === 0) return;
+  const newPath = (r.filePaths[0] ?? "").trim();
+  if (!newPath) return;
+  if (!isPlainTextBookPath(newPath)) {
+    await appAlert("请选择 txt 或 md 文件。");
+    return;
+  }
+
+  const oldKey = fileHistoryKey(oldPath);
+  const nextKey = fileHistoryKey(newPath);
+  if (oldKey === nextKey) return;
+
+  const newName = fileNameKey(newPath);
+
+  let size = 0;
+  try {
+    const st = await window.colorTxt.stat(newPath);
+    if (!st.isFile) {
+      await appAlert("所选路径不是有效文件。");
+      return;
+    }
+    size = typeof st.size === "number" ? st.size : 0;
+  } catch {
+    await appAlert("无法读取所选文件。");
+    return;
+  }
+
+  const wasOpen =
+    Boolean(currentFile.value) &&
+    fileHistoryKey(currentFile.value!) === oldKey;
+
+  txtFiles.value = txtFiles.value
+    .filter((f) => {
+      const k = fileHistoryKey(f.path);
+      // 若新路径已在列表中，去掉旧的那条，避免重复
+      if (k === nextKey && k !== oldKey) return false;
+      return true;
+    })
+    .map((f) => {
+      if (fileHistoryKey(f.path) !== oldKey) return f;
+      return normalizeTxtFileItem({
+        ...f,
+        path: newPath,
+        size,
+      });
+    });
+
+  recentFiles.value = recentFiles.value.map((item) =>
+    fileHistoryKey(item.path) === oldKey ? { ...item, path: newPath } : item,
+  );
+
+  let prevMeta = fileMetaRecords.value.find(
+    (m) => fileHistoryKey(m.path) === oldKey,
+  );
+  if (!prevMeta) {
+    const fallbackCandidates = fileMetaRecords.value.filter(
+      (m) => m.fileName === fileNameKey(oldPath),
+    );
+    if (fallbackCandidates.length === 1) {
+      prevMeta = fallbackCandidates[0];
+    }
+  }
+  if (prevMeta) {
+    const prevMetaKey = fileHistoryKey(prevMeta.path);
+    const migrated: FileMetaRecord = {
+      ...prevMeta,
+      path: newPath,
+      fileName: fileNameKey(newPath),
+      // 纯文本替换不沿用电子书转换缓存路径
+      convertedMdPath: undefined,
+      sourceMtimeMsAtConvert: undefined,
+      updatedAt: Date.now(),
+    };
+    fileMetaRecords.value = [
+      migrated,
+      ...fileMetaRecords.value.filter((m) => {
+        const k = fileHistoryKey(m.path);
+        if (k === prevMetaKey) return false;
+        if (k === oldKey) return false;
+        if (k === nextKey) return false;
+        return true;
+      }),
+    ];
+  } else {
+    // 原项无阅读数据：去掉可能挂在旧路径上的空壳，保留新路径已有 meta（若有）
+    fileMetaRecords.value = fileMetaRecords.value.filter(
+      (m) => fileHistoryKey(m.path) !== oldKey,
+    );
+  }
+
+  if (metaProgressByPathKey.value.has(oldKey)) {
+    const m = new Map(metaProgressByPathKey.value);
+    const v = m.get(oldKey);
+    m.delete(oldKey);
+    m.delete(nextKey);
+    if (typeof v === "number") m.set(nextKey, v);
+    metaProgressByPathKey.value = m;
+  } else if (metaProgressByPathKey.value.has(nextKey) && prevMeta) {
+    // 已用旧 meta 覆盖新路径时，清掉仅属于新路径旧进度的映射（进度在 meta 内）
+    const m = new Map(metaProgressByPathKey.value);
+    if (typeof prevMeta.progress === "number") {
+      m.set(nextKey, prevMeta.progress);
+    }
+    metaProgressByPathKey.value = m;
+  }
+
+  await migratePortraitBookDirIfNeeded(oldPath, newPath);
+
+  persistFileListCache();
+  persistRecentFiles();
+  persistFileMeta();
+
+  if (wasOpen) {
+    await openFilePath(newPath, { keepSidebarTab: true });
+  } else {
+    if (
+      physicalReaderPath.value &&
+      fileHistoryKey(physicalReaderPath.value) === oldKey
+    ) {
+      physicalReaderPath.value = newPath;
+    }
+    if (
+      activeStreamFilePath.value &&
+      fileHistoryKey(activeStreamFilePath.value) === oldKey
+    ) {
+      activeStreamFilePath.value = newPath;
+    }
+  }
+
+  appToast(`已替换为「${newName}」`, { kind: "success" });
 }
 
 function onOpenFileInNewWindow(path: string) {
@@ -3277,6 +3462,7 @@ useAppShellThemeWatch({
           @remove-file-list="removeFileList"
           @clear-file-meta="onClearFileMeta"
           @rename-file-path="onRenameFilePath"
+          @replace-file-path="onReplaceFilePath"
           @open-file-in-new-window="onOpenFileInNewWindow"
           @close-current-file="closeCurrentFile"
           @refresh-chapters-from-reader="applyChaptersFromReaderPlainText"
@@ -3525,7 +3711,9 @@ useAppShellThemeWatch({
         :reading-progress-detail-part="readingProgressParts.detailPart"
         :reading-progress-placeholder="readingProgressParts.placeholder"
         :reading-progress-complete="readingProgressParts.complete"
-        :total-char-count-text="formatCharCount(totalCharCount)"
+        :total-char-count-text="
+          formatCharCount(totalCharCount, chapterCharCountExact)
+        "
         :file-size-text="formatFileSize(currentFileSize)"
         :file-encoding="fileEncoding"
         :encoding-actions-enabled="footerEncodingActionsEnabled"

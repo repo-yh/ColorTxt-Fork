@@ -8,6 +8,9 @@ import {
   normalizeCharacterRoster,
 } from "../stores/fileMetaStore";
 import {
+  isAllowedPortraitImageBasename,
+} from "@shared/characterPortraitPaths";
+import {
   bookTitleForExport,
 } from "./readerAnnotationExport";
 import { sanitizeChatExportTitleForFilename } from "../aiAssistant/aiAssistantExport";
@@ -47,7 +50,7 @@ export type CharacterRosterPackManifestV1 = {
 
 export type ParsedCharacterRosterPack = {
   manifest: CharacterRosterPackManifestV1;
-  /** basename → PNG bytes（文件名与包内一致） */
+  /** basename → 图片字节（文件名与包内一致） */
   portraits: Map<string, ArrayBuffer>;
 };
 
@@ -69,25 +72,27 @@ export function buildCharacterRosterPackDefaultName(bookName: string): string {
   return `${titlePart}.${CHARACTER_ROSTER_PACK_FILE_EXT}`;
 }
 
-/** 同 id 以导入侧为准；总数经 normalize 裁到上限 */
-export function mergeCharacterRosterById(
+/** 同角色名（trim 后）以导入侧字段为准，保留已有条目的 id；总数经 normalize 裁到上限 */
+export function mergeCharacterRosterByDisplayName(
   existing: readonly CharacterRosterEntry[],
   incoming: readonly CharacterRosterEntry[],
 ): CharacterRosterEntry[] {
-  const byId = new Map<string, CharacterRosterEntry>();
-  for (const e of existing) byId.set(e.id, e);
-  for (const e of incoming) byId.set(e.id, e);
-  return normalizeCharacterRoster([...byId.values()]) ?? [];
+  const byName = new Map<string, CharacterRosterEntry>();
+  for (const e of existing) {
+    const key = e.displayName.trim();
+    if (key) byName.set(key, e);
+  }
+  for (const e of incoming) {
+    const key = e.displayName.trim();
+    if (!key) continue;
+    const prev = byName.get(key);
+    byName.set(key, prev ? { ...e, id: prev.id } : e);
+  }
+  return normalizeCharacterRoster([...byName.values()]) ?? [];
 }
 
 function isSafePortraitBasename(name: string): boolean {
-  const n = name.trim();
-  if (!n || n !== name) return false;
-  if (n.includes("/") || n.includes("\\") || n.includes("..")) return false;
-  if (!/\.png$/i.test(n)) return false;
-  if (/_tmp\.png$/i.test(n)) return false;
-  if (/^_char_draft_/i.test(n)) return false;
-  return true;
+  return isAllowedPortraitImageBasename(name);
 }
 
 export function parseCharacterRosterPackManifest(
@@ -116,7 +121,7 @@ export function parseCharacterRosterPackManifest(
 export async function buildCharacterRosterPackZip(options: {
   characterRoster: readonly CharacterRosterEntry[];
   characterBookStyle?: CharacterBookStylePersisted;
-  /** basename → PNG 内容（已存在的正式立绘） */
+  /** basename → 图片内容（已存在的正式立绘） */
   portraits: ReadonlyMap<string, ArrayBuffer>;
 }): Promise<ArrayBuffer> {
   const roster =

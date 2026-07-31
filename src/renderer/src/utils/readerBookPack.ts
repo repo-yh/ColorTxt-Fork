@@ -9,8 +9,11 @@ import type {
 } from "@shared/characterTypes";
 import {
   characterPortraitBookDirAbs,
-  characterPortraitImageAbs,
-  portraitPngFileNameForCharacterName,
+  characterPortraitImageAbsCandidates,
+  isAllowedPortraitImageBasename,
+  normalizePortraitImageExtension,
+  portraitImageExtensionFromPath,
+  portraitStemForCharacterName,
   sanitizeBookFolderSegment,
 } from "@shared/characterPortraitPaths";
 import {
@@ -55,7 +58,7 @@ import {
 import {
   CHARACTER_ROSTER_PACK_KIND,
   CHARACTER_ROSTER_PACK_SCHEMA_VERSION,
-  mergeCharacterRosterById,
+  mergeCharacterRosterByDisplayName,
   parseCharacterRosterPackManifest,
   type CharacterRosterPackManifestV1,
 } from "./characterRosterPack";
@@ -323,11 +326,28 @@ async function collectPortraitsForRoster(
   for (const entry of roster) {
     const name = entry.displayName.trim();
     if (!name) continue;
-    const abs = characterPortraitImageAbs(root, bookSeg, name);
-    const basename = portraitPngFileNameForCharacterName(name);
+    let abs: string | null = null;
+    for (const candidate of characterPortraitImageAbsCandidates(
+      root,
+      bookSeg,
+      name,
+    )) {
+      try {
+        const st = await window.colorTxt.stat(candidate);
+        if (st.isFile) {
+          abs = candidate;
+          break;
+        }
+      } catch {
+        /* try next */
+      }
+    }
+    if (!abs) continue;
+    const ext = normalizePortraitImageExtension(
+      portraitImageExtensionFromPath(abs) || "png",
+    );
+    const basename = `${portraitStemForCharacterName(name)}.${ext}`;
     try {
-      const st = await window.colorTxt.stat(abs);
-      if (!st.isFile) continue;
       portraits.set(basename, await window.colorTxt.readFileAsArrayBuffer(abs));
     } catch {
       /* skip */
@@ -591,7 +611,7 @@ export async function parseReaderBookPackZip(
       if (!norm.startsWith(portraitPrefix)) return;
       const base = norm.slice(portraitPrefix.length);
       if (!base || base.includes("/") || base.includes("..")) return;
-      if (!/\.png$/i.test(base)) return;
+      if (!isAllowedPortraitImageBasename(base)) return;
       pTasks.push(
         (async () => {
           portraits.set(base, await file.async("arraybuffer"));
@@ -699,8 +719,27 @@ export async function writePortraitsForBook(params: {
   const bookDir = characterPortraitBookDirAbs(root, bookSeg);
   await window.colorTxt.mkdir(bookDir);
   for (const [basename, buf] of params.portraits) {
-    const dest = joinFs(bookDir, basename);
+    if (!isAllowedPortraitImageBasename(basename)) continue;
+    const rawExt = portraitImageExtensionFromPath(basename);
+    const keepExt = normalizePortraitImageExtension(rawExt || "png");
+    const stem = basename.slice(0, basename.length - rawExt.length - 1);
+    if (!stem) continue;
+    const dest = joinFs(bookDir, `${stem}.${keepExt}`);
     await window.colorTxt.writeBinaryFile(dest, arrayBufferToBase64(buf));
+    const keepPath = dest.replace(/\\/g, "/").toLowerCase();
+    for (const candidate of characterPortraitImageAbsCandidates(
+      root,
+      bookSeg,
+      stem,
+    )) {
+      if (candidate.replace(/\\/g, "/").toLowerCase() === keepPath) continue;
+      try {
+        const st = await window.colorTxt.stat(candidate);
+        if (st.isFile) await window.colorTxt.removePath(candidate);
+      } catch {
+        /* ignore */
+      }
+    }
   }
 }
 
@@ -730,7 +769,7 @@ export function mergeBookPackMetaIntoRecord(params: {
     params.existing?.readerAnnotations ?? [],
     params.pack.annotations,
   );
-  const characterRoster = mergeCharacterRosterById(
+  const characterRoster = mergeCharacterRosterByDisplayName(
     params.existing?.characterRoster ?? [],
     params.pack.characterRoster,
   );

@@ -355,12 +355,15 @@ export function normalizeCharacterRoster(
   raw: unknown,
 ): CharacterRosterEntry[] | undefined {
   if (!Array.isArray(raw)) return undefined;
-  const byId = new Map<string, CharacterRosterEntry>();
+  const byName = new Map<string, CharacterRosterEntry>();
   for (const row of raw.slice(0, MAX_ROSTER_ENTRIES + 50)) {
     const n = normalizeCharacterRosterEntry(row);
-    if (n) byId.set(n.id, n);
+    if (!n) continue;
+    const key = n.displayName.trim();
+    if (!key) continue;
+    byName.set(key, n);
   }
-  const list = [...byId.values()].slice(0, MAX_ROSTER_ENTRIES);
+  const list = [...byName.values()].slice(0, MAX_ROSTER_ENTRIES);
   return list.length ? list : undefined;
 }
 

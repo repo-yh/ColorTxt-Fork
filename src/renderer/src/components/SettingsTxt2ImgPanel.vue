@@ -1070,7 +1070,7 @@ defineExpose({
         </div>
         <p class="aiMasterHint">
           侧栏「角色卡」上传或生成的立绘将保存到：<code
-            >该目录 / 书名文件夹 / 角色名.png</code
+            >该目录 / 书名文件夹 / 角色名.{png|jpg|…}</code
           >；<br />修改目录后，旧目录的内容将自动迁移到新目录。
         </p>
       </section>

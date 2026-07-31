@@ -37,6 +37,7 @@ import {
   formatFileSize,
   isProgressComplete,
 } from "../utils/fileListPanelDisplay";
+import { isPlainTextBookPath } from "../ebook/ebookFormat";
 import { icons } from "../icons";
 import { fileListEmptyHint, fileListDropHint, fileListNoMatchHint } from "../constants/appUi";
 import { useAnchoredAppShellMenu } from "../composables/useAnchoredAppShellMenu";
@@ -84,6 +85,7 @@ const emit = defineEmits<{
   ];
   setFilesCategory: [paths: string[], category: string];
   renameFilePath: [payload: { oldPath: string; newName: string }];
+  replaceFilePath: [oldPath: string];
   "open-file-in-new-window": [path: string];
   "clear-file-meta": [path: string];
   openFile: [item: SidebarFileItem];
@@ -537,6 +539,13 @@ function onFileCtxRename() {
   closeFileContextMenuAll();
 }
 
+function onFileCtxReplace() {
+  const target = fileCtxTargetPath();
+  if (!target || !isPlainTextBookPath(target)) return;
+  emit("replaceFilePath", target);
+  closeFileContextMenuAll();
+}
+
 function onFileCtxRemove() {
   const target = fileCtxTargetPath();
   if (!target) return;
@@ -580,6 +589,17 @@ function onEditCtxRename() {
     null;
   if (!target) return;
   startRenamingFile(target);
+  menus.closeEditContextMenu();
+}
+
+function onEditCtxReplace() {
+  const target =
+    menus.editContextMenuFilePath ||
+    lastSelectedFilePath.value ||
+    selectedFilePaths.value[selectedFilePaths.value.length - 1] ||
+    null;
+  if (!target || !isPlainTextBookPath(target)) return;
+  emit("replaceFilePath", target);
   menus.closeEditContextMenu();
 }
 
@@ -1082,6 +1102,18 @@ onBeforeUnmount(() => {
         >
           重命名
         </button>
+        <button
+          v-if="
+            menus.fileContextMenuFilePath &&
+            isPlainTextBookPath(menus.fileContextMenuFilePath)
+          "
+          type="button"
+          class="appShellMenuItem"
+          role="menuitem"
+          @click="onFileCtxReplace"
+        >
+          替换文件
+        </button>
         <div class="appShellMenuDivider" role="separator" />
         <button
           type="button"
@@ -1173,6 +1205,19 @@ onBeforeUnmount(() => {
           @click="onEditCtxRename"
         >
           重命名
+        </button>
+        <button
+          v-if="
+            isPlainTextBookPath(
+              menus.editContextMenuFilePath || lastSelectedFilePath || '',
+            )
+          "
+          type="button"
+          class="appShellMenuItem"
+          role="menuitem"
+          @click="onEditCtxReplace"
+        >
+          替换文件
         </button>
         <div class="appShellMenuDivider" role="separator" />
         <button

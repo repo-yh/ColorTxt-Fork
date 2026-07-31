@@ -117,18 +117,18 @@ const bookPackUnpackDirPlaceholder = computed(() => {
 
       <div class="settingsRow">
         <div class="settingsRowMain">
-          <span class="settingsLabel">章节字数显示具体数值</span>
+          <span class="settingsLabel">字数显示具体数值</span>
           <SwitchToggle
             :model-value="draftChapterCharCountExact"
-            aria-label="章节字数显示具体数值"
+            aria-label="字数显示具体数值"
             @update:model-value="
               $emit('update:draftChapterCharCountExact', $event)
             "
           />
         </div>
         <p class="settingsHint">
-          开启后章节列表字数显示为具体数值（如 <code>23,123 字</code>，而不是
-          <code>2.3 万字</code>）。
+          开启后章节列表字数与底栏总字数显示为具体数值（如
+          <code>23,123 字</code>，而不是 <code>2.3 万字</code>）。
         </p>
       </div>
     </div>

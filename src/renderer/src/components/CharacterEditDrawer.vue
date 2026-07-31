@@ -11,6 +11,8 @@ import {
 } from "@shared/characterAliases";
 import {
   isPortraitUploadImagePath,
+  normalizePortraitImageExtension,
+  portraitImageExtensionFromPath,
   PORTRAIT_UPLOAD_OPEN_DIALOG_FILTERS,
 } from "@shared/characterPortraitPaths";
 import { vAiStickScroll } from "../directives/aiStickScroll";
@@ -63,14 +65,26 @@ const props = withDefaults(
     aiConfigSyncNonce?: number;
     voiceReadSettings?: VoiceReadSettings;
     portraitTmpAbsForDisplayName: (displayName: string) => Promise<string>;
-    portraitSessionDraftAbs: (sessionKey: string) => Promise<string>;
-    portraitAbsForDisplayName: (displayName: string) => Promise<string>;
+    portraitAbsForDisplayName: (
+      displayName: string,
+      ext?: string,
+    ) => Promise<string>;
+    resolvePortraitSessionDraftAbs: (
+      sessionKey: string,
+    ) => Promise<string | null>;
     readablePortraitDraftThenCanonical: (opts: {
       displayName: string;
       sessionKey: string;
     }) => Promise<string | null>;
-    applyPortraitFromFilePath: (fromPath: string) => Promise<boolean>;
+    applyPortraitFromFilePath: (
+      fromPath: string,
+      options?: { quiet?: boolean },
+    ) => Promise<boolean>;
     deletePortraitSessionDraftFile: (sessionKey: string) => Promise<void>;
+    removeSiblingPortraitFilesByDisplayName: (
+      displayName: string,
+      keepExt?: string,
+    ) => Promise<void>;
     removeCharacterPortraitFilesByDisplayName: (
       displayName: string,
     ) => Promise<void>;
@@ -139,6 +153,7 @@ const charVoicePreviewPlayer = new VoiceReadLinePlayer();
 let charVoicePreviewRunId = 0;
 
 const slideError = ref("");
+const nameError = ref("");
 const drawerPortraitPreviewUrl = ref<string | null>(null);
 const drawerPortraitDragOverlayVisible = ref(false);
 const txt2imgEnabled = ref(false);
@@ -498,8 +513,52 @@ function rosterIndexById(id: string): number {
   return props.characterRoster.findIndex((r) => r.id === id);
 }
 
+function isDisplayNameTaken(name: string): boolean {
+  const key = name.trim();
+  if (!key) return false;
+  return props.characterRoster.some(
+    (r) =>
+      r.displayName.trim() === key &&
+      (editingId.value == null || r.id !== editingId.value),
+  );
+}
+
+/** 角色名重名校验（输入 / blur 即时；空名不提示，由保存按钮禁用处理） */
+function refreshNameError() {
+  const name = draftDisplayName.value.trim();
+  if (!name) {
+    nameError.value = "";
+    return;
+  }
+  nameError.value = isDisplayNameTaken(name) ? "已存在同名角色" : "";
+}
+
+const canSaveCharacter = computed(
+  () =>
+    !extracting.value &&
+    Boolean(draftDisplayName.value.trim()) &&
+    !nameError.value,
+);
+
+watch(
+  [
+    open,
+    draftDisplayName,
+    editingId,
+    () =>
+      props.characterRoster
+        .map((e) => `${e.id}\0${e.displayName.trim()}`)
+        .join("\n"),
+  ],
+  () => {
+    if (!open.value) return;
+    refreshNameError();
+  },
+);
+
 function openAddSlide() {
   slideError.value = "";
+  nameError.value = "";
   if (editingId.value) {
     void props.deletePortraitSessionDraftFile(editingId.value);
   } else if (portraitEditSessionKey.value.trim()) {
@@ -529,6 +588,7 @@ function openAddSlide() {
 
 function openEditSlide(entry: CharacterRosterEntry) {
   slideError.value = "";
+  nameError.value = "";
   if (editingId.value == null && portraitEditSessionKey.value.trim()) {
     void props.deletePortraitSessionDraftFile(portraitEditSessionKey.value);
   }
@@ -569,6 +629,7 @@ function closeSlide() {
   open.value = false;
   editingId.value = null;
   slideError.value = "";
+  nameError.value = "";
   hideDrawerPortraitDragOverlay();
 }
 
@@ -596,6 +657,7 @@ function resetCharacterEditDrawerOnBookChange() {
   resetVoiceSampleDraft();
   drawerMediaTab.value = "portrait";
   slideError.value = "";
+  nameError.value = "";
   open.value = false;
 }
 
@@ -627,11 +689,13 @@ async function onSaveSlide() {
   if (extracting.value) return;
   slideError.value = "";
   retrieveNoticeBanner.value = "";
+  refreshNameError();
   const name = draftDisplayName.value.trim();
   if (!name) {
-    slideError.value = "请填写角色名。";
+    nameError.value = "请填写角色名。";
     return;
   }
+  if (nameError.value) return;
 
   const stylePatch: CharacterBookStylePersisted = {
     stylePrefixZh: draftStylePrefix.value.trim(),
@@ -662,10 +726,12 @@ async function onSaveSlide() {
   const sk = portraitEditSessionKey.value.trim();
   if (sk) {
     try {
-      const draftPath = await props.portraitSessionDraftAbs(sk);
-      const st = await window.colorTxt.stat(draftPath);
-      if (st.isFile) {
-        const dest = await props.portraitAbsForDisplayName(name);
+      const draftPath = await props.resolvePortraitSessionDraftAbs(sk);
+      if (draftPath) {
+        const ext = normalizePortraitImageExtension(
+          portraitImageExtensionFromPath(draftPath) || "png",
+        );
+        const dest = await props.portraitAbsForDisplayName(name, ext);
         const cp = await window.colorTxt.characterPortrait.copyFileTo({
           from: draftPath,
           to: dest,
@@ -674,6 +740,7 @@ async function onSaveSlide() {
           slideError.value = cp.error ?? "立绘保存失败";
           return;
         }
+        await props.removeSiblingPortraitFilesByDisplayName(name, ext);
         portraitCommitted = true;
         try {
           await window.colorTxt.removePath(draftPath);
@@ -853,15 +920,20 @@ defineExpose({
         <div class="field">
           <span class="label">角色名</span>
           <div class="drawerNameRow">
-            <div :inert="extracting">
+            <div class="drawerNameInputWrap" :inert="extracting">
               <input
                 v-model="draftDisplayName"
                 type="text"
                 class="drawerNameInput"
                 spellcheck="false"
                 :disabled="extracting"
+                :aria-invalid="Boolean(nameError)"
+                @input="refreshNameError"
+                @change="refreshNameError"
+                @blur="refreshNameError"
                 @keydown.enter.prevent="canRetrieve && onRetrieve()"
               />
+              <p v-if="nameError" class="error fieldError">{{ nameError }}</p>
             </div>
             <div class="drawerRetrieveRow">
               <button
@@ -1223,7 +1295,7 @@ defineExpose({
           <button
             type="button"
             class="link success drawerFootAction"
-            :disabled="extracting || !draftDisplayName.trim()"
+            :disabled="!canSaveCharacter"
             @click="onSaveSlide"
           >
             {{ isAddMode ? "添加角色" : "保存修改" }}
@@ -1243,7 +1315,7 @@ defineExpose({
     :editing-id="editingId"
     :character-roster="characterRoster"
     :portrait-tmp-abs-for-display-name="portraitTmpAbsForDisplayName"
-    :portrait-session-draft-abs="portraitSessionDraftAbs"
+    :apply-portrait-from-file-path="applyPortraitFromFilePath"
     :readable-portrait-draft-then-canonical="readablePortraitDraftThenCanonical"
     @character-file-meta-patch="emit('characterFileMetaPatch', $event)"
     @sync-draft-prompts="onSyncDraftPrompts"
@@ -1612,6 +1684,18 @@ defineExpose({
   margin: 0;
   color: var(--error-fg, #c62828);
   line-height: 1.4;
+}
+
+.drawerNameInputWrap {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  min-width: 0;
+}
+
+.fieldError {
+  margin-top: 6px;
+  font-size: 12px;
 }
 
 .charDrawerFade-enter-active,

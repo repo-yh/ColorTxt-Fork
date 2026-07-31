@@ -23,7 +23,10 @@ const props = withDefaults(
     editingId: string | null;
     characterRoster: readonly CharacterRosterEntry[];
     portraitTmpAbsForDisplayName: (displayName: string) => Promise<string>;
-    portraitSessionDraftAbs: (sessionKey: string) => Promise<string>;
+    applyPortraitFromFilePath: (
+      fromPath: string,
+      options?: { quiet?: boolean },
+    ) => Promise<boolean>;
     readablePortraitDraftThenCanonical: (opts: {
       displayName: string;
       sessionKey: string;
@@ -301,13 +304,9 @@ async function onGenApply() {
       genError.value = "请关闭并重新打开编辑面板后再试。";
       return;
     }
-    const draftDest = await props.portraitSessionDraftAbs(sk);
-    const cp = await window.colorTxt.characterPortrait.copyFileTo({
-      from: tmpAbs,
-      to: draftDest,
-    });
-    if (!cp.ok) {
-      genError.value = cp.error ?? "应用失败";
+    const ok = await props.applyPortraitFromFilePath(tmpAbs, { quiet: true });
+    if (!ok) {
+      genError.value = "应用失败";
       return;
     }
     try {
