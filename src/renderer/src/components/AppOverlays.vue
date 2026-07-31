@@ -20,6 +20,8 @@ import AppModal from "./AppModal.vue";
 import ColorSchemePanel from "./ColorSchemePanel.vue";
 import AppUpdateFlow from "./AppUpdateFlow.vue";
 import ChapterRulePanel from "./ChapterRulePanel.vue";
+import ReplaceRulePanel from "../bookSource/components/ReplaceRulePanel.vue";
+import type { ReplaceRule } from "@shared/bookSource/replaceRule";
 import SettingsPanel, { type SettingsApplyPayload } from "./SettingsPanel.vue";
 import ShortcutPanel from "./ShortcutPanel.vue";
 import type { ShortcutBindingMap } from "../services/shortcutRegistry";
@@ -39,6 +41,8 @@ const props = defineProps<{
   readerLineHeightMultiple: number;
   monacoSmoothScrolling: boolean;
   stickyChapterTitleEnabled: boolean;
+  chapterNavToolbarEnabled: boolean;
+  chapterCharCountExact: boolean;
   readerEditShowLineNumbers: boolean;
   readerEditMinimap: boolean;
   editAutoRefreshChapterList: boolean;
@@ -49,6 +53,8 @@ const props = defineProps<{
   timedScrollSettings: TimedScrollSettings;
   chapterRules: ChapterMatchRule[];
   chapterRuleErrorText: string;
+  /** 编辑态打开文本替换时面板主按钮为「应用」 */
+  readerEditMode?: boolean;
   editingBookmarkLine: number | null;
   /** 编辑书签时「更新为当前行」是否可用（与顶栏书签一致：有文件、非加载、有正文行） */
   canBookmark: boolean;
@@ -101,6 +107,7 @@ const emit = defineEmits<{
   ];
   applyHighlightColors: [payload: { light: string[]; dark: string[] }];
   applyLineationColors: [payload: { light: string[]; dark: string[] }];
+  applyReplaceRuleFormat: [rules: ReplaceRule[]];
 }>();
 
 const showAboutPanel = defineModel<boolean>("showAboutPanel", {
@@ -113,6 +120,9 @@ const showSettingsPanel = defineModel<boolean>("showSettingsPanel", {
   default: false,
 });
 const showChapterRulePanel = defineModel<boolean>("showChapterRulePanel", {
+  default: false,
+});
+const showReplaceRulePanel = defineModel<boolean>("showReplaceRulePanel", {
   default: false,
 });
 const showColorSchemePanel = defineModel<boolean>("showColorSchemePanel", {
@@ -205,6 +215,8 @@ onBeforeUnmount(() => {
     :reader-line-height-multiple="readerLineHeightMultiple"
     :monaco-smooth-scrolling="monacoSmoothScrolling"
     :sticky-chapter-title-enabled="stickyChapterTitleEnabled"
+    :chapter-nav-toolbar-enabled="chapterNavToolbarEnabled"
+    :chapter-char-count-exact="chapterCharCountExact"
     :reader-edit-show-line-numbers="readerEditShowLineNumbers"
     :reader-edit-minimap="readerEditMinimap"
     :edit-auto-refresh-chapter-list="editAutoRefreshChapterList"
@@ -230,6 +242,12 @@ onBeforeUnmount(() => {
     :error-text="chapterRuleErrorText"
     @apply="emit('applyChapterRules', $event)"
   />
+  <ReplaceRulePanel
+    v-model="showReplaceRulePanel"
+    bucket="app"
+    :edit-format-mode="readerEditMode === true"
+    @apply-format="emit('applyReplaceRuleFormat', $event)"
+  />
 
   <ColorSchemePanel
     v-model="showColorSchemePanel"
@@ -249,7 +267,6 @@ onBeforeUnmount(() => {
   />
 
   <AppModal
-    v-model="addBookmarkOpen"
     :title="editingBookmarkLine == null ? '添加书签' : '编辑书签'"
     max-width="480px"
   >

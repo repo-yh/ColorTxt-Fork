@@ -53,6 +53,7 @@ import {
   clearBookmarksForFile,
   findFileMetaRecord,
   loadFileMetaRecords,
+  mergeFileMetaRecords,
   normalizeHighlightWordsByIndex,
   persistFileMetaRecords,
   removeBookmarkForFile,
@@ -198,6 +199,7 @@ export function useAppPersistence(deps: {
   textConvertLetter: Ref<import("@shared/textConvertTypes").TextConvertWidthMode>;
   textConvertDigit: Ref<import("@shared/textConvertTypes").TextConvertWidthMode>;
   showChapterCounts: Ref<boolean>;
+  chapterCharCountExact: Ref<boolean>;
   readerFontSize: Ref<number>;
   readerLineHeightMultiple: Ref<number>;
   monacoFontFamily: Ref<string>;
@@ -210,6 +212,7 @@ export function useAppPersistence(deps: {
   monacoAdvancedWrapping: Ref<boolean>;
   monacoSmoothScrolling: Ref<boolean>;
   stickyChapterTitleEnabled: Ref<boolean>;
+  chapterNavToolbarEnabled: Ref<boolean>;
   readerEditShowLineNumbers: Ref<boolean>;
   readerEditMinimap: Ref<boolean>;
   editAutoRefreshChapterList: Ref<boolean>;
@@ -283,6 +286,21 @@ export function useAppPersistence(deps: {
     pendingFileMetaWrite = null;
   }
 
+  /**
+   * 写盘前与磁盘态按路径合并，避免多窗口整表 setItem 互相覆盖未在本窗打开的文件进度。
+   * 正在阅读的文件保留本窗 progress / 视图状态。
+   */
+  function mergeFileMetaWithDiskAndPersist(tieBreak: "local" | "remote") {
+    const disk = loadFileMetaRecords(window.localStorage, fileMetaKey);
+    const merged = mergeFileMetaRecords(deps.fileMetaRecords.value, disk, {
+      preferLocalReadingPath: deps.currentFile.value,
+      tieBreak,
+    });
+    deps.fileMetaRecords.value = merged;
+    rebuildMetaProgressMap();
+    persistFileMetaRecords(window.localStorage, fileMetaKey, merged);
+  }
+
   function runScheduledFileMetaWrite() {
     fileMetaWriteTimer = null;
     const mode = pendingFileMetaWrite;
@@ -291,11 +309,7 @@ export function useAppPersistence(deps: {
     if (mode === "gated") {
       if (deps.currentFile.value && !deps.readingProgressSynced.value) return;
     }
-    persistFileMetaRecords(
-      window.localStorage,
-      fileMetaKey,
-      deps.fileMetaRecords.value,
-    );
+    mergeFileMetaWithDiskAndPersist("local");
   }
 
   function scheduleFileMetaDiskWrite(mode: "gated" | "forced") {
@@ -386,11 +400,13 @@ export function useAppPersistence(deps: {
   /** 取消防抖并不受阅读进度同步门控，立即写入 file.meta（关窗等场景须落盘进度/书签/视图状态等） */
   function persistFileMetaImmediate() {
     cancelScheduledFileMetaWrite();
-    persistFileMetaRecords(
-      window.localStorage,
-      fileMetaKey,
-      deps.fileMetaRecords.value,
-    );
+    // 滚动原地改 progress 不刷新 updatedAt；关窗落盘前抬一下，便于与他窗合并时本窗进度胜出
+    const openPath = deps.currentFile.value?.trim();
+    if (openPath && deps.readingProgressSynced.value) {
+      const cur = findFileMetaRecord(deps.fileMetaRecords.value, openPath);
+      if (cur) cur.updatedAt = Date.now();
+    }
+    mergeFileMetaWithDiskAndPersist("local");
   }
 
   /** 将内存中的最近文件与 file meta 写入 localStorage（窗口关闭时与内存中滚动等未落盘状态对齐） */
@@ -403,6 +419,23 @@ export function useAppPersistence(deps: {
     deps.fileMetaRecords.value = loadFileMetaRecords(
       window.localStorage,
       fileMetaKey,
+    );
+    rebuildMetaProgressMap();
+  }
+
+  /**
+   * 他窗写入 file.meta 后：合并进本窗内存，保留当前打开文件的未落盘阅读进度，
+   * 避免整表替换把本窗滚动进度冲回旧值（关窗后再关另一窗会把错误进度写回磁盘）。
+   */
+  function syncFileMetaFromOtherWindow() {
+    const disk = loadFileMetaRecords(window.localStorage, fileMetaKey);
+    deps.fileMetaRecords.value = mergeFileMetaRecords(
+      deps.fileMetaRecords.value,
+      disk,
+      {
+        preferLocalReadingPath: deps.currentFile.value,
+        tieBreak: "remote",
+      },
     );
     rebuildMetaProgressMap();
   }
@@ -434,7 +467,7 @@ export function useAppPersistence(deps: {
       return;
     }
     if (ev.key === fileMetaKey) {
-      loadFileMeta();
+      syncFileMetaFromOtherWindow();
       return;
     }
     if (ev.key === recentFilesKey) {
@@ -815,6 +848,9 @@ export function useAppPersistence(deps: {
     if (typeof data.showChapterCounts === "boolean") {
       deps.showChapterCounts.value = data.showChapterCounts;
     }
+    if (typeof data.chapterCharCountExact === "boolean") {
+      deps.chapterCharCountExact.value = data.chapterCharCountExact;
+    }
 
     if (typeof data.fontSize === "number") {
       deps.readerFontSize.value = Math.max(
@@ -881,6 +917,9 @@ export function useAppPersistence(deps: {
     }
     if (typeof data.stickyChapterTitleEnabled === "boolean") {
       deps.stickyChapterTitleEnabled.value = data.stickyChapterTitleEnabled;
+    }
+    if (typeof data.chapterNavToolbarEnabled === "boolean") {
+      deps.chapterNavToolbarEnabled.value = data.chapterNavToolbarEnabled;
     }
     if (typeof data.readerEditShowLineNumbers === "boolean") {
       deps.readerEditShowLineNumbers.value = data.readerEditShowLineNumbers;
@@ -1091,6 +1130,7 @@ export function useAppPersistence(deps: {
       textConvertLetter: deps.textConvertLetter.value,
       textConvertDigit: deps.textConvertDigit.value,
       showChapterCounts: deps.showChapterCounts.value,
+      chapterCharCountExact: deps.chapterCharCountExact.value,
       chapterRules: deps.chapterRuleState.value.rules,
       restoreSessionOnStartup: deps.restoreSessionOnStartup.value,
       syncCurrentFile: deps.syncCurrentFile.value,
@@ -1099,6 +1139,7 @@ export function useAppPersistence(deps: {
       monacoAdvancedWrapping: deps.monacoAdvancedWrapping.value,
       monacoSmoothScrolling: deps.monacoSmoothScrolling.value,
       stickyChapterTitleEnabled: deps.stickyChapterTitleEnabled.value,
+      chapterNavToolbarEnabled: deps.chapterNavToolbarEnabled.value,
       readerEditShowLineNumbers: deps.readerEditShowLineNumbers.value,
       readerEditMinimap: deps.readerEditMinimap.value,
       editAutoRefreshChapterList: deps.editAutoRefreshChapterList.value,

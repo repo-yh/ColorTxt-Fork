@@ -1,3 +1,37 @@
+## 3.0
+
+新功能：
+
+- **找书**（支持 `阅读（Legado）` 文本书源）
+  - 入口：主界面「更多 → 找书」（快捷键：`F7`）
+  - 界面：「书架」「找书」「发现」
+  - 书源：找书窗口「更多 → 书源管理」打开面板，可导入、导出、编辑书源
+  - 功能：搜索书籍、在线阅读、整书下载
+  - 设置：找书窗口「更多 → 设置」可配置「下载」「代理」等相关选项
+
+> [!NOTE]
+> `阅读` 书源用到了一些 `Java` 接口，彩读移植了一套 `JavaScript` 实现，做不到 100% 复刻，具体见 [§ 规则能力与兼容范围](https://github.com/ssnangua/ColorTxt/blob/main/docs/%E4%B9%A6%E6%BA%90%E6%89%BE%E4%B9%A6.md#7-%E8%A7%84%E5%88%99%E8%83%BD%E5%8A%9B%E4%B8%8E%E5%85%BC%E5%AE%B9%E8%8C%83%E5%9B%B4)，大概率有错漏，只能通过迭代不断纠错兼容，目前算是测试版，如发现问题，请提交 [issue](https://github.com/ssnangua/ColorTxt/issues/new)
+
+> [!WARNING]
+> 「彩读」**不提供、不内置、不分发任何书源**，鼓励大家通过正规渠道支持作者与正版，具体见「更多 → 免责声明」。
+
+- **文本替换**：全局替换文本，可用于替换人名、去广告文本等
+- **章节导航工具栏**：可在「设置 → 阅读」中启用，会在阅读区底部显示「上一章 / 下一章」快捷跳转
+
+改进：
+
+- 「设置 → 常规」增加「章节字数显示具体数值」配置项，开启后章节列表字数显示为具体数值（如 `23,123 字`）[#27](https://github.com/ssnangua/ColorTxt/issues/27)
+- 「设置」重置当前页时，_缓存目录_ 类配置项的重置行为统一为 _填入默认值_
+
+修复：
+
+- 多窗口下阅读进度可能被后关闭的窗口用旧进度覆盖 [#25](https://github.com/ssnangua/ColorTxt/issues/25)
+- 「设置 → 向量模型」设置为「内置本地模型」后如果 _未下载_ 模型，关闭「AI 阅读助手」会无法保存 [#21](https://github.com/ssnangua/ColorTxt/issues/21)
+- 词云弹框字体列表层级问题
+- macOS Intel 包因交叉编译缺少 `@node-rs/jieba-darwin-x64` 导致打开即崩溃；现在改成 `macos-15-intel` 打 x64
+- macOS Intel 包在 arm64 CI 交叉构建时打入 arm64 的 `opencc.node`（`have 'arm64', need 'x86_64'`）；改为 `macos-15-intel` 原生构建并校验 Mach-O 架构
+- Linux AppImage 在 Ubuntu 24.04 等缺 FUSE2 的系统上无法启动（`libfuse.so.2`）；改为静态 AppImage runtime [#28](https://github.com/ssnangua/ColorTxt/issues/28)
+
 ## 2.8
 
 新功能：

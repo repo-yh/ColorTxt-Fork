@@ -25,8 +25,10 @@ const props = withDefaults(
     /** 已钉在外层列表的「其他字体」名称 */
     pinnedOtherFonts?: string[];
     disabled?: boolean;
+    /** 菜单层叠（Teleport 到 body；需高于外层模态时传入更大值） */
+    menuZIndex?: number;
   }>(),
-  { pinnedOtherFonts: () => [], disabled: false },
+  { pinnedOtherFonts: () => [], disabled: false, menuZIndex: 7200 },
 );
 
 const emit = defineEmits<{
@@ -56,7 +58,7 @@ const filteredSystemFonts = computed(() => {
 });
 
 /** 虚拟列表单行高度（px），与 `.fontOtherItem` 一致 */
-const FONT_ROW_STRIDE = 36;
+const FONT_ROW_STRIDE = 40;
 const VIRTUAL_OVERSCAN = 10;
 
 const selectedFont = computed(() =>
@@ -130,7 +132,7 @@ const fontMenu = useAnchoredAppShellMenu({
   placement: "below-center",
   widthPx: 140,
   gap: 6,
-  zIndex: 7200,
+  zIndex: props.menuZIndex,
   onClose: () => {
     showOtherFontsPanel.value = false;
     otherFontFilter.value = "";
@@ -588,7 +590,7 @@ watch(
   display: block;
 }
 
-.fontMenuPinIcon :deep(path) {
+.fontMenuPinIcon :deep(svg path) {
   fill: currentColor;
 }
 
@@ -633,6 +635,10 @@ watch(
   padding-right: 2px;
   min-height: 0; /* allow flex overflow container to size correctly */
   flex: 1;
+}
+
+.fontOtherList :deep(.virtualList-row) {
+  padding-bottom: 4px;
 }
 
 .fontOtherItem {

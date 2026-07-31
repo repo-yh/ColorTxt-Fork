@@ -12,6 +12,7 @@ import {
   migrateTxtFileListAddedAt,
   type TxtFileItem,
 } from "../services/fileListService";
+import { persistedSettingsChangedEvent, persistKey } from "../constants/appUi";
 
 export type { TxtFileItem };
 import { parseHighlightColorsArray } from "../constants/highlightColors";
@@ -69,6 +70,8 @@ export type PersistedSettingsData = {
   textConvertDigit?: string;
   /** 章节列表是否显示每章字数 */
   showChapterCounts?: boolean;
+  /** 章节列表字数是否显示具体数值（如 `23,123 字`） */
+  chapterCharCountExact?: boolean;
   chapterRules?: ChapterMatchRule[];
   /** 启动时是否从会话快照恢复上次文件与列表；关闭时关闭窗口不写入会话 */
   restoreSessionOnStartup?: boolean;
@@ -82,6 +85,8 @@ export type PersistedSettingsData = {
   monacoSmoothScrolling?: boolean;
   /** 阅读区顶部粘性章节标题（Monaco stickyScroll） */
   stickyChapterTitleEnabled?: boolean;
+  /** 阅读区底部「上一章 / 下一章」工具栏 */
+  chapterNavToolbarEnabled?: boolean;
   /** 编辑模式下是否显示行号 */
   readerEditShowLineNumbers?: boolean;
   /** 编辑模式下是否显示小地图 */
@@ -286,6 +291,9 @@ export function loadPersistedSettingsData(
   if (typeof obj.showChapterCounts === "boolean") {
     data.showChapterCounts = obj.showChapterCounts;
   }
+  if (typeof obj.chapterCharCountExact === "boolean") {
+    data.chapterCharCountExact = obj.chapterCharCountExact;
+  }
   if (Array.isArray(obj.chapterRules)) {
     data.chapterRules = obj.chapterRules as ChapterMatchRule[];
   }
@@ -315,6 +323,9 @@ export function loadPersistedSettingsData(
   }
   if (typeof obj.stickyChapterTitleEnabled === "boolean") {
     data.stickyChapterTitleEnabled = obj.stickyChapterTitleEnabled;
+  }
+  if (typeof obj.chapterNavToolbarEnabled === "boolean") {
+    data.chapterNavToolbarEnabled = obj.chapterNavToolbarEnabled;
   }
   if (typeof obj.readerEditShowLineNumbers === "boolean") {
     data.readerEditShowLineNumbers = obj.readerEditShowLineNumbers;
@@ -539,6 +550,13 @@ export function persistSettingsData(
 ) {
   try {
     storage?.setItem(key, JSON.stringify(data));
+    if (
+      typeof window !== "undefined" &&
+      storage === window.localStorage &&
+      key === persistKey
+    ) {
+      window.dispatchEvent(new Event(persistedSettingsChangedEvent));
+    }
   } catch {
     // ignore
   }

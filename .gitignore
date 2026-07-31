@@ -10,3 +10,5 @@ release
 .qwen
 .vscode
 .npmrc
+.tmp-electron-*/
+tmp-*.json

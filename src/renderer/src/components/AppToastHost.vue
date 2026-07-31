@@ -1,10 +1,31 @@
 <script setup lang="ts">
+import { onMounted, onUnmounted } from "vue";
 import {
+  appToast,
   appToastItems,
   dismissAppToast,
   type AppToastItem,
 } from "../services/appToast";
+import { APP_TOAST_Z_INDEX } from "../constants/appUi";
 import { icons } from "../icons";
+
+/** Legado Toast.LENGTH_LONG 量级；普通 toast 用 appToast 默认时长 */
+const LONG_TOAST_DURATION_MS = 5000;
+
+let offBookSourceToast: (() => void) | null = null;
+
+onMounted(() => {
+  offBookSourceToast = window.colorTxt.onBookSourceToast((ev) => {
+    const msg = ev.message?.trim();
+    if (!msg) return;
+    appToast(msg, ev.long ? { duration: LONG_TOAST_DURATION_MS } : undefined);
+  });
+});
+
+onUnmounted(() => {
+  offBookSourceToast?.();
+  offBookSourceToast = null;
+});
 
 function iconHtml(kind: AppToastItem["kind"]): string {
   switch (kind) {
@@ -25,7 +46,7 @@ function iconHtml(kind: AppToastItem["kind"]): string {
 
 <template>
   <Teleport to="body">
-    <div class="appToastHost" aria-live="polite">
+    <div class="appToastHost" aria-live="polite" :style="{ zIndex: APP_TOAST_Z_INDEX }">
       <TransitionGroup name="appToast" tag="div" class="appToastStack">
         <div
           v-for="t in appToastItems"
@@ -68,7 +89,6 @@ function iconHtml(kind: AppToastItem["kind"]): string {
   top: 0;
   left: 0;
   right: 0;
-  z-index: 5998;
   display: flex;
   justify-content: center;
   padding: 12px 12px 0;
@@ -89,7 +109,7 @@ function iconHtml(kind: AppToastItem["kind"]): string {
   display: flex;
   align-items: center;
   justify-content: flex-start;
-  gap: 10px;
+  gap: 4px;
   width: auto;
   max-width: min(480px, 100%);
   box-sizing: border-box;
