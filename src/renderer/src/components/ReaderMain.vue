@@ -2244,27 +2244,47 @@ type FindControllerStartOpts = {
   loop: boolean;
 };
 
-/** 顶栏高亮词：先经书钉回调，再打开查找并填入高亮词（字面量），并跳到下一处匹配 */
-function openFindWithSearchString(raw: string) {
-  void openFindWithSearchStringAsync(raw);
+/** 顶栏高亮词：先经书钉回调，再打开查找并填入高亮词，并跳到匹配处 */
+function openFindWithSearchString(raw: string, isRegex?: boolean, direction?: 'prev') {
+  void openFindWithSearchStringAsync(raw, isRegex, direction);
 }
 
-async function openFindWithSearchStringAsync(raw: string) {
+async function openFindWithSearchStringAsync(raw: string, isRegex?: boolean, direction?: 'prev') {
   if (props.voiceReadBlocksFind) return;
   const e = editor.value;
   const term = raw.trim();
   if (!e || !term) return;
 
-  props.beforeRevealFindWidget?.();
+  const useRegex = isRegex === true;
 
   const findOpt = e.getOption(monaco.editor.EditorOption.find);
   const ctrl = e.getContribution(FIND_CONTROLLER_ID) as {
+    getState?: () => {
+      isRevealed: boolean;
+      searchString: string;
+      isRegex: boolean;
+    };
     start?: (
       opts: FindControllerStartOpts,
       newState?: Record<string, unknown>,
     ) => Promise<void>;
     moveToNextMatch?: () => boolean;
+    moveToPrevMatch?: () => boolean;
   } | null;
+
+  const state = ctrl?.getState?.();
+  // 搜索框已打开且搜索词/正则模式相同：仅导航，不重新填充
+  if (state?.isRevealed && state.searchString === term && state.isRegex === useRegex) {
+    e.focus();
+    if (direction === 'prev') {
+      ctrl?.moveToPrevMatch?.();
+    } else {
+      ctrl?.moveToNextMatch?.();
+    }
+    return;
+  }
+
+  props.beforeRevealFindWidget?.();
 
   e.focus();
 
@@ -2272,7 +2292,7 @@ async function openFindWithSearchStringAsync(raw: string) {
     e.getAction("actions.find")?.run();
     e.trigger("colortxt", "editor.actions.findWithArgs", {
       searchString: term,
-      isRegex: false,
+      isRegex: useRegex,
       matchWholeWord: false,
       isCaseSensitive: false,
       preserveCase: false,
@@ -2295,13 +2315,17 @@ async function openFindWithSearchStringAsync(raw: string) {
     {
       searchString: term,
       isReplaceRevealed: false,
-      isRegex: false,
+      isRegex: useRegex,
       wholeWord: false,
       matchCase: false,
       preserveCase: false,
     },
   );
-  ctrl.moveToNextMatch?.();
+  if (direction === 'prev') {
+    ctrl.moveToPrevMatch?.();
+  } else {
+    ctrl.moveToNextMatch?.();
+  }
 }
 
 function focusEditor() {

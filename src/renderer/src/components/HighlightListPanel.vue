@@ -45,6 +45,7 @@ const props = withDefaults(
 const emit = defineEmits<{
   addHighlightTerm: [];
   findHighlightTerm: [text: string, isRegex: boolean];
+  findHighlightTermPrev: [text: string, isRegex: boolean];
   removeHighlightTerm: [payload: { text: string; scope: "global" | "book" }];
   favoriteHighlightTerm: [payload: { text: string; colorIndex: number }];
   unfavoriteHighlightTerm: [payload: { text: string; colorIndex: number }];
@@ -156,7 +157,7 @@ const emptyMessage = computed(() => {
         <div
           v-for="item in highlightRows"
           :key="item.listKey"
-          :title="'点击跳转到下一个：' + item.text"
+          :title="'左键跳转下一个，右键跳转上一个：' + item.text"
           class="highlightItem"
           :class="{ 'highlightItem--favorited': item.isFavorited }"
           :style="{
@@ -164,6 +165,7 @@ const emptyMessage = computed(() => {
             fontFamily: monacoFontFamily,
           }"
           @click="emit('findHighlightTerm', item.text, item.isRegex)"
+          @contextmenu.prevent="emit('findHighlightTermPrev', item.text, item.isRegex)"
         >
           <span class="highlightText" :style="{ color: item.color }">
             {{ item.text }}

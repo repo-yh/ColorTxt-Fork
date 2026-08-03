@@ -404,7 +404,7 @@ export function useAppHighlightTerms(deps: {
     });
   }
 
-  function onFindHighlightTermFromSidebar(text: string, isRegex?: boolean) {
+  function onFindHighlightTermFromSidebar(text: string, isRegex?: boolean, direction?: 'prev') {
     if (
       !deps.currentFile.value ||
       deps.loading.value ||
@@ -413,14 +413,8 @@ export function useAppHighlightTerms(deps: {
       return;
     if (deps.isVoiceReadNavigationBlocked.value) return;
     deps.ensurePinBeforeRevealFindWidget();
-    const useRegex = isRegex === true;
-    const found = deps.readerRef.value?.jumpToNextInlineSearchMatch?.(text, {
-      caseSensitive: false,
-      wholeWord: false,
-      useRegex,
-      smooth: true,
-    });
-    deps.hasInlineSearchHighlight.value = found === true;
+    deps.readerRef.value?.openFindWithSearchString?.(text, isRegex, direction);
+    deps.hasInlineSearchHighlight.value = true;
   }
 
   /** 从侧栏手动录入添加高亮词（随机颜色） */

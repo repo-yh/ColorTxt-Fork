@@ -263,6 +263,7 @@ const emit = defineEmits<{
   openSettings: [];
   refreshChaptersFromReader: [];
   findHighlightTerm: [text: string, isRegex: boolean];
+  findHighlightTermPrev: [text: string, isRegex: boolean];
   removeHighlightTerm: [payload: { text: string; scope: "global" | "book" }];
   favoriteHighlightTerm: [payload: { text: string; colorIndex: number }];
   unfavoriteHighlightTerm: [payload: { text: string; colorIndex: number }];
@@ -1094,6 +1095,7 @@ defineExpose({
         :menu-anchor-el="highlightsHeaderMoreBtnRef"
         @add-highlight-term="toggleAddHighlightInput"
         @find-highlight-term="(text, isRegex) => emit('findHighlightTerm', text, isRegex)"
+        @find-highlight-term-prev="(text, isRegex) => emit('findHighlightTermPrev', text, isRegex)"
         @remove-highlight-term="emit('removeHighlightTerm', $event)"
         @favorite-highlight-term="emit('favoriteHighlightTerm', $event)"
         @unfavorite-highlight-term="emit('unfavoriteHighlightTerm', $event)"
