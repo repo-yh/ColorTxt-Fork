@@ -26,6 +26,7 @@ import AppDialogHost from "./components/AppDialogHost.vue";
 import AppCaptchaHost from "./components/AppCaptchaHost.vue";
 import AppToastHost from "./components/AppToastHost.vue";
 import AppOverlays from "./components/AppOverlays.vue";
+import ReplaceFileModal from "./components/ReplaceFileModal.vue";
 import WebDavSyncPanel from "./components/WebDavSyncPanel.vue";
 import FullscreenSystemClock from "./components/FullscreenSystemClock.vue";
 import PomodoroBreakOverlay from "./components/PomodoroBreakOverlay.vue";
@@ -136,6 +137,8 @@ import {
   defaultReaderPaletteLight,
   defaultReaderTheme,
   defaultRecentFilesHistoryLimit,
+  defaultDragDropAction,
+  type DragDropAction,
   mergeReaderPaletteColorEnabled,
   mergeReaderSurfacePalette,
   overridesFromColorEnabled,
@@ -327,6 +330,11 @@ watch(
 );
 const showChapterRulePanel = ref(false);
 const showReplaceRulePanel = ref(false);
+const showReplaceFileModal = ref(false);
+const pendingReplaceOldPath = ref("");
+const showDragDropChoice = ref(false);
+const dragDropChoiceDetail = ref("");
+const dragDropChoiceResolve = ref<((v: number) => void) | null>(null);
 const chapterRuleErrorText = ref("");
 const chapterRuleState = ref(getChapterMatchRules());
 /** 主窗口文本替换规则（localStorage，与找书分键） */
@@ -570,6 +578,7 @@ const restoreSessionOnStartup = ref(defaultRestoreSessionOnStartup);
 const syncCurrentFile = ref(defaultSyncCurrentFile);
 /** 最近打开文件条数上限，0 表示不记录 */
 const recentFilesHistoryLimit = ref(defaultRecentFilesHistoryLimit);
+const dragDropAction = ref<DragDropAction>(defaultDragDropAction);
 /** 小于该字数的章节不纳入章节列表与导航 */
 const chapterMinCharCount = ref(defaultChapterMinCharCount);
 /** Monaco wrappingStrategy：advanced 换行更优、更重 */
@@ -1033,6 +1042,7 @@ const persistence = useAppPersistence({
   recentFiles,
   restoreSessionOnStartup,
   recentFilesHistoryLimit,
+  dragDropAction,
   chapterMinCharCount,
   monacoAdvancedWrapping,
   monacoSmoothScrolling,
@@ -1241,6 +1251,28 @@ function replaceFileBaseName(filePath: string, newBaseName: string): string {
   return `${filePath.slice(0, idx + 1)}${newBaseName}`;
 }
 
+/** 重命名：仅修改文件列表中展示的 name 字段，不动磁盘文件 */
+function onRenameFileName(payload: { oldPath: string; newName: string }) {
+  const oldPath = payload.oldPath.trim();
+  const newName = payload.newName.trim();
+  if (!oldPath || !newName) return;
+  txtFiles.value = txtFiles.value.map((f) =>
+    fileHistoryKey(f.path) === fileHistoryKey(oldPath)
+      ? { ...f, name: newName }
+      : f,
+  );
+  const nameKey = fileNameKey(newName);
+  // 确保 meta 记录存在并写入自定义 fileName
+  fileMetaRecords.value = upsertFileMetaRecord(
+    fileMetaRecords.value,
+    oldPath,
+    () => ({ fileName: nameKey }),
+  );
+  persistFileListCache({ force: true });
+  persistFileMeta();
+}
+
+/** @deprecated 保留但不再使用：磁盘重命名 + 全量迁移（避免上游差异过大） */
 async function onRenameFilePath(payload: { oldPath: string; newName: string }) {
   const oldPath = payload.oldPath.trim();
   const newName = payload.newName.trim();
@@ -1373,26 +1405,13 @@ async function migratePortraitBookDirIfNeeded(
 async function onReplaceFilePath(oldPathRaw: string) {
   const oldPath = oldPathRaw.trim();
   if (!oldPath || !isPlainTextBookPath(oldPath)) return;
-  if (!window.colorTxt) {
-    await appAlert("preload 未注入：请重启应用（或检查主进程 preload 路径）");
-    return;
-  }
+  pendingReplaceOldPath.value = oldPath;
+  showReplaceFileModal.value = true;
+}
 
-  const r = await window.colorTxt.showOpenDialog({
-    title: "选择替换文件",
-    properties: ["openFile"],
-    filters: [
-      { name: "文本", extensions: ["txt", "md"] },
-      { name: "所有文件", extensions: ["*"] },
-    ],
-  });
-  if (r.canceled || r.filePaths.length === 0) return;
-  const newPath = (r.filePaths[0] ?? "").trim();
-  if (!newPath) return;
-  if (!isPlainTextBookPath(newPath)) {
-    await appAlert("请选择 txt 或 md 文件。");
-    return;
-  }
+async function onReplaceFileConfirmed(newPath: string, newSize: number) {
+  const oldPath = pendingReplaceOldPath.value.trim();
+  if (!oldPath) return;
 
   const oldKey = fileHistoryKey(oldPath);
   const nextKey = fileHistoryKey(newPath);
@@ -1400,18 +1419,7 @@ async function onReplaceFilePath(oldPathRaw: string) {
 
   const newName = fileNameKey(newPath);
 
-  let size = 0;
-  try {
-    const st = await window.colorTxt.stat(newPath);
-    if (!st.isFile) {
-      await appAlert("所选路径不是有效文件。");
-      return;
-    }
-    size = typeof st.size === "number" ? st.size : 0;
-  } catch {
-    await appAlert("无法读取所选文件。");
-    return;
-  }
+  const size = newSize;
 
   const wasOpen =
     Boolean(currentFile.value) &&
@@ -1426,11 +1434,11 @@ async function onReplaceFilePath(oldPathRaw: string) {
     })
     .map((f) => {
       if (fileHistoryKey(f.path) !== oldKey) return f;
-      return normalizeTxtFileItem({
+      return {
         ...f,
         path: newPath,
         size,
-      });
+      };
     });
 
   recentFiles.value = recentFiles.value.map((item) =>
@@ -1453,10 +1461,12 @@ async function onReplaceFilePath(oldPathRaw: string) {
     const migrated: FileMetaRecord = {
       ...prevMeta,
       path: newPath,
-      fileName: fileNameKey(newPath),
+      fileName: prevMeta.fileName || fileNameKey(newPath),
       // 纯文本替换不沿用电子书转换缓存路径
       convertedMdPath: undefined,
       sourceMtimeMsAtConvert: undefined,
+      // 旧文件标注行号对新文件无意义
+      readerAnnotations: undefined,
       updatedAt: Date.now(),
     };
     fileMetaRecords.value = [
@@ -1499,6 +1509,11 @@ async function onReplaceFilePath(oldPathRaw: string) {
   persistFileMeta();
 
   if (wasOpen) {
+    // 先清 currentFile 避免 resetSession 对旧路径落盘
+    readingProgressSynced.value = true;
+    currentFile.value = null;
+    activeStreamFilePath.value = null;
+    physicalReaderPath.value = null;
     await openFilePath(newPath, { keepSidebarTab: true });
   } else {
     if (
@@ -2594,6 +2609,9 @@ async function exportCurrentReaderBookPack(includeReadingProgress: boolean) {
     }
   }
   try {
+    const existing = txtFiles.value.find(
+      (f) => fileHistoryKey(f.path) === fileHistoryKey(sessionPath),
+    );
     const zipBuffer = await buildReaderBookPackZip({
       physicalContentPath: physicalPath,
       sessionFilePath: sessionPath,
@@ -2602,12 +2620,11 @@ async function exportCurrentReaderBookPack(includeReadingProgress: boolean) {
       includeReadingProgress,
       viewportTopPhysicalLine,
       password: bookPackPassword.value,
+      contentDisplayName: existing?.name,
     });
     const encrypted = Boolean(bookPackPassword.value.trim());
-    const name = buildReaderBookPackDefaultName(
-      fileNameKey(sessionPath),
-      encrypted,
-    );
+    const bookName = existing?.name || fileNameKey(sessionPath);
+    const name = buildReaderBookPackDefaultName(bookName, encrypted);
     const r = await saveReaderBookPackFile(name, zipBuffer, encrypted);
     if (!r.ok) {
       if ("error" in r) await appAlert(r.error);
@@ -2665,6 +2682,9 @@ async function uploadCurrentReaderBookPackToWebDav() {
       : stream.viewportDisplayLineToPhysicalLine(top);
   }
   try {
+    const existing = txtFiles.value.find(
+      (f) => fileHistoryKey(f.path) === fileHistoryKey(sessionPath),
+    );
     const zipBuffer = await buildReaderBookPackZip({
       physicalContentPath: physicalPath,
       sessionFilePath: sessionPath,
@@ -2673,12 +2693,11 @@ async function uploadCurrentReaderBookPackToWebDav() {
       includeReadingProgress: true,
       viewportTopPhysicalLine,
       password: bookPackPassword.value,
+      contentDisplayName: existing?.name,
     });
     const encrypted = Boolean(bookPackPassword.value.trim());
-    const name = buildReaderBookPackDefaultName(
-      fileNameKey(sessionPath),
-      encrypted,
-    );
+    const bookName = existing?.name || fileNameKey(sessionPath);
+    const name = buildReaderBookPackDefaultName(bookName, encrypted);
     const tempRoot = await window.colorTxt.getPath("temp");
     if (!tempRoot) {
       await appAlert("无法获取临时目录");
@@ -3047,6 +3066,7 @@ async function applySettings(payload: SettingsApplyPayload) {
       Math.floor(payload.recentFilesHistoryLimit),
     ),
   );
+  dragDropAction.value = (payload.dragDropAction ?? defaultDragDropAction) as DragDropAction;
   chapterMinCharCount.value = Math.max(
     minChapterMinCharCount,
     Math.min(maxChapterMinCharCount, Math.floor(payload.chapterMinCharCount)),
@@ -3244,6 +3264,20 @@ useAppWindowBindings({
   activeStreamFilePath,
   readingProgressSynced,
   readerDropOverlayVisible,
+  suppressReaderDropOverlay: showReplaceFileModal,
+  requestReplaceFilePath: (p) => onReplaceFilePath(p),
+  replaceCurrentWithDragged: (newPath, newSize) => {
+    pendingReplaceOldPath.value = currentFile.value ?? "";
+    void onReplaceFileConfirmed(newPath, newSize);
+  },
+  dragDropAction,
+  showDragDropChoice(detail) {
+    return new Promise((resolve) => {
+      dragDropChoiceDetail.value = detail;
+      dragDropChoiceResolve.value = resolve;
+      showDragDropChoice.value = true;
+    });
+  },
   handleWindowCloseRequest,
   readerEditMode,
   voiceReadScrollLocked: isVoiceReadScrollLocked,
@@ -3258,6 +3292,7 @@ useAppShellThemeWatch({
   persistSettings,
   showChapterCounts,
   currentFile,
+  txtFiles,
   readerEditMode,
   readerEditorDirty,
   isFullscreenView,
@@ -3461,7 +3496,7 @@ useAppShellThemeWatch({
           @clear-file-list-category="clearFileListForCategory"
           @remove-file-list="removeFileList"
           @clear-file-meta="onClearFileMeta"
-          @rename-file-path="onRenameFilePath"
+          @rename-file-path="onRenameFileName"
           @replace-file-path="onReplaceFilePath"
           @open-file-in-new-window="onOpenFileInNewWindow"
           @close-current-file="closeCurrentFile"
@@ -3767,6 +3802,12 @@ useAppShellThemeWatch({
       @stop="stopAiSmartFormat()"
     />
 
+    <ReplaceFileModal
+      v-model:visible="showReplaceFileModal"
+      :old-file-name="pendingReplaceOldPath ? fileNameKey(pendingReplaceOldPath) : ''"
+      @confirm="(path, size) => onReplaceFileConfirmed(path, size)"
+    />
+
     <WebDavSyncPanel
       v-model="showWebDavPanel"
       :web-dav="{
@@ -3795,6 +3836,10 @@ useAppShellThemeWatch({
       :restore-session-on-startup="restoreSessionOnStartup"
       :sync-current-file="syncCurrentFile"
       :recent-files-history-limit="recentFilesHistoryLimit"
+      :drag-drop-action="dragDropAction"
+      :show-drag-drop-choice="showDragDropChoice"
+      :drag-drop-choice-detail="dragDropChoiceDetail"
+      @drag-drop-choice="(v) => { dragDropChoiceResolve?.(v); dragDropChoiceResolve = null; showDragDropChoice = false }"
       :chapter-min-char-count="chapterMinCharCount"
       :fullscreen-reader-width-percent="fullscreenReaderWidthPercent"
       :fullscreen-show-system-time="fullscreenShowSystemTime"

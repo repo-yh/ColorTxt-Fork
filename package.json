@@ -1,12 +1,12 @@
 {
   "name": "colortxt",
   "private": true,
-  "version": "3.2.1",
+  "version": "3.2.2",
   "description": "一款会给内容上色的本地 TXT 小说阅读器，带给你不一样的阅读体验！",
   "type": "module",
   "main": "dist/main/index.js",
   "author": "kainanhong@gmail.com",
-  "homepage": "https://github.com/laz-yh/ColorTxt-Fork",
+  "homepage": "https://github.com/repo-yh/ColorTxt-Fork",
   "scripts": {
     "dev": "electron-vite dev",
     "dev:find": "electron-vite dev -- --find-book",
@@ -189,7 +189,7 @@
       ],
       "publish": {
         "provider": "github",
-        "owner": "laz-yh",
+        "owner": "repo-yh",
         "repo": "ColorTxt-Fork",
         "channel": "latest-${arch}"
       },
@@ -262,7 +262,7 @@
       ],
       "publish": {
         "provider": "github",
-        "owner": "laz-yh",
+        "owner": "repo-yh",
         "repo": "ColorTxt-Fork",
         "channel": "latest-${arch}"
       },
@@ -272,7 +272,7 @@
     },
     "publish": {
       "provider": "github",
-      "owner": "laz-yh",
+      "owner": "repo-yh",
       "repo": "ColorTxt-Fork"
     }
   }
