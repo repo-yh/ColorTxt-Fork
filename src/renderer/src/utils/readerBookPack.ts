@@ -365,10 +365,12 @@ export async function buildReaderBookPackZip(options: {
   viewportTopPhysicalLine?: number | null;
   /** 非空则对 ZIP 整包 AES-GCM 加密 */
   password?: string;
+  /** 文件列表中的自定义展示名，优先于磁盘文件名用于 manifest contentFileName */
+  contentDisplayName?: string;
 }): Promise<ArrayBuffer> {
   const contentAbs = options.physicalContentPath.trim();
   const contentBuf = await window.colorTxt.readFileAsArrayBuffer(contentAbs);
-  const contentFileName = basenameFromPath(contentAbs);
+  const contentFileName = options.contentDisplayName?.trim() || basenameFromPath(contentAbs);
   const sessionPath = options.sessionFilePath.trim() || contentAbs;
 
   const manifest: ReaderBookPackManifestV1 = {

@@ -1,5 +1,7 @@
 import { nextTick, watch, type Ref } from "vue";
 import type ReaderMain from "../components/ReaderMain.vue";
+import { fileHistoryKey } from "../stores/recentHistoryStore";
+import { type TxtFileItem } from "../services/fileListService";
 import {
   APP_DISPLAY_NAME,
   applyReaderSurfaceToDocument,
@@ -27,6 +29,8 @@ export function useAppShellThemeWatch(deps: {
   persistSettings: () => void;
   showChapterCounts: Ref<boolean>;
   currentFile: Ref<string | null>;
+  /** 文件列表，用于获取自定义展示名 */
+  txtFiles: Ref<TxtFileItem[]>;
   /** 阅读器编辑模式：未保存 dirty 时标题加 `*` */
   readerEditMode?: Ref<boolean>;
   readerEditorDirty?: Ref<boolean>;
@@ -87,7 +91,10 @@ export function useAppShellThemeWatch(deps: {
         window.colorTxt.setWindowTitle(APP_DISPLAY_NAME);
         return;
       }
-      const fileName = fp.split(/[\\/]/).pop() || fp;
+      const existing = deps.txtFiles.value.find(
+        (f) => fileHistoryKey(f.path) === fileHistoryKey(fp),
+      );
+      const fileName = existing?.name || fp.split(/[\\/]/).pop() || fp;
       const star = editMode && dirty ? "* " : "";
       window.colorTxt.setWindowTitle(`${star}${fileName} - ${APP_DISPLAY_NAME}`);
     },

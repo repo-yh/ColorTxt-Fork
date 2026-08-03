@@ -92,6 +92,7 @@ export function mergeTxtFileLists(
           : undefined;
       byPath.set(n.path, {
         ...n,
+        name: prev.name,
         addedAt: prev.addedAt,
         category: incomingCat ?? prev.category,
       });

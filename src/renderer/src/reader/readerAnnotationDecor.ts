@@ -108,6 +108,7 @@ export function buildAnnotationDecorationsForViewport(
   const suppressId = options?.suppressNoteHoverForAnnotationId ?? null;
   const decs: monaco.editor.IModelDeltaDecoration[] = [];
   for (let line = lo; line <= hi; line++) {
+    if (line < 1 || line > model.getLineCount()) continue;
     const hits = hitsByLine.get(line);
     if (!hits?.length) continue;
     const maxCol = model.getLineMaxColumn(line);

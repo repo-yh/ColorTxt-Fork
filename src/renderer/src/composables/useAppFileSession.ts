@@ -409,14 +409,18 @@ export function useAppFileSession(deps: {
   function restoreFileListFromSession() {
     const fileList = loadTxtFileListSnapshot(window.localStorage, fileListKey);
     if (fileList.length === 0) return false;
-    deps.txtFiles.value = fileList.map((f) =>
-      normalizeTxtFileItem({
+    deps.txtFiles.value = fileList.map((f) => {
+      const normalized = normalizeTxtFileItem({
         ...f,
         name: String(f.name ?? ""),
         path: String(f.path ?? ""),
         size: typeof f.size === "number" ? f.size : 0,
-      }),
-    );
+      });
+      return {
+        ...normalized,
+        name: String(f.name ?? "").trim() || normalized.name,
+      };
+    });
     persistFileListCache();
     return true;
   }

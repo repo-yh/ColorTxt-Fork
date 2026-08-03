@@ -370,7 +370,10 @@ export function normalizeCharacterRoster(
 function normalizeRecord(item: Partial<FileMetaRecord>): FileMetaRecord | null {
   if (typeof item.path !== "string" || !item.path.trim()) return null;
   const path = item.path.trim();
-  const fileName = fileNameKey(path);
+  const fileName =
+    typeof item.fileName === "string" && item.fileName.trim()
+      ? item.fileName.trim()
+      : fileNameKey(path);
   const progress =
     typeof item.progress === "number" && Number.isFinite(item.progress)
       ? Math.max(0, Math.min(100, item.progress))
@@ -609,7 +612,7 @@ export function upsertFileMetaRecord(
     sidebarTab: prev?.sidebarTab,
     ...nextPartial,
     path,
-    fileName: fileNameKey(path),
+    fileName: nextPartial.fileName ?? prev?.fileName ?? fileNameKey(path),
     updatedAt: now,
   };
   const normalized = normalizeRecord(merged);
