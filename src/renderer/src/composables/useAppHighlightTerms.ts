@@ -412,7 +412,19 @@ export function useAppHighlightTerms(deps: {
       return;
     if (deps.isVoiceReadNavigationBlocked.value) return;
     deps.ensurePinBeforeRevealFindWidget();
-    deps.readerRef.value?.openFindWithSearchString?.(text, isRegex, direction);
+    if (direction === 'prev') {
+      // 右键：先清除左键的 inline decoration，再填充搜索面板
+      deps.readerRef.value?.clearInlineSearchState?.();
+      deps.readerRef.value?.openFindWithSearchString?.(text, isRegex, direction);
+    } else {
+      // 左键：隐式查找，跳下一个
+      deps.readerRef.value?.jumpToNextInlineSearchMatch?.(text, {
+        caseSensitive: false,
+        wholeWord: false,
+        useRegex: isRegex === true,
+        smooth: true,
+      });
+    }
   }
 
   /** 从侧栏手动录入添加高亮词（随机颜色） */
