@@ -28,7 +28,6 @@ const props = withDefaults(
   defineProps<{
     currentFilePath: string | null;
     highlightTerms: HighlightListTerm[];
-    hasInlineSearchHighlight?: boolean;
     highlightPreviewBg?: string;
     monacoFontFamily: string;
     menuAnchorEl?: HTMLButtonElement | null;
@@ -36,7 +35,6 @@ const props = withDefaults(
   {
     currentFilePath: null,
     highlightTerms: () => [],
-    hasInlineSearchHighlight: false,
     highlightPreviewBg: "var(--reader-bg, var(--bg))",
     menuAnchorEl: null,
   },
@@ -49,7 +47,6 @@ const emit = defineEmits<{
   removeHighlightTerm: [payload: { text: string; scope: "global" | "book" }];
   favoriteHighlightTerm: [payload: { text: string; colorIndex: number }];
   unfavoriteHighlightTerm: [payload: { text: string; colorIndex: number }];
-  clearInlineSearchHighlight: [];
   clearHighlights: [];
   exportBookHighlightsJson: [];
   importBookHighlightsJson: [];
@@ -215,14 +212,6 @@ const emptyMessage = computed(() => {
         >共 {{ highlightTerms.length }} 个</span
       >
       <div class="sidebarTabFooterActions">
-        <button
-          type="button"
-          class="link hoverMode sidebarTabFooterAction"
-          :disabled="!hasInlineSearchHighlight"
-          @click="emit('clearInlineSearchHighlight')"
-        >
-          清除定位
-        </button>
         <button
           type="button"
           class="link danger hoverMode sidebarTabFooterAction"

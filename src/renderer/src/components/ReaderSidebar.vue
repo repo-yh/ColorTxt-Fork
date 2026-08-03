@@ -93,7 +93,6 @@ const props = withDefaults(
     searchWholeWord?: boolean;
     searchUseRegex?: boolean;
     activeSearchResult?: { displayLine: number; rangeStart: number } | null;
-    hasInlineSearchHighlight?: boolean;
     highlightPreviewBg?: string;
     monacoFontFamily?: string;
     lineationColors?: readonly string[];
@@ -173,7 +172,6 @@ const props = withDefaults(
     searchWholeWord: false,
     searchUseRegex: false,
     activeSearchResult: null,
-    hasInlineSearchHighlight: false,
     highlightPreviewBg: "var(--reader-bg, var(--bg))",
     monacoFontFamily: "",
     lineationColors: () => [],
@@ -267,7 +265,6 @@ const emit = defineEmits<{
   removeHighlightTerm: [payload: { text: string; scope: "global" | "book" }];
   favoriteHighlightTerm: [payload: { text: string; colorIndex: number }];
   unfavoriteHighlightTerm: [payload: { text: string; colorIndex: number }];
-  clearInlineSearchHighlight: [];
   clearHighlights: [];
   addHighlightTerm: [text: string, isRegex: boolean];
   exportBookHighlightsJson: [];
@@ -1089,7 +1086,6 @@ defineExpose({
         v-show="activeTab === 'highlights'"
         :current-file-path="currentFilePath"
         :highlight-terms="highlightTerms"
-        :has-inline-search-highlight="hasInlineSearchHighlight"
         :highlight-preview-bg="highlightPreviewBg"
         :monaco-font-family="monacoFontFamily"
         :menu-anchor-el="highlightsHeaderMoreBtnRef"
@@ -1099,7 +1095,6 @@ defineExpose({
         @remove-highlight-term="emit('removeHighlightTerm', $event)"
         @favorite-highlight-term="emit('favoriteHighlightTerm', $event)"
         @unfavorite-highlight-term="emit('unfavoriteHighlightTerm', $event)"
-        @clear-inline-search-highlight="emit('clearInlineSearchHighlight')"
         @clear-highlights="emit('clearHighlights')"
         @export-book-highlights-json="emit('exportBookHighlightsJson')"
         @import-book-highlights-json="emit('importBookHighlightsJson')"

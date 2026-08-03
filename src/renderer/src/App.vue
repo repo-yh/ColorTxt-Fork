@@ -2068,7 +2068,6 @@ const {
   persistSettings,
   isVoiceReadNavigationBlocked,
   ensurePinBeforeRevealFindWidget,
-  hasInlineSearchHighlight,
   editorContentChangeEpoch,
 });
 
@@ -3453,7 +3452,6 @@ useAppShellThemeWatch({
           :search-whole-word="searchWholeWord"
           :search-use-regex="searchUseRegex"
           :active-search-result="activeSearchResult"
-          :has-inline-search-highlight="hasInlineSearchHighlight"
           :highlight-preview-bg="
             currentTheme === 'vs'
               ? readerSurfaceLight.readerBg
@@ -3510,7 +3508,6 @@ useAppShellThemeWatch({
           @import-bookmarks-json="onImportBookmarksJson"
           @find-highlight-term="(text, isRegex) => onFindHighlightTermFromSidebar(text, isRegex)"
           @find-highlight-term-prev="(text, isRegex) => onFindHighlightTermFromSidebar(text, isRegex, 'prev')"
-          @clear-inline-search-highlight="clearReaderInlineSearchHighlight"
           @update:search-query="searchQuery = $event"
           @update:search-match-case="searchMatchCase = $event"
           @update:search-whole-word="searchWholeWord = $event"

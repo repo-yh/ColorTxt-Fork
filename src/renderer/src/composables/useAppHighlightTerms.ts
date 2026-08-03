@@ -53,7 +53,6 @@ export function useAppHighlightTerms(deps: {
   persistSettings: () => void;
   isVoiceReadNavigationBlocked: Ref<boolean>;
   ensurePinBeforeRevealFindWidget: () => void;
-  hasInlineSearchHighlight: Ref<boolean>;
   editorContentChangeEpoch: Ref<number>;
 }) {
   const currentFileHighlightWords = computed(
@@ -414,7 +413,6 @@ export function useAppHighlightTerms(deps: {
     if (deps.isVoiceReadNavigationBlocked.value) return;
     deps.ensurePinBeforeRevealFindWidget();
     deps.readerRef.value?.openFindWithSearchString?.(text, isRegex, direction);
-    deps.hasInlineSearchHighlight.value = true;
   }
 
   /** 从侧栏手动录入添加高亮词（随机颜色） */
