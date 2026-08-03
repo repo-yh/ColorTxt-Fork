@@ -1,6 +1,6 @@
 import { nextTick, onBeforeUnmount, onMounted, type Ref } from "vue";
 import type ReaderMain from "../components/ReaderMain.vue";
-import { isSupportedBookPath } from "../ebook/ebookFormat";
+import { isPlainTextBookPath, isSupportedBookPath } from "../ebook/ebookFormat";
 import {
   collectFsPathsFromDataTransfer,
   dataTransferLikelyHasExternalFiles,
@@ -8,6 +8,8 @@ import {
   isDragOverDropZone,
 } from "../utils/dragDropFsPaths";
 import { looksLikeZipBookPackCandidate } from "../utils/readerBookPack";
+import { fileHistoryKey } from "../stores/recentHistoryStore";
+import { type DragDropAction } from "../constants/appUi";
 import { formatTextEncodingLabel } from "@shared/textEncodingDisplay";
 import { appAlert } from "../services/appDialog";
 import {
@@ -126,6 +128,16 @@ export function useAppWindowBindings(deps: {
   readingProgressSynced: Ref<boolean>;
   /** 拖入阅读区时，在阅读区容器上显示「打开文件」局部蒙层 */
   readerDropOverlayVisible: Ref<boolean>;
+  /** 为 true 时不显示阅读区拖放蒙层（如文件替换 Modal 打开时） */
+  suppressReaderDropOverlay?: Ref<boolean>;
+  /** 拖放到阅读区时，若文件已在列表中则回调请求替换 */
+  requestReplaceFilePath?: (oldPath: string) => void;
+  /** 拖放到阅读区时，直接替换当前文件（复用替换文件逻辑） */
+  replaceCurrentWithDragged?: (newPath: string, newSize: number) => void;
+  /** 拖放动作偏好：prompt | replace | openNew */
+  dragDropAction: Ref<DragDropAction>;
+  /** 弹出自定义选择对话框，返回按钮索引 0=替换 1=打开 -1=取消 */
+  showDragDropChoice: (detail: string) => Promise<number>;
   /** 主进程拦截关窗后由渲染进程决定是否 `proceedCloseWindow` */
   handleWindowCloseRequest: () => Promise<void>;
   /** 编辑模式：焦点在 Monaco 内时，仅滚屏/查找等冲突快捷键交给编辑器，其余窗口快捷键仍生效 */
@@ -548,6 +560,41 @@ export function useAppWindowBindings(deps: {
           if (!isSupportedBookPath(p) && !looksLikeZipBookPackCandidate(p)) {
             continue;
           }
+          // 拖入文件已在书架中 → 直接打开
+          if (isPlainTextBookPath(p)) {
+            const draggedInList = deps.txtFiles.value.some(
+              (f) => fileHistoryKey(f.path) === fileHistoryKey(p),
+            );
+            if (draggedInList) {
+              await deps.fileSession.openFilePath(p);
+              return;
+            }
+          }
+          // 当前打开的文件在书架中时按偏好处理
+          const cur = deps.currentFile.value;
+          if (cur && isPlainTextBookPath(p)) {
+            const curInList = deps.txtFiles.value.some(
+              (f) => fileHistoryKey(f.path) === fileHistoryKey(cur),
+            );
+            if (curInList) {
+              const action = deps.dragDropAction.value;
+              if (action === "replace") {
+                deps.replaceCurrentWithDragged?.(p, st.size);
+                return;
+              }
+              if (action === "prompt") {
+                const r = await deps.showDragDropChoice(
+                  "替换文件：迁移阅读数据到新文件\n打开新文件：不保留现有阅读数据",
+                );
+                if (r === 0) {
+                  deps.replaceCurrentWithDragged?.(p, st.size);
+                  return;
+                }
+                if (r !== 1) return;
+              }
+              // action === "openNew": fall through to normal open
+            }
+          }
           await deps.fileSession.openFilePath(p);
           return;
         } catch {
@@ -567,6 +614,10 @@ export function useAppWindowBindings(deps: {
         return;
       }
       if (isOverSidebarImportDropZone(ev)) {
+        clearReaderDropOverlay();
+        return;
+      }
+      if (deps.suppressReaderDropOverlay?.value) {
         clearReaderDropOverlay();
         return;
       }
