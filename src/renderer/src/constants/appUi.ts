@@ -181,6 +181,9 @@ export { defaultAiSmartFormatSettings } from "@shared/aiSmartFormatTypes";
 /** 默认「最近打开」条数上限（可被设置覆盖） */
 export const defaultRecentFilesHistoryLimit = 20;
 export const maxRecentFilesHistoryLimit = 1000;
+
+export type DragDropAction = "prompt" | "replace" | "openNew";
+export const defaultDragDropAction: DragDropAction = "prompt";
 /** 全屏时阅读区域宽度百分比（仅 Monaco 主体区域） */
 export const defaultFullscreenReaderWidthPercent = 50;
 export const minFullscreenReaderWidthPercent = 30;

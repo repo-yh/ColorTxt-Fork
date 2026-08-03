@@ -26,8 +26,9 @@ import ReplaceRulePanel from "../bookSource/components/ReplaceRulePanel.vue";
 import type { ReplaceRule } from "@shared/bookSource/replaceRule";
 import SettingsPanel, { type SettingsApplyPayload } from "./SettingsPanel.vue";
 import ShortcutPanel from "./ShortcutPanel.vue";
+import DragDropChoiceModal from "./DragDropChoiceModal.vue";
 import type { ShortcutBindingMap } from "../services/shortcutRegistry";
-import type { ReaderSurfacePalette } from "../constants/appUi";
+import type { ReaderSurfacePalette, DragDropAction } from "../constants/appUi";
 import type { ReaderSurfaceColorEnabled } from "../constants/readerPalette";
 import { readerEbookConvertingHintText, readerBookPackUnpackingHintText } from "../constants/appUi";
 
@@ -37,6 +38,9 @@ const props = defineProps<{
   restoreSessionOnStartup: boolean;
   syncCurrentFile: boolean;
   recentFilesHistoryLimit: number;
+  dragDropAction: DragDropAction;
+  showDragDropChoice: boolean;
+  dragDropChoiceDetail: string;
   chapterMinCharCount: number;
   fullscreenReaderWidthPercent: number;
   fullscreenShowSystemTime: boolean;
@@ -113,6 +117,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   applySettings: [payload: SettingsApplyPayload];
+  dragDropChoice: [index: number];
   applyChapterRules: [payload: { rules: ChapterMatchRule[] }];
   confirmAddBookmark: [];
   updateBookmarkToCurrentViewportLine: [];
@@ -251,11 +256,17 @@ onBeforeUnmount(() => {
     :default-shortcut-bindings="defaultShortcutBindings"
     @apply="emit('applyShortcutBindings', $event)"
   />
+  <DragDropChoiceModal
+    :visible="showDragDropChoice"
+    :detail="dragDropChoiceDetail"
+    @choose="(v) => emit('dragDropChoice', v)"
+  />
   <SettingsPanel
     v-model="showSettingsPanel"
     :restore-session-on-startup="restoreSessionOnStartup"
     :sync-current-file="syncCurrentFile"
     :recent-files-history-limit="recentFilesHistoryLimit"
+    :drag-drop-action="dragDropAction"
     :chapter-min-char-count="chapterMinCharCount"
     :fullscreen-reader-width-percent="fullscreenReaderWidthPercent"
     :fullscreen-show-system-time="fullscreenShowSystemTime"

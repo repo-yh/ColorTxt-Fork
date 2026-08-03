@@ -86,6 +86,8 @@ export type PersistedSettingsData = {
   restoreSessionOnStartup?: boolean;
   /** 最近打开文件条数上限，0 表示不记录 */
   recentFilesHistoryLimit?: number;
+  /** 拖放动作：prompt | replace | openNew */
+  dragDropAction?: string;
   /** 小于该字数的章节不纳入章节列表与导航 */
   chapterMinCharCount?: number;
   /** Monaco 换行是否使用 advanced 策略（性能开销更大） */

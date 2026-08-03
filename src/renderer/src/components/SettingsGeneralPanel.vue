@@ -3,18 +3,34 @@ import { computed } from "vue";
 import NumericInput from "./NumericInput.vue";
 import SwitchToggle from "./SwitchToggle.vue";
 import PathPickerInput from "./PathPickerInput.vue";
+import AppCustomSelect, { type CustomSelectItem } from "./AppCustomSelect.vue";
 import {
   maxChapterMinCharCount,
   maxRecentFilesHistoryLimit,
   minChapterMinCharCount,
 } from "../constants/appUi";
 import { resolveDefaultUnpackedBooksDirSync } from "../utils/defaultCacheDirs";
+
+const selectListsEmpty: CustomSelectItem[] = [];
+
+const dragDropActionItems: CustomSelectItem[] = [
+  { kind: "item", id: "prompt", label: "弹窗提示" },
+  { kind: "item", id: "replace", label: "一律替换" },
+  { kind: "item", id: "openNew", label: "一律新打开" },
+];
+
+const dragDropActionLabel = (v: string): string =>
+  (dragDropActionItems as Extract<CustomSelectItem, { kind: "item" }>[]).find(
+    (it) => it.id === v,
+  )?.label ?? "弹窗提示";
+
 import { icons } from "../icons";
 
 defineProps<{
   draftRestore: boolean;
   draftSyncCurrentFile: boolean;
   draftRecentLimit: number;
+  draftDragDropAction: string;
   draftChapterMinCharCount: number;
   draftChapterCharCountExact: boolean;
   draftEbookConvertOutputDir: string;
@@ -27,6 +43,7 @@ defineEmits<{
   "update:draftRestore": [v: boolean];
   "update:draftSyncCurrentFile": [v: boolean];
   "update:draftRecentLimit": [v: number];
+  "update:draftDragDropAction": [v: string];
   "update:draftChapterMinCharCount": [v: number];
   "update:draftChapterCharCountExact": [v: boolean];
   "update:draftEbookConvertOutputDir": [v: string];
@@ -91,6 +108,26 @@ const bookPackUnpackDirPlaceholder = computed(() => {
         </div>
         <p class="settingsHint">
           最近打开文件的保留条数；设置为 0 时不记录最近打开的文件。
+        </p>
+      </div>
+
+      <div class="settingsRow">
+        <div class="settingsRowMain settingsRowMain--baseline">
+          <span class="settingsLabel">默认拖放动作</span>
+          <AppCustomSelect
+            class="settingsSelect"
+            :model-value="draftDragDropAction"
+            :display-label="dragDropActionLabel(draftDragDropAction)"
+            :fixed-top-items="selectListsEmpty"
+            :scroll-items="dragDropActionItems"
+            :fixed-bottom-items="selectListsEmpty"
+            :scroll-max-height="160"
+            ariaLabel="默认拖放动作"
+            @update:model-value="(v) => $emit('update:draftDragDropAction', v as string)"
+          />
+        </div>
+        <p class="settingsHint">
+          拖放文件到阅读区替换当前阅读的书架文件时的默认动作。
         </p>
       </div>
     </div>
