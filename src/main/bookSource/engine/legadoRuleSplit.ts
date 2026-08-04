@@ -141,7 +141,7 @@ function isLegadoRuleLineAfterJs(line: string): boolean {
   if (!t) return false;
   // JS 正则：整行 `/pat/flags`，或 `/pat/.test(...)` / `/pat/ &&` 等（如 isVip 判断）
   {
-    const m = t.match(/^\/(?:\\.|[^/\n])+\/[gimsuyd]*/i);
+    const m = t.match(/^\/(?:\\.|[^/\\\n])+\/[gimsuyd]*/i);
     if (m) {
       const rest = t.slice(m[0].length).replace(/^\s+/, "");
       if (
