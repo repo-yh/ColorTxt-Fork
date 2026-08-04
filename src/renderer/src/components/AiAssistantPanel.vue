@@ -1114,15 +1114,49 @@ async function requestRebuildVectorIndex(): Promise<void> {
   }
 }
 
-/** 侧栏 header「更多 → 清除缓存」：删除本书向量索引与分词缓存（不含对话记录） */
-async function requestClearAiBookCache(): Promise<void> {
+const segmentRebuildBusy = ref(false);
+
+/** 侧栏 header「更多 → 重建词云分词」：清空后按章重建 segment.sqlite */
+async function requestRebuildSegmentCache(): Promise<void> {
+  if (!bookHash.value) return;
+  if (segmentRebuildBusy.value) {
+    appToast("分词任务正在进行中，请稍候。", { kind: "info" });
+    return;
+  }
+  const chapterCount = props.chapters.length;
+  if (chapterCount <= 0) {
+    await appAlert("当前没有可分词的章节。");
+    return;
+  }
+  segmentRebuildBusy.value = true;
+  try {
+    const res = await window.colorTxt.ai.segmentRebuildBook({
+      bookHash: bookHash.value,
+      chapterCount,
+    });
+    if (!res.ok) {
+      await appAlert(res.error || "重建词云分词失败。");
+      return;
+    }
+    appToast(`已重建词云分词（${res.chaptersBuilt} 章）。`, {
+      kind: "success",
+    });
+  } catch (e) {
+    await appAlert(e instanceof Error ? e.message : "重建词云分词失败。");
+  } finally {
+    segmentRebuildBusy.value = false;
+  }
+}
+
+/** 侧栏 header「更多 → 清除向量索引缓存」 */
+async function requestClearVectorIndexCache(): Promise<void> {
   if (!bookHash.value) return;
   if (isAiVectorIndexPhaseBusy()) {
     appToast("索引任务正在进行中，请稍候。", { kind: "info" });
     return;
   }
   if (chatAwaitingReply.value || streaming.value) {
-    appToast("对话正在进行中，请先停止或等待完成后再清除缓存。", {
+    appToast("对话正在进行中，请先停止或等待完成后再清除向量索引。", {
       kind: "info",
     });
     return;
@@ -1133,22 +1167,104 @@ async function requestClearAiBookCache(): Promise<void> {
     buttons: ["取消", "清除"],
     defaultId: 1,
     cancelId: 0,
-    message: "是否清除本书 AI 缓存？",
-    detail:
-      "将删除本书的向量索引与词云分词缓存；对话记录会保留。",
+    message: "是否清除本书向量索引？",
+    detail: "将删除本书的向量索引；对话记录与词云分词缓存会保留。",
     noLink: true,
   });
   if (r.response !== 1) return;
   const del = await window.colorTxt.ai.indexDeleteBook(bookHash.value);
   if (!del.ok) {
-    await appAlert("清除缓存失败。");
+    await appAlert("清除向量索引失败。");
     return;
   }
   indexPhase.value = "idle";
   indexError.value = "";
   indexEmbedCurrent.value = 0;
   indexEmbedTotal.value = 0;
-  appToast("已清除本书 AI 缓存。", { kind: "success" });
+  appToast("已清除本书向量索引。", { kind: "success" });
+}
+
+/** 侧栏 header「更多 → 清除词云分词缓存」 */
+async function requestClearSegmentCache(): Promise<void> {
+  if (!bookHash.value) return;
+  if (segmentRebuildBusy.value) {
+    appToast("分词任务正在进行中，请稍候。", { kind: "info" });
+    return;
+  }
+  const r = await window.colorTxt.showMessageBox({
+    type: "warning",
+    title: APP_DISPLAY_NAME,
+    buttons: ["取消", "清除"],
+    defaultId: 1,
+    cancelId: 0,
+    message: "是否清除本书词云分词缓存？",
+    detail: "将删除本书的词云分词缓存；对话记录与向量索引会保留。",
+    noLink: true,
+  });
+  if (r.response !== 1) return;
+  const del = await window.colorTxt.ai.segmentDeleteBook(bookHash.value);
+  if (!del.ok) {
+    await appAlert("清除词云分词缓存失败。");
+    return;
+  }
+  appToast("已清除本书词云分词缓存。", { kind: "success" });
+}
+
+/** 侧栏 header「更多 → 清除对话记录」：删除本书全部会话与消息（不含向量索引） */
+async function requestClearAiChatHistory(): Promise<void> {
+  if (!bookHash.value) return;
+  if (chatAwaitingReply.value || streaming.value) {
+    appToast("对话正在进行中，请先停止或等待完成后再清除对话记录。", {
+      kind: "info",
+    });
+    return;
+  }
+  const r = await window.colorTxt.showMessageBox({
+    type: "warning",
+    title: APP_DISPLAY_NAME,
+    buttons: ["取消", "清除"],
+    defaultId: 1,
+    cancelId: 0,
+    message: "是否清除本书对话记录？",
+    detail: "将删除本书的全部 AI 对话记录；向量索引与分词缓存会保留。",
+    noLink: true,
+  });
+  if (r.response !== 1) return;
+  try {
+    if (streaming.value) onStop();
+    else if (chatAwaitingReply.value) {
+      abortActiveAiWork(activeRequestId.value);
+      chatAwaitingReply.value = false;
+    }
+    const list = await window.colorTxt.ai.threadList(bookHash.value);
+    for (const t of list) {
+      await window.colorTxt.ai.threadDelete(t.id);
+    }
+    await reloadUiAfterChatHistoryCleared();
+    appToast("已清除本书对话记录。", { kind: "success" });
+  } catch (e) {
+    await appAlert(
+      e instanceof Error ? e.message : "清除对话记录失败。",
+    );
+  }
+}
+
+/** 阅读数据被外部清除后：刷新侧栏对话与索引 UI（假定该书会话/索引/分词已删） */
+async function reloadUiAfterChatHistoryCleared(): Promise<void> {
+  if (streaming.value) onStop();
+  else if (chatAwaitingReply.value) {
+    abortActiveAiWork(activeRequestId.value);
+    chatAwaitingReply.value = false;
+  }
+  threadId.value = null;
+  messages.value = [];
+  threads.value = [];
+  historyOpen.value = false;
+  indexPhase.value = "idle";
+  indexError.value = "";
+  indexEmbedCurrent.value = 0;
+  indexEmbedTotal.value = 0;
+  await ensureThread();
 }
 
 async function buildIndex(
@@ -1816,7 +1932,11 @@ function prefillQuotedText(text: string) {
 
 defineExpose({
   requestRebuildVectorIndex,
-  requestClearAiBookCache,
+  requestRebuildSegmentCache,
+  requestClearVectorIndexCache,
+  requestClearSegmentCache,
+  requestClearAiChatHistory,
+  reloadUiAfterChatHistoryCleared,
   prefillQuotedText,
 });
 </script>

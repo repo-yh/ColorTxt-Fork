@@ -280,7 +280,7 @@ const bookPackUnpackDirPlaceholder = computed(() => {
               阅读数据
             </button>
             <button
-              class="btn warning"
+              class="btn danger"
               type="button"
               size="large"
               @click="$emit('clearCache')"

@@ -68,6 +68,7 @@ import {
   findFileMetaRecord,
   loadFileMetaRecords,
   mergeFileMetaRecords,
+  normalizeFileMetaPathKey,
   normalizeHighlightWordsByIndex,
   persistFileMetaRecords,
   removeBookmarkForFile,
@@ -496,6 +497,48 @@ export function useAppPersistence(deps: {
     persistFileMetaRecords(window.localStorage, fileMetaKey, merged);
   }
 
+  /**
+   * 清除阅读数据：内存删除 → 取消防抖 → 以当前内存直接覆盖写盘（不合并）。
+   * setItem 会触发他窗 storage，他窗按磁盘重载；可选同时移出最近打开。
+   */
+  function removeFileMetaPaths(
+    pathKeys: Iterable<string>,
+    opts?: { removeFromRecent?: boolean },
+  ) {
+    const keys = new Set<string>();
+    for (const raw of pathKeys) {
+      const k = normalizeFileMetaPathKey(raw);
+      if (k) keys.add(k);
+    }
+    if (keys.size === 0) return;
+
+    deps.fileMetaRecords.value = deps.fileMetaRecords.value.filter(
+      (m) => !keys.has(normalizeFileMetaPathKey(m.path)),
+    );
+    for (const k of keys) {
+      if (metaProgressByPathKey.value.has(k)) {
+        const m = new Map(metaProgressByPathKey.value);
+        m.delete(k);
+        metaProgressByPathKey.value = m;
+      }
+    }
+
+    if (opts?.removeFromRecent !== false) {
+      deps.recentFiles.value = deps.recentFiles.value.filter(
+        (r) => !keys.has(fileHistoryKey(r.path)),
+      ) as typeof deps.recentFiles.value;
+      persistRecentFiles();
+    }
+
+    cancelScheduledFileMetaWrite();
+    persistFileMetaRecords(
+      window.localStorage,
+      fileMetaKey,
+      deps.fileMetaRecords.value,
+    );
+    rebuildMetaProgressMap();
+  }
+
   function runScheduledFileMetaWrite() {
     fileMetaWriteTimer = null;
     const mode = pendingFileMetaWrite;
@@ -619,19 +662,38 @@ export function useAppPersistence(deps: {
   }
 
   /**
-   * 他窗写入 file.meta 后：合并进本窗内存，保留当前打开文件的未落盘阅读进度，
-   * 避免整表替换把本窗滚动进度冲回旧值（关窗后再关另一窗会把错误进度写回磁盘）。
+   * 他窗写入 file.meta 后：以磁盘为权威重载内存。
+   * 若本窗正在读的书仍在磁盘上，仅把本窗未落盘的进度/视口盖回去，避免滚动被冲掉；
+   * 若磁盘已无该书（他窗已清除），则不再保留本窗旧 meta。
    */
   function syncFileMetaFromOtherWindow() {
     const disk = loadFileMetaRecords(window.localStorage, fileMetaKey);
-    deps.fileMetaRecords.value = mergeFileMetaRecords(
-      deps.fileMetaRecords.value,
-      disk,
-      {
-        preferLocalReadingPath: deps.currentFile.value,
-        tieBreak: "remote",
-      },
+    const openPath = deps.currentFile.value?.trim() ?? "";
+    if (!openPath) {
+      deps.fileMetaRecords.value = disk;
+      rebuildMetaProgressMap();
+      return;
+    }
+    const localCur = findFileMetaRecord(deps.fileMetaRecords.value, openPath);
+    const diskCur = findFileMetaRecord(disk, openPath);
+    if (!localCur || !diskCur) {
+      deps.fileMetaRecords.value = disk;
+      rebuildMetaProgressMap();
+      return;
+    }
+    const openKey = normalizeFileMetaPathKey(openPath);
+    const without = disk.filter(
+      (m) => normalizeFileMetaPathKey(m.path) !== openKey,
     );
+    deps.fileMetaRecords.value = [
+      {
+        ...diskCur,
+        progress: localCur.progress,
+        editorViewState: localCur.editorViewState,
+        viewportTopPhysicalLine: localCur.viewportTopPhysicalLine,
+      },
+      ...without,
+    ];
     rebuildMetaProgressMap();
   }
 
@@ -836,6 +898,7 @@ export function useAppPersistence(deps: {
     const prev = findFileMetaRecord(deps.fileMetaRecords.value, p);
     if (prev) {
       prev.lastOpenedAt = now;
+      prev.updatedAt = now;
     } else {
       deps.fileMetaRecords.value = upsertFileMetaRecord(
         deps.fileMetaRecords.value,
@@ -1565,6 +1628,8 @@ export function useAppPersistence(deps: {
     clearRecentFiles,
     loadFileMeta,
     persistFileMeta,
+    persistFileMetaImmediate,
+    removeFileMetaPaths,
     getFileMeta,
     setEbookConvertedMeta,
     touchFileLastOpened,

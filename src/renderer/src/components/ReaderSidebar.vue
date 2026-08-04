@@ -491,10 +491,14 @@ const activePanelTitle = computed(() => {
 });
 
 /** 侧栏「AI 阅读助手」标题行「更多」菜单 */
-const AI_ASSISTANT_HEADER_MORE_MENU_W = 120;
+const AI_ASSISTANT_HEADER_MORE_MENU_W = 150;
 const aiAssistantPanelRef = ref<{
   requestRebuildVectorIndex: () => Promise<void>;
-  requestClearAiBookCache: () => Promise<void>;
+  requestRebuildSegmentCache: () => Promise<void>;
+  requestClearVectorIndexCache: () => Promise<void>;
+  requestClearSegmentCache: () => Promise<void>;
+  requestClearAiChatHistory: () => Promise<void>;
+  reloadUiAfterChatHistoryCleared: () => Promise<void>;
   prefillQuotedText: (text: string) => void;
 } | null>(null);
 const fileListPanelRef = ref<InstanceType<typeof FileListPanel> | null>(null);
@@ -565,10 +569,28 @@ async function onAiAssistantHeaderMoreRebuildIndex() {
   await aiAssistantPanelRef.value?.requestRebuildVectorIndex?.();
 }
 
-async function onAiAssistantHeaderMoreClearCache() {
+async function onAiAssistantHeaderMoreRebuildSegment() {
   closeAiAssistantHeaderMoreMenu();
   await nextTick();
-  await aiAssistantPanelRef.value?.requestClearAiBookCache?.();
+  await aiAssistantPanelRef.value?.requestRebuildSegmentCache?.();
+}
+
+async function onAiAssistantHeaderMoreClearVectorIndex() {
+  closeAiAssistantHeaderMoreMenu();
+  await nextTick();
+  await aiAssistantPanelRef.value?.requestClearVectorIndexCache?.();
+}
+
+async function onAiAssistantHeaderMoreClearSegment() {
+  closeAiAssistantHeaderMoreMenu();
+  await nextTick();
+  await aiAssistantPanelRef.value?.requestClearSegmentCache?.();
+}
+
+async function onAiAssistantHeaderMoreClearChatHistory() {
+  closeAiAssistantHeaderMoreMenu();
+  await nextTick();
+  await aiAssistantPanelRef.value?.requestClearAiChatHistory?.();
 }
 
 watch(
@@ -692,6 +714,9 @@ defineExpose({
   centerActiveChapterInList,
   prefillAiAssistantQuotedText(text: string) {
     aiAssistantPanelRef.value?.prefillQuotedText(text);
+  },
+  reloadAiAssistantAfterChatHistoryCleared() {
+    return aiAssistantPanelRef.value?.reloadUiAfterChatHistoryCleared?.();
   },
 });
 </script>
@@ -1212,14 +1237,38 @@ defineExpose({
       >
         重建向量索引
       </button>
+      <button
+        type="button"
+        class="appShellMenuItem"
+        role="menuitem"
+        @click="onAiAssistantHeaderMoreRebuildSegment"
+      >
+        重建词云分词
+      </button>
       <div class="appShellMenuDivider" role="separator" />
+      <button
+        type="button"
+        class="appShellMenuItem appShellMenuItem--warning"
+        role="menuitem"
+        @click="onAiAssistantHeaderMoreClearVectorIndex"
+      >
+        清除向量索引缓存
+      </button>
+      <button
+        type="button"
+        class="appShellMenuItem appShellMenuItem--warning"
+        role="menuitem"
+        @click="onAiAssistantHeaderMoreClearSegment"
+      >
+        清除词云分词缓存
+      </button>
       <button
         type="button"
         class="appShellMenuItem appShellMenuItem--danger"
         role="menuitem"
-        @click="onAiAssistantHeaderMoreClearCache"
+        @click="onAiAssistantHeaderMoreClearChatHistory"
       >
-        清除缓存
+        清除对话记录
       </button>
     </AppShellMenuTeleport>
     <AppShellMenuTeleport

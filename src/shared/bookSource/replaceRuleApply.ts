@@ -12,24 +12,42 @@ import {
   type ReplaceRule,
 } from "./replaceRule";
 
-export function scopeMatches(
-  haystack: string | null | undefined,
+/**
+ * 范围字符串是否命中当前书：范围包含完整书名，或包含书源 URL。
+ * 空 name/origin 不参与 `includes`（避免 JS `s.includes("")` 恒为 true）。
+ * 同一范围可拼多本书名以同时匹配（如 `《三体：第一部》《三体：第二部》`）。
+ */
+function scopeContainsBook(
+  scopeText: string,
   name: string,
   origin: string,
 ): boolean {
-  if (haystack == null || !String(haystack).trim()) return true;
-  const s = String(haystack);
-  return s.includes(name) || s.includes(origin);
+  const n = String(name ?? "");
+  const o = String(origin ?? "");
+  return (
+    (n.length > 0 && scopeText.includes(n)) ||
+    (o.length > 0 && scopeText.includes(o))
+  );
 }
 
-export function excludeMatches(
-  haystack: string | null | undefined,
+/** 空范围=全部；否则范围字符串需包含当前书名或书源 URL（对齐 Legado） */
+export function scopeMatches(
+  scope: string | null | undefined,
   name: string,
   origin: string,
 ): boolean {
-  if (haystack == null || !String(haystack).trim()) return false;
-  const s = String(haystack);
-  return s.includes(name) || s.includes(origin);
+  if (scope == null || !String(scope).trim()) return true;
+  return scopeContainsBook(String(scope), name, origin);
+}
+
+/** 空排除=不排除；否则范围包含当前书名或书源 URL 则排除（对齐 Legado） */
+export function excludeMatches(
+  excludeScope: string | null | undefined,
+  name: string,
+  origin: string,
+): boolean {
+  if (excludeScope == null || !String(excludeScope).trim()) return false;
+  return scopeContainsBook(String(excludeScope), name, origin);
 }
 
 /** 对齐 Legado `findEnabledByContentScope` / `findEnabledByTitleScope` */

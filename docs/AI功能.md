@@ -249,7 +249,7 @@ cardShellWrap（悬停抬高 z-index）
 | 工具参数 | `reasoning`、`title`、`mode`（`general` \| `semantic`）、`semanticQuery`（semantic 必填，贴近用户原话）、`scope`（`full` \| `chapter`）、`chapterIndex`、`maxWords`（未指定时用设置 **`wordcloudMaxWords`**，默认 **80**，范围 **10–200**） |
 | **general** | 全书或单章高频词：`@node-rs/jieba` 分词 + 停用词过滤；按章词频合并后取 Top N |
 | **semantic** | 两阶段：① 抽样章节 LLM **抽取**候选词项；② 全书计数后 LLM 按 **`semanticQuery`** **筛选**相关词（无预设语义类别，由用户原话驱动，如「武功招式」「角色名」等） |
-| 分词缓存 | 数据缓存根下 **`segment.sqlite`**（`aiSegmentCache.ts`）：按 **`bookHash` + chapterIndex** 缓存章级词频；章节正文变更时重建 |
+| 分词缓存 | 数据缓存根下 **`segment.sqlite`**（`segmentCache.ts`）：按 **`bookHash` + chapterIndex** 缓存章级词频；章节正文变更时按 content hash 重建；侧栏 **更多 → 重建词云分词**（`ai:segment:rebuildBook`）可全书预热 |
 | 防剧透 | 与阅读助手共用 **`spoilerSafe`**：统计章节范围不超过当前阅读章节 |
 | 进度 | 工具折叠区展示阶段标题（构建分词缓存、语义抽取/筛选等） |
 | 侧栏预览 | 与思维导图类似：缩略 Canvas、点击打开全屏；标题行 **`icons.wordcloud`** |
@@ -271,10 +271,10 @@ cardShellWrap（悬停抬高 z-index）
 - **入口**：编辑态顶栏「保存」右侧 **AI 智能排版**（全文，确认后执行；**`AppHeader`**，`canUseAiSmartFormat`）；右键 **AI 智能排版：选中文本** / **全文**。排版进行中或 Diff 预览时禁用编辑开关与智能排版按钮。
 - **分段**（`aiSmartFormat/aiSmartFormatSegments.ts`）：全文有章节表时按章切分，且**包含第一章标题前的内容**（书名、简介、序等）；单章或章前段超过 **8000 字**时再按字数切块（尽量在换行处断开）。无章节时整文按 8000 字切块。选区超过 **6000 字**时同样按 8000 字切块。仅需本地预处理（如仅清 HTML）且无 LLM 时可为单段同步完成。
 - **进度弹窗**（`AiSmartFormatProgressModal.vue`）：状态行固定 **正在处理…**；仅多段（`total > 1`）时显示 **当前进度：M/N**（`M` 在某段**处理完成**后更新）；需 LLM 时展示 **累计消耗 Token**（输入/缓存命中/输出与花费约，跨段累加，样式同 **`AiTokenUsageBanner`**，标签「累计消耗 Token」）。底栏 **停止**（`danger`）可中断：若已有成功变更的段落，进入 Diff 预览**仅含已完成段**对应行范围；若尚无成功段落则直接结束。停止提示为 **warning** Toast。
-- **流程**：内存中逐段调用对话模型（及本地预处理）→ 校验通过后合并为 **proposed** → 后置 **压缩空行** / **行首缩进** → 在原编辑器区域打开 **Monaco Diff**（左原文、右排版结果）。预览顶栏：**排版预览**、差异计数与 **上/下处差异**（`Ctrl+↑/↓`）、**空白差异** / **折叠未更改** 工具、**放弃** / **应用**。预览期间锁定编辑模式与保存；仍可对右侧 modified 模型执行顶栏 **格式化**（压缩空行、行首缩进；**未**单独挂接 **「格式化：转换」** 子菜单，见 [基础功能.md](./基础功能.md) → **「简繁与全半角转换」**）。**应用** 后一次性写回并选中变更范围；**放弃** 则主文档不变。
+- **流程**：内存中逐段调用对话模型（及本地预处理）→ 校验通过后合并为 **proposed** → 后置 **压缩空行** / **行首缩进** → 在原编辑器区域打开 **Monaco Diff**（左原文、右排版结果）。预览顶栏：**排版预览**、差异计数与 **上/下处差异**（`Ctrl+↑/↓`）、**空白差异** / **折叠未更改** 工具、**放弃** / **应用**。预览期 **`Ctrl+F` / 菜单「查找」** 打开 Monaco 查找栏（当前聚焦的 Diff 侧；无焦点时默认右侧 modified）。预览期间锁定编辑模式与保存；仍可对右侧 modified 模型执行顶栏 **格式化**（压缩空行、行首缩进；**未**单独挂接 **「格式化：转换」** 子菜单，见 [基础功能.md](./基础功能.md) → **「简繁与全半角转换」**）。**应用** 后一次性写回并选中变更范围；**放弃** 前经确认弹框，确认后关闭预览且主文档不变。
 - **类型与默认**（`@shared/aiSmartFormatTypes.ts`）：**`AiSmartFormatSettings`**、**`defaultAiSmartFormatSettings`**（乱码/屏蔽/水印/引流等默认开）、分段进度与 Review session 类型；**`aiSmartFormatHasAnyTask`** 判定是否至少启用一项任务。
 - **实现要点**：渲染侧 **`useAiSmartFormat.ts`**（管线与 session）、**`useReaderSmartFormatDiff.ts`** + **`monaco/readerDiffEditorOptions.ts`**（Diff 编辑器）、**`aiSmartFormat/*`**（分段、后置处理、Review 类型、放弃确认文案）；主进程 **`ai/chat/textFormatCleanup.ts`**（`ai:text-format:cleanup` / `abort`，经 **`registerAiIpc.ts`** 注册）。
-- **说明**：不能替代以正确编码重新打开文件；写回后不支持撤销；全书耗时与 Token 消耗随分段数增长。
+- **说明**：不能替代以正确编码重新打开文件；写回后不支持撤销；全书耗时与 Token 消耗随分段数增长。提示词与硬性约束均禁止「的 / 地 / 得」语法互替；段结果写回前会按原文还原此类替换（`revertDeDiDeParticleSubstitutions`）。
 
 ### Token 用量
 
@@ -359,7 +359,7 @@ cardShellWrap（悬停抬高 z-index）
 | `SettingsSkillEditModal.vue` | 自定义技能新建/编辑弹窗 |
 | `AppPullFlashButton.vue` | 设置面板内刷新模型/采样器列表等，完成态闪光反馈 |
 | `PathPickerInput.vue` | 目录选择（含 **角色立绘缓存根目录** 等） |
-| `AiAssistantPanel.vue` | 侧栏 AI 阅读助手主面板：会话、输入、`onAgentEvent`（流式增量、工具、`token_usage_*`、`done`/`error`）；历史列表会话名 **`title`** 悬停提示；**`findLiveAgentAssistant`**；受 **`showTokenUsage`** 控制 Token 条。<br>**导出**默认名 **`{书名}-{对话标题}[（带思考过程）].chat.{md\|json}`**（`aiAssistantExport.buildChatExportDefaultName`）。<br>**`prefillQuotedText(text)`**：阅读器 **「问 AI」** 填入 blockquote 引用并 autosize / 滚至光标 |
+| `AiAssistantPanel.vue` | 侧栏 AI 阅读助手主面板：会话、输入、`onAgentEvent`（流式增量、工具、`token_usage_*`、`done`/`error`）；历史列表会话名 **`title`** 悬停提示；**`findLiveAgentAssistant`**；受 **`showTokenUsage`** 控制 Token 条。<br>标题行 **更多**：重建向量索引 / 重建词云分词；清除向量索引缓存 / 清除词云分词缓存 / 清除对话记录（`ai:index:deleteBook` 仅向量；`ai:segment:deleteBook` / `ai:segment:rebuildBook`）。<br>**导出**默认名 **`{书名}-{对话标题}[（带思考过程）].chat.{md\|json}`**（`aiAssistantExport.buildChatExportDefaultName`）。<br>**`prefillQuotedText(text)`**：阅读器 **「问 AI」** 填入 blockquote 引用并 autosize / 滚至光标 |
 | `AiAssistantChatMessages.vue` | 消息列表：用户/助手气泡、思考块、工具折叠、**`AiMindmapView`** / **`AiWordcloudView`**（传入 `chapters`）；**`AiMarkdown`** 章节跳转；**`AiTokenUsageBanner`** |
 | `AiAssistantDetailsFold.vue` | 助手详情折叠（与 `directives/aiStickScroll`、`useAiFoldContentSelectAll` 配合） |
 | `AiToolFoldBody.vue` | 工具折叠正文；超长章压缩进度中 **`当前进度：M/N`** 高亮（`utils/aiToolFoldBody.ts`） |

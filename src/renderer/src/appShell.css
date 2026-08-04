@@ -197,25 +197,47 @@
   text-align: center;
 }
 
+/* 与 Monaco Diff 中间 sash 一致：4px 命中区、ew-resize、悬停延迟出蓝条、渐隐 */
 .resizer {
   position: absolute;
   top: 0;
   bottom: 0;
   z-index: 1000;
-  width: 6px;
+  width: var(--app-sash-size, 4px);
   margin-left: 0;
-  cursor: col-resize;
+  cursor: ew-resize;
+  touch-action: none;
+  background: transparent;
 }
 
-.resizer:hover {
-  background: var(--accent);
+.resizer::before {
+  content: "";
+  pointer-events: none;
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: var(--app-sash-hover-size, 4px);
+  left: calc(50% - (var(--app-sash-hover-size, 4px) / 2));
+  background: transparent;
+  transition: background-color var(--app-sash-fade-duration, 0.1s) ease-out;
+  transition-delay: 0s;
+}
+
+.resizer:hover::before {
+  background: var(--app-sash-hover-border, var(--accent));
+  transition-delay: var(--app-sash-hover-delay, 300ms);
+}
+
+.resizer.resizer--active::before {
+  background: var(--app-sash-hover-border, var(--accent));
+  transition-delay: 0s;
 }
 
 /* 全屏侧栏拖条在容器内，与指针同处于侧栏子树，移入拖条不会触发 mouseleave */
 .resizer.resizer--fullscreenSidebar {
   position: absolute;
   left: auto;
-  right: -3px;
+  right: calc(var(--app-sash-size, 4px) / -2);
   top: 0;
   bottom: 0;
   z-index: 10;

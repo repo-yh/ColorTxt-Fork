@@ -672,6 +672,16 @@ const api = {
       ipcRenderer.invoke("ai:index:deleteBook", bookHash) as Promise<{
         ok: boolean;
       }>,
+    indexDeleteAll: () =>
+      ipcRenderer.invoke("ai:index:deleteAll") as Promise<{ ok: boolean }>,
+    segmentDeleteBook: (bookHash: string) =>
+      ipcRenderer.invoke("ai:segment:deleteBook", bookHash) as Promise<{
+        ok: boolean;
+      }>,
+    segmentRebuildBook: (payload: { bookHash: string; chapterCount: number }) =>
+      ipcRenderer.invoke("ai:segment:rebuildBook", payload) as Promise<
+        { ok: true; chaptersBuilt: number } | { ok: false; error: string }
+      >,
     indexReplaceChunks: (bookHash: string, chunks: AIChunkRecord[]) =>
       ipcRenderer.invoke(
         "ai:index:replaceChunks",
@@ -831,6 +841,8 @@ const api = {
       ) as Promise<void>,
     threadDelete: (threadId: string) =>
       ipcRenderer.invoke("ai:thread:delete", threadId) as Promise<void>,
+    threadDeleteAll: () =>
+      ipcRenderer.invoke("ai:thread:deleteAll") as Promise<void>,
     threadDeleteEmptyForBook: (
       bookHash: string,
       exceptThreadId?: string | null,

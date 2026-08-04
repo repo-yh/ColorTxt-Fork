@@ -1006,6 +1006,12 @@ function unknownQuoteAttributions(
         roster.push({ displayName, aliases });
       }
       const includeEmotion = o.includeEmotion === true;
+      const contextBefore = Array.isArray(o.contextBefore)
+        ? o.contextBefore.filter((t): t is string => typeof t === "string")
+        : [];
+      const contextAfter = Array.isArray(o.contextAfter)
+        ? o.contextAfter.filter((t): t is string => typeof t === "string")
+        : [];
       if (!line.trim() || dialogueTexts.length === 0) {
         return {
           ok: true,
@@ -1036,6 +1042,8 @@ function unknownQuoteAttributions(
             dialogueTexts,
             roster,
             includeEmotion,
+            contextBefore,
+            contextAfter,
           });
         return {
           ok: true,

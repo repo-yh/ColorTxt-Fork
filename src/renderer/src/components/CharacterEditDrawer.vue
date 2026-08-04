@@ -30,6 +30,7 @@ import {
 } from "../constants/voiceRead";
 import { speakCharacterVoiceSample } from "../services/voiceRead/voiceReadCharacterPreview";
 import { fetchMinimaxVoiceCatalog } from "../services/voiceRead/minimaxVoiceCatalog";
+import { fetchWinSapiVoiceCatalog } from "../services/voiceRead/winSapiVoiceCatalog";
 import { VoiceReadLinePlayer } from "../services/voiceRead/voiceReadLinePlayer";
 import {
   getVoiceGroupsForEngine,
@@ -218,6 +219,9 @@ watch(
   ([engine, apiKey]) => {
     if (engine === "minimax" && apiKey) {
       void fetchMinimaxVoiceCatalog(props.voiceReadSettings.engineConfig);
+    }
+    if (engine === "winSapi") {
+      void fetchWinSapiVoiceCatalog(props.voiceReadSettings.engineConfig);
     }
   },
   { immediate: true },

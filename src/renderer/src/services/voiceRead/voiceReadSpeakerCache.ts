@@ -54,6 +54,7 @@ export function voiceReadSpeakerCacheKey(
   dialogueTexts: string[],
   roster: readonly CharacterRosterEntry[],
   includeEmotion = false,
+  contextToken = "",
 ): VoiceReadSpeakerCacheKey {
   return [
     bookPath,
@@ -63,6 +64,7 @@ export function voiceReadSpeakerCacheKey(
     String(rosterVersion),
     rosterVersionToken(roster),
     includeEmotion ? "emo1" : "emo0",
+    contextToken,
   ].join("\u0003");
 }
 
@@ -130,6 +132,7 @@ export async function attributeDialogueQuotes(
   roster: readonly CharacterRosterEntry[],
   cacheKey: VoiceReadSpeakerCacheKey,
   includeEmotion = false,
+  context?: { before?: string[]; after?: string[] },
 ): Promise<VoiceReadSpeakerAttributionResult> {
   if (quoteTexts.length === 0) {
     return { quotes: [], narrationEmotion: VOICE_READ_EMOTION_AUTO };
@@ -144,6 +147,12 @@ export async function attributeDialogueQuotes(
     displayName: r.displayName,
     aliases: parseCharacterAliasesInput(r.aliases),
   }));
+  const contextBefore = (context?.before ?? [])
+    .map((t) => t.trim())
+    .filter(Boolean);
+  const contextAfter = (context?.after ?? [])
+    .map((t) => t.trim())
+    .filter(Boolean);
 
   const work = window.colorTxt
     .voiceReadAttributeSpeakers({
@@ -151,6 +160,8 @@ export async function attributeDialogueQuotes(
       dialogueTexts: quoteTexts,
       roster: rosterPayload,
       includeEmotion,
+      contextBefore,
+      contextAfter,
     })
     .then((r) => {
       if (r.ok) {

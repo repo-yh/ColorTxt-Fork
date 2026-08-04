@@ -275,6 +275,13 @@ export function deleteBookIndex(bookHash: string): void {
   tx();
 }
 
+/** 清空全部向量索引与分块（保留会话表与当前嵌入维度）。 */
+export function deleteAllBookIndexes(): void {
+  if (!db || !openedDim) throw new Error("AI vector DB not opened");
+  dropVecTables(db);
+  createVecTables(db, openedDim);
+}
+
 export function insertChunksBatch(records: AIChunkRecord[]): void {
   if (records.length === 0) return;
   const database = getAiVectorDb();
@@ -463,6 +470,16 @@ export function touchThread(threadId: string): void {
 export function deleteThread(threadId: string): void {
   const database = getAiVectorDb();
   database.prepare(`DELETE FROM threads WHERE id = ?`).run(threadId);
+}
+
+/** 删除全部会话与消息（向量分块 / 分词缓存不动）。 */
+export function deleteAllThreads(): void {
+  const database = getAiVectorDb();
+  const run = database.transaction(() => {
+    database.prepare(`DELETE FROM messages`).run();
+    database.prepare(`DELETE FROM threads`).run();
+  });
+  run();
 }
 
 /**

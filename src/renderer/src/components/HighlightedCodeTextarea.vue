@@ -14,10 +14,12 @@ const props = withDefaults(
     maxHeight?: number;
     /** 为 false 时仅作普通自动增高 textarea（无叠层着色） */
     highlight?: boolean;
+    placeholder?: string;
   }>(),
   {
     maxHeight: undefined,
     highlight: true,
+    placeholder: "",
   },
 );
 
@@ -295,6 +297,7 @@ defineExpose({ resize, focus, textareaRef });
       autocapitalize="off"
       autocomplete="off"
       autocorrect="off"
+      :placeholder="placeholder"
       @input="onInput"
       @keydown="onKeydown"
       @scroll="onScroll"

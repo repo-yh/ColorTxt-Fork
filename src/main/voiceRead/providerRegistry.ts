@@ -10,6 +10,7 @@ import { dashscopeTtsProvider } from "./providers/dashscopeProvider";
 import { edgeTtsProvider } from "./providers/edgeProvider";
 import { mimoTtsProvider } from "./providers/mimoProvider";
 import { minimaxTtsProvider } from "./providers/minimaxProvider";
+import { winSapiTtsProvider } from "./providers/winSapiProvider";
 import type { VoiceReadTtsProvider } from "./providers/types";
 
 const PROVIDERS: VoiceReadTtsProvider[] = [
@@ -17,6 +18,7 @@ const PROVIDERS: VoiceReadTtsProvider[] = [
   dashscopeTtsProvider,
   minimaxTtsProvider,
   mimoTtsProvider,
+  ...(process.platform === "win32" ? [winSapiTtsProvider] : []),
 ];
 
 const PROVIDER_MAP = new Map<VoiceReadEngineId, VoiceReadTtsProvider>(

@@ -39,6 +39,9 @@ export const VOICE_READ_ENGINE_DEFAULTS: Record<
   system: {
     voiceId: "",
   },
+  winSapi: {
+    voiceId: "",
+  },
   dashscope: {
     voiceId: "Eldric Sage",
     model: "qwen3-tts-instruct-flash",

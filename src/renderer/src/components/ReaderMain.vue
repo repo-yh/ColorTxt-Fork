@@ -125,6 +125,7 @@ import type {
 import { useReaderAnnotations } from "../composables/useReaderAnnotations";
 import { annotationMarkerCssRules } from "../reader/readerAnnotationDecor";
 import { floorReadingPercentFromScrollRatio } from "../utils/format";
+import { bookTitleForExport } from "../utils/readerAnnotationExport";
 import {
   hasEscBeforeModalLayers,
   hasModalOnStack,
@@ -193,11 +194,22 @@ const editorEditContextMenuItems = computed(() => {
     separator?: boolean;
     disabled?: boolean;
     iconHtml?: string;
-  }> = [
+  }> = [];
+  if (!props.readerEditMode) {
+    items.push({
+      id: "copy",
+      label: "复制",
+      disabled: !editorEditContextMenuHasSelection.value,
+    });
+    items.push({ id: "sep-select-all", separator: true });
+    items.push({ id: "selectAll", label: "全选" });
+    return items;
+  }
+  items.push(
     { id: "cut", label: "剪切" },
     { id: "copy", label: "复制" },
     { id: "paste", label: "粘贴" },
-  ];
+  );
   if (
     props.aiFeaturesEnabled &&
     props.canUseAiSmartFormat &&
@@ -854,6 +866,7 @@ function restoreViewportToRestoreAnchor(
             anchor.physicalLine,
             m.getLineCount(),
             displayLineToPhysicalLine,
+            (d) => m.getLineContent(d),
           );
           e.setPosition({ lineNumber: displayLine, column: 1 });
         } else if (anchor.physicalLine >= m.getLineCount()) {
@@ -997,10 +1010,17 @@ async function applyEditFormatTextConvertDigits(
 async function applyEditFormatTextReplace(
   rules: readonly ReplaceRule[],
 ): Promise<boolean> {
+  const path =
+    props.physicalReaderPath?.trim() || props.readerFilePath?.trim() || "";
+  const base = path
+    ? path.replace(/\\/g, "/").split("/").pop() || path
+    : "";
+  const title = base ? bookTitleForExport(base) : "";
+  const bookName = title && title !== "未命名" ? title : base;
   return applyEditFormat((plain) => ({
     text: applyReplaceRulesToText(
       plain,
-      filterEnabledReplaceRules([...rules], "", "", "content"),
+      filterEnabledReplaceRules([...rules], bookName, "", "content"),
     ),
   }));
 }
@@ -2157,15 +2177,21 @@ function onEditorEditContextMenuSelect(id: string) {
   closeEditorEditContextMenu();
   if (smartFormatReviewActive.value) return;
   const e = editor.value;
-  if (!e || smartFormatRunning.value) return;
-  if (id === "cut") {
-    e.focus();
-    e.trigger("keyboard", "editor.action.clipboardCutAction", null);
-    return;
-  }
+  if (!e) return;
   if (id === "copy") {
     e.focus();
     e.trigger("keyboard", "editor.action.clipboardCopyAction", null);
+    return;
+  }
+  if (id === "selectAll") {
+    e.focus();
+    e.trigger("keyboard", "editor.action.selectAll", null);
+    return;
+  }
+  if (!props.readerEditMode || smartFormatRunning.value) return;
+  if (id === "cut") {
+    e.focus();
+    e.trigger("keyboard", "editor.action.clipboardCutAction", null);
     return;
   }
   if (id === "paste") {
@@ -2183,9 +2209,23 @@ function onEditorEditContextMenuSelect(id: string) {
 
 const FIND_CONTROLLER_ID = "editor.contrib.findController";
 
+/** 查找目标：Diff 预览时用当前聚焦侧（默认右侧 modified），否则用主编辑器 */
+function getFindTargetEditor(): monaco.editor.ICodeEditor | null {
+  if (smartFormatReviewActive.value) {
+    const diff = smartFormatDiffEditor.value;
+    if (!diff) return null;
+    const original = diff.getOriginalEditor();
+    const modified = diff.getModifiedEditor();
+    if (original.hasTextFocus()) return original;
+    if (modified.hasTextFocus()) return modified;
+    return modified;
+  }
+  return editor.value;
+}
+
 function toggleFindWidget() {
   if (props.voiceReadBlocksFind) return;
-  const e = editor.value;
+  const e = getFindTargetEditor();
   if (!e) return;
   const findCtrl = e.getContribution(FIND_CONTROLLER_ID) as {
     getState?: () => { isRevealed: boolean };
@@ -2209,6 +2249,17 @@ function toggleFindWidget() {
 }
 
 function isFindWidgetRevealed(): boolean {
+  if (smartFormatReviewActive.value) {
+    const diff = smartFormatDiffEditor.value;
+    if (!diff) return false;
+    for (const ed of [diff.getModifiedEditor(), diff.getOriginalEditor()]) {
+      const findCtrl = ed.getContribution(FIND_CONTROLLER_ID) as {
+        getState?: () => { isRevealed: boolean };
+      } | null;
+      if (findCtrl?.getState?.().isRevealed === true) return true;
+    }
+    return false;
+  }
   const e = editor.value;
   if (!e) return false;
   const findCtrl = e.getContribution(FIND_CONTROLLER_ID) as {
@@ -2219,18 +2270,28 @@ function isFindWidgetRevealed(): boolean {
 
 /** 全屏顶栏收起等场景：仅当查找栏已显示时关闭，不打开查找栏 */
 function closeFindWidgetIfRevealed() {
-  const e = editor.value;
-  if (!e) return;
-  const findCtrl = e.getContribution(FIND_CONTROLLER_ID) as {
-    getState?: () => { isRevealed: boolean };
-    closeFindWidget?: () => void;
-  } | null;
-  if (findCtrl?.getState?.().isRevealed !== true) return;
-  if (findCtrl.closeFindWidget) {
-    findCtrl.closeFindWidget();
+  const closeOn = (e: monaco.editor.ICodeEditor) => {
+    const findCtrl = e.getContribution(FIND_CONTROLLER_ID) as {
+      getState?: () => { isRevealed: boolean };
+      closeFindWidget?: () => void;
+    } | null;
+    if (findCtrl?.getState?.().isRevealed !== true) return;
+    if (findCtrl.closeFindWidget) {
+      findCtrl.closeFindWidget();
+      return;
+    }
+    e.getAction("closeFindWidget")?.run();
+  };
+  if (smartFormatReviewActive.value) {
+    const diff = smartFormatDiffEditor.value;
+    if (!diff) return;
+    closeOn(diff.getModifiedEditor());
+    closeOn(diff.getOriginalEditor());
     return;
   }
-  e.getAction("closeFindWidget")?.run();
+  const e = editor.value;
+  if (!e) return;
+  closeOn(e);
 }
 
 type FindControllerStartOpts = {
@@ -2251,7 +2312,7 @@ function openFindWithSearchString(raw: string, isRegex?: boolean, direction?: 'p
 
 async function openFindWithSearchStringAsync(raw: string, isRegex?: boolean, direction?: 'prev') {
   if (props.voiceReadBlocksFind) return;
-  const e = editor.value;
+  const e = getFindTargetEditor();
   const term = raw.trim();
   if (!e || !term) return;
 
@@ -2329,6 +2390,10 @@ async function openFindWithSearchStringAsync(raw: string, isRegex?: boolean, dir
 }
 
 function focusEditor() {
+  if (smartFormatReviewActive.value) {
+    getFindTargetEditor()?.focus();
+    return;
+  }
   editor.value?.focus();
 }
 
@@ -2659,7 +2724,16 @@ defineExpose({
   setPendingEbookInternalLinkSidecar,
   shiftPendingEbookSidecarForDeletedDisplayLines,
   getEbookLeadingLinkLabelsByDisplayLine,
-  getReaderEditorDomNode: () => editor.value?.getDomNode() ?? null,
+  getReaderEditorDomNode: () => {
+    if (smartFormatReviewActive.value) {
+      return (
+        diffHostEl.value ??
+        smartFormatDiffEditor.value?.getModifiedEditor().getDomNode() ??
+        null
+      );
+    }
+    return editor.value?.getDomNode() ?? null;
+  },
   // Highlight-term utilities
   countHighlightTermMatches,
   // Annotation utilities
@@ -2838,23 +2912,18 @@ onMounted(() => {
         mouseEv.event.stopPropagation();
         return;
       }
-      if (props.readerEditMode) {
-        if (smartFormatRunning.value) {
-          mouseEv.event.preventDefault();
-          mouseEv.event.stopPropagation();
-          return;
-        }
+      if (props.readerEditMode && smartFormatRunning.value) {
         mouseEv.event.preventDefault();
         mouseEv.event.stopPropagation();
-        const sel = e.getSelection();
-        editorEditContextMenuHasSelection.value = Boolean(
-          sel && !sel.isEmpty(),
-        );
-        editorEditContextMenuX.value = mouseEv.event.browserEvent.clientX;
-        editorEditContextMenuY.value = mouseEv.event.browserEvent.clientY;
-        editorEditContextMenuOpen.value = true;
         return;
       }
+      mouseEv.event.preventDefault();
+      mouseEv.event.stopPropagation();
+      const sel = e.getSelection();
+      editorEditContextMenuHasSelection.value = Boolean(sel && !sel.isEmpty());
+      editorEditContextMenuX.value = mouseEv.event.browserEvent.clientX;
+      editorEditContextMenuY.value = mouseEv.event.browserEvent.clientY;
+      editorEditContextMenuOpen.value = true;
     });
     saveCommandDisposable = e.addAction({
       id: "colortxt.readerEdit.save",
@@ -3161,7 +3230,7 @@ watch(smartFormatReviewActive, (active) => {
       :x="editorEditContextMenuX"
       :y="editorEditContextMenuY"
       :items="editorEditContextMenuItems"
-      :min-width="200"
+      :min-width="readerEditMode ? 200 : 96"
       @close="closeEditorEditContextMenu"
       @select="onEditorEditContextMenuSelect"
     />
@@ -3170,7 +3239,7 @@ watch(smartFormatReviewActive, (active) => {
       :x="diffReviewContextMenuX"
       :y="diffReviewContextMenuY"
       :items="diffReviewContextMenuItems"
-      :min-width="200"
+      :min-width="96"
       @close="closeDiffReviewContextMenu"
       @select="onDiffReviewContextMenuSelect"
     />

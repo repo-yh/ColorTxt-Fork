@@ -2,7 +2,7 @@ import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 
 import type { VoiceReadEngineConfig } from "@shared/voiceReadEngineConfig";
-import { MIMO_API_BASE_URL } from "@shared/apiEndpointPresets";
+import { resolveMimoApiBaseUrlFromApiKey } from "@shared/apiEndpointPresets";
 import { defaultVoiceIdForEngine } from "@shared/voiceReadEngineDefaults";
 import { mapEmotionForMimo } from "@shared/voiceReadEmotion";
 import { arrayBufferForIpc } from "@shared/voiceReadIpcSerialize";
@@ -19,10 +19,19 @@ import type {
 } from "@shared/voiceReadSynthesis";
 import type { VoiceReadTtsProvider } from "./types";
 
-const MIMO_API_ROOT = MIMO_API_BASE_URL.replace(/\/$/, "");
-const MIMO_TTS_URL = `${MIMO_API_ROOT}/chat/completions`;
-const MIMO_MODELS_URL = `${MIMO_API_ROOT}/models`;
 const MAX_REFERENCE_AUDIO_BYTES = 10 * 1024 * 1024;
+
+function mimoApiRootFromKey(apiKey: string): string {
+  return resolveMimoApiBaseUrlFromApiKey(apiKey).replace(/\/$/, "");
+}
+
+function mimoTtsUrl(apiKey: string): string {
+  return `${mimoApiRootFromKey(apiKey)}/chat/completions`;
+}
+
+function mimoModelsUrl(apiKey: string): string {
+  return `${mimoApiRootFromKey(apiKey)}/models`;
+}
 
 type ReferenceAudioDataUrlCacheEntry = {
   dataUrl: string;
@@ -220,7 +229,7 @@ export const mimoTtsProvider: VoiceReadTtsProvider = {
     messages.push({ role: "assistant", content: req.text });
     const audio = await buildMimoAudioPayload(req, model, req.engineConfig);
 
-    const resp = await fetch(MIMO_TTS_URL, {
+    const resp = await fetch(mimoTtsUrl(apiKey), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -284,18 +293,22 @@ export const mimoTtsProvider: VoiceReadTtsProvider = {
       if (!apiKey) {
         return { ok: false, message: "请先填写 API 密钥" };
       }
-      const resp = await fetch(MIMO_MODELS_URL, {
+      const base = resolveMimoApiBaseUrlFromApiKey(apiKey);
+      const resp = await fetch(mimoModelsUrl(apiKey), {
         method: "GET",
         headers: { "api-key": apiKey },
         signal,
       });
       if (resp.ok) {
-        return { ok: true, message: "连接成功" };
+        return { ok: true, message: `连接成功（${base}）` };
       }
       if (resp.status === 401 || resp.status === 403) {
-        return { ok: false, message: "API 密钥无效" };
+        return {
+          ok: false,
+          message: `API 密钥无效（已请求 ${base}；Token Plan 请使用 tp- 密钥，按量付费请使用 sk- 密钥）`,
+        };
       }
-      return { ok: false, message: `HTTP ${resp.status}` };
+      return { ok: false, message: `HTTP ${resp.status}（${base}）` };
     } catch (e) {
       return {
         ok: false,

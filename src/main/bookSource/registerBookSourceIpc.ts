@@ -46,6 +46,7 @@ import {
 } from "./engine/loginCheck";
 import { runChapterPayAction } from "./engine/payAction";
 import { clearExploreKindsCache, getExploreKinds } from "./engine/exploreKinds";
+import { fetchViaChromiumNet } from "./engine/chromiumNetFetch";
 import {
   exploreBook,
   getBookInfo,
@@ -136,9 +137,13 @@ export function registerBookSourceIpcHandlers(): void {
       return { ok: false, message: "URL 无效" };
     }
     try {
-      const res = await fetch(url.trim());
-      const text = await res.text();
-      return { ok: true, text };
+      // 与书源请求一致：undici 失败时回退 Chromium session（部分站点 Node TLS 会被重置）
+      const res = await fetchViaChromiumNet({
+        url: url.trim(),
+        method: "GET",
+        timeoutMs: 30_000,
+      });
+      return { ok: true, text: res.body };
     } catch (e) {
       return {
         ok: false,

@@ -1,12 +1,101 @@
 import type { AiSmartFormatUnifyDialogueQuotes } from "./aiSmartFormatTypes";
 
+const CORE_STRIP_PUNCT_RE =
+  /[\u201c\u201d\u2018\u2019，。！？、；：""''「」『』《》【】（）()\[\]{}…—\-·,.!?;:'"`~@#$%^&*+=|\\/<>]/;
+const CORE_STRIP_WS_RE = /[\s\r\n\t\u3000\u00a0]/;
+/** 结构助词「的/地/得」：网络小说口语常混用，智能排版不应互替 */
+const DE_DI_DE_PARTICLES = new Set(["的", "地", "得"]);
+
+function isFormatCoreChar(ch: string): boolean {
+  return !CORE_STRIP_WS_RE.test(ch) && !CORE_STRIP_PUNCT_RE.test(ch);
+}
+
 /** 提取用于保真校验的核心字序（去空白与常见标点） */
 export function extractCoreCharSequence(text: string): string {
-  const stripped = text.replace(/[\s\r\n\t\u3000\u00a0]/g, "");
-  return stripped.replace(
-    /[\u201c\u201d\u2018\u2019，。！？、；：""''「」『』《》【】（）()\[\]{}…—\-·,.!?;:'"`~@#$%^&*+=|\\/<>]/g,
-    "",
-  );
+  let out = "";
+  for (const ch of text) {
+    if (isFormatCoreChar(ch)) out += ch;
+  }
+  return out;
+}
+
+/**
+ * 将输出中相对输入发生的「的/地/得」互替还原为原文用字。
+ * 按核心字序双指针对齐；遇删增时小窗前瞻重同步，避免误伤乱码/屏蔽还原。
+ */
+export function revertDeDiDeParticleSubstitutions(
+  input: string,
+  output: string,
+): string {
+  if (!input || !output || input === output) return output;
+  const inn = Array.from(input);
+  const out = Array.from(output);
+  let i = 0;
+  let j = 0;
+  const LOOK = 12;
+
+  const nextCore = (
+    chars: string[],
+    start: number,
+  ): { ch: string; idx: number } | null => {
+    for (let k = start; k < chars.length; k++) {
+      const ch = chars[k]!;
+      if (isFormatCoreChar(ch)) return { ch, idx: k };
+    }
+    return null;
+  };
+
+  while (i < inn.length && j < out.length) {
+    const a = nextCore(inn, i);
+    const b = nextCore(out, j);
+    if (!a || !b) break;
+    i = a.idx;
+    j = b.idx;
+    if (a.ch === b.ch) {
+      i++;
+      j++;
+      continue;
+    }
+    if (DE_DI_DE_PARTICLES.has(a.ch) && DE_DI_DE_PARTICLES.has(b.ch)) {
+      out[j] = a.ch;
+      i++;
+      j++;
+      continue;
+    }
+    // 输入侧被删：在后续窗口内找与当前输出字对齐的位置
+    let resynced = false;
+    for (let k = 1; k <= LOOK && i + k < inn.length; k++) {
+      const ch = inn[i + k]!;
+      if (!isFormatCoreChar(ch)) continue;
+      if (
+        ch === b.ch ||
+        (DE_DI_DE_PARTICLES.has(ch) && DE_DI_DE_PARTICLES.has(b.ch))
+      ) {
+        i = i + k;
+        resynced = true;
+        break;
+      }
+    }
+    if (resynced) continue;
+    // 输出侧插入：跳过输出窗口
+    for (let k = 1; k <= LOOK && j + k < out.length; k++) {
+      const ch = out[j + k]!;
+      if (!isFormatCoreChar(ch)) continue;
+      if (
+        ch === a.ch ||
+        (DE_DI_DE_PARTICLES.has(ch) && DE_DI_DE_PARTICLES.has(a.ch))
+      ) {
+        j = j + k;
+        resynced = true;
+        break;
+      }
+    }
+    if (resynced) continue;
+    // 其它一对一替换（乱码/屏蔽还原等）：保留输出，继续对齐
+    i++;
+    j++;
+  }
+  return out.join("");
 }
 
 export type FormatOutputValidationResult = {

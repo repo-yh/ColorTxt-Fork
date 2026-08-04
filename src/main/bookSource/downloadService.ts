@@ -1,4 +1,4 @@
-import { access, mkdir, writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import iconv from "iconv-lite";
@@ -76,12 +76,8 @@ async function writeDownloadFile(
   fullText: string,
 ): Promise<string> {
   await mkdir(outputDir, { recursive: true });
-  let filePath = path.join(outputDir, `${baseName}.txt`);
-  let n = 1;
-  while (await fileExists(filePath)) {
-    filePath = path.join(outputDir, `${baseName}_${n}.txt`);
-    n += 1;
-  }
+  // 同名直接覆盖：重复下载通常是为了更新内容，加后缀会在「文件」列表留下多余副本
+  const filePath = path.join(outputDir, `${baseName}.txt`);
   await writeFile(filePath, iconv.encode(fullText, "utf8"));
   return filePath;
 }
@@ -244,14 +240,5 @@ async function runDownload(
     emit({ downloadId, type: "error", message: msg });
   } finally {
     sessions.delete(downloadId);
-  }
-}
-
-async function fileExists(p: string): Promise<boolean> {
-  try {
-    await access(p);
-    return true;
-  } catch {
-    return false;
   }
 }

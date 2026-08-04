@@ -31,11 +31,35 @@ export const MINIMAX_API_KEY_CONSOLE_URL =
 /** 小米 MiMo 平台统一品牌名（对话、语音朗读 TTS 等） */
 export const MIMO_PLATFORM_LABEL = "小米 MiMo";
 
-/** 小米 MiMo 官方 OpenAI 兼容 API Base URL */
+/** 小米 MiMo 官方 OpenAI 兼容 API Base URL（按量付费 `sk-`） */
 export const MIMO_API_BASE_URL = "https://api.xiaomimimo.com/v1";
+
+/**
+ * Token Plan OpenAI 兼容 Base URL（中国集群）。
+ * `tp-` 密钥需走此网关；新加坡 / 欧洲见官方控制台，语音朗读默认中国集群。
+ */
+export const MIMO_TOKEN_PLAN_CN_API_BASE_URL =
+  "https://token-plan-cn.xiaomimimo.com/v1";
 
 /** 小米 MiMo 官方开放平台控制台 */
 export const MIMO_API_KEY_CONSOLE_URL = "https://platform.xiaomimimo.com/";
+
+/** 是否为 Token Plan 专属 API Key（`tp-xxxxx`） */
+export function isMimoTokenPlanApiKey(apiKey: string): boolean {
+  return apiKey.trim().toLowerCase().startsWith("tp-");
+}
+
+/**
+ * 按密钥前缀解析 MiMo OpenAI 兼容 Base URL（去尾斜杠前由调用方再处理亦可）。
+ * - `tp-` → Token Plan 中国集群
+ * - 其余（含 `sk-`）→ 按量付费官方地址
+ */
+export function resolveMimoApiBaseUrlFromApiKey(apiKey: string): string {
+  if (isMimoTokenPlanApiKey(apiKey)) {
+    return MIMO_TOKEN_PLAN_CN_API_BASE_URL;
+  }
+  return MIMO_API_BASE_URL;
+}
 
 /** 对话 API 推荐服务商（OpenAI 兼容 /chat/completions） */
 export type ChatApiProviderPreset = {

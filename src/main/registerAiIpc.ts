@@ -71,7 +71,11 @@ import {
   runPortraitPromptZhToEn,
   runTxt2ImgToAbsolutePath,
 } from "./ai/tools/characterPortrait";
-import { deleteBookSegmentCache } from "./ai/rag/segmentCache";
+import {
+  deleteAllSegmentCache,
+  deleteBookSegmentCache,
+} from "./ai/rag/segmentCache";
+import { rebuildBookSegmentCache } from "./ai/rag/rebuildBookSegmentCache";
 import { adaptPortraitPromptForBackend } from "./ai/txt2img/promptAdapt";
 import { testTxt2ImgConnection } from "./ai/txt2img/testConnection";
 import { isTxt2ImgBackend, txt2ImgRequiresApiKey } from "@shared/txt2ImgBackend";
@@ -79,7 +83,9 @@ import {
   appendMessage,
   createThread,
   deleteBookIndex,
+  deleteAllBookIndexes,
   deleteThread,
+  deleteAllThreads,
   deleteEmptyThreadsForBook,
   indexHasBook,
   insertChunksBatch,
@@ -558,7 +564,53 @@ export function registerAiIpcHandlers(): void {
       openOrRecreateAiVectorDb(c.embedding.dimension);
       if (typeof bookHash !== "string") return { ok: false };
       deleteBookIndex(bookHash);
+      return { ok: true };
+    },
+  );
+
+  ipcMain.handle(
+    "ai:segment:deleteBook",
+    async (_evt, bookHash: unknown): Promise<{ ok: boolean }> => {
+      const c = await cfg();
+      if (typeof bookHash !== "string") return { ok: false };
       deleteBookSegmentCache(bookHash, c);
+      return { ok: true };
+    },
+  );
+
+  ipcMain.handle(
+    "ai:segment:rebuildBook",
+    async (
+      evt,
+      payload: unknown,
+    ): Promise<
+      { ok: true; chaptersBuilt: number } | { ok: false; error: string }
+    > => {
+      const c = await cfg();
+      if (!isRecord(payload)) return { ok: false, error: "无效参数" };
+      const bookHash =
+        typeof payload.bookHash === "string" ? payload.bookHash : "";
+      const chapterCount = Number(payload.chapterCount);
+      if (!bookHash.trim()) return { ok: false, error: "无效 bookHash" };
+      if (!Number.isFinite(chapterCount) || chapterCount <= 0) {
+        return { ok: false, error: "没有可分词的章节" };
+      }
+      return rebuildBookSegmentCache({
+        webContents: evt.sender,
+        bookHash,
+        chapterCount: Math.trunc(chapterCount),
+        aiConfig: c,
+      });
+    },
+  );
+
+  ipcMain.handle(
+    "ai:index:deleteAll",
+    async (): Promise<{ ok: boolean }> => {
+      const c = await cfg();
+      openOrRecreateAiVectorDb(c.embedding.dimension);
+      deleteAllBookIndexes();
+      deleteAllSegmentCache(c);
       return { ok: true };
     },
   );
@@ -1123,6 +1175,12 @@ function formatChatConnectionTestError(status: number, raw: string): string {
     openOrRecreateAiVectorDb(c.embedding.dimension);
     if (typeof threadId !== "string") return;
     deleteThread(threadId);
+  });
+
+  ipcMain.handle("ai:thread:deleteAll", async () => {
+    const c = await cfg();
+    openOrRecreateAiVectorDb(c.embedding.dimension);
+    deleteAllThreads();
   });
 
   ipcMain.handle(

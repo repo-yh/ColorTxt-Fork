@@ -90,6 +90,8 @@ import { isEbookFilePath, isMarkdownFilePath, isPlainTextBookPath } from "./eboo
 import { useAppVoiceRead } from "./composables/useAppVoiceRead";
 import { useAppTimedScroll } from "./composables/useAppTimedScroll";
 import { useTxtStreamPipeline } from "./composables/useTxtStreamPipeline";
+import { basenameFromPath } from "./services/fileListService";
+import { bookTitleForExport } from "./utils/readerAnnotationExport";
 import { fileHistoryKey } from "./stores/recentHistoryStore";
 import {
   clampLineationLastColorsToCount,
@@ -164,6 +166,7 @@ import {
   minChapterMinCharCount,
   minLineHeightMultiple,
   SIDEBAR_ACTIVITY_BAR_WIDTH,
+  APP_DISPLAY_NAME,
   type ReaderSurfaceColorEnabled,
   type ReaderSurfacePalette,
 } from "./constants/appUi";
@@ -196,6 +199,7 @@ import {
 } from "./constants/lineationColors";
 import { formatCharCount, formatFileSize } from "./utils/format";
 import { resolveDefaultUnpackedBooksDirSync } from "./utils/defaultCacheDirs";
+import { clearAiReadingTracesForBook } from "./utils/clearAiChatForBook";
 import { joinFs } from "./ebook/pathUtils";
 import { buildWebDavAuth } from "./utils/webDavAuth";
 import { READER_EDITOR_DEFAULT_FONT_FAMILY } from "./monaco/readerEditorOptions";
@@ -339,13 +343,23 @@ const chapterRuleErrorText = ref("");
 const chapterRuleState = ref(getChapterMatchRules());
 /** 主窗口文本替换规则（localStorage，与找书分键） */
 const cachedReplaceRules = ref<ReplaceRule[]>([]);
-const textReplaceActive = computed(
-  () =>
-    filterEnabledReplaceRules(cachedReplaceRules.value, "", "", "content")
+/** 替换范围匹配 / 建议用的「书名」= 当前打开文件名去掉常见后缀（如 foo.epub.md → foo） */
+const replaceRuleScopeBookName = computed(() => {
+  const p = currentFile.value?.trim();
+  if (!p) return "";
+  const base = basenameFromPath(p);
+  const title = bookTitleForExport(base);
+  return title === "未命名" ? base : title;
+});
+const textReplaceActive = computed(() => {
+  const name = replaceRuleScopeBookName.value;
+  return (
+    filterEnabledReplaceRules(cachedReplaceRules.value, name, "", "content")
       .length > 0 ||
-    filterEnabledReplaceRules(cachedReplaceRules.value, "", "", "title")
-      .length > 0,
-);
+    filterEnabledReplaceRules(cachedReplaceRules.value, name, "", "title")
+      .length > 0
+  );
+});
 
 function refreshReplaceRulesCache() {
   cachedReplaceRules.value = listReplaceRulesLocal("app");
@@ -973,6 +987,7 @@ const stream = useTxtStreamPipeline({
   textConvertLetter,
   textConvertDigit,
   replaceRules: cachedReplaceRules,
+  replaceRuleBookName: replaceRuleScopeBookName,
   chapterMinCharCount,
   currentFileIsMarkdown,
   afterFullTextInstalled: () => afterStreamFullTextInstalled(),
@@ -1105,6 +1120,7 @@ const {
   persistWindowUnloadState,
   persistFileListCache,
   persistFileMeta,
+  removeFileMetaPaths,
   persistRecentFiles,
   touchRecentFile,
   upsertBookmark,
@@ -1540,17 +1556,10 @@ function onOpenFileInNewWindow(path: string) {
 
 function onClearFileMeta(path: string) {
   const key = fileHistoryKey(path);
-  const next = fileMetaRecords.value.filter(
-    (m) => fileHistoryKey(m.path) !== key,
-  );
-  if (next.length === fileMetaRecords.value.length) return;
-  fileMetaRecords.value = next;
-  if (metaProgressByPathKey.value.has(key)) {
-    const m = new Map(metaProgressByPathKey.value);
-    m.delete(key);
-    metaProgressByPathKey.value = m;
+  if (!fileMetaRecords.value.some((m) => fileHistoryKey(m.path) === key)) {
+    return;
   }
-  persistFileMeta();
+  removeFileMetaPaths([key]);
 }
 
 function metaHasClearableReadingData(rec: FileMetaRecord | undefined): boolean {
@@ -1618,9 +1627,47 @@ async function removePortraitCacheForBook(bookPath: string) {
   }
 }
 
+/** 与 AI 助手一致：会话路径 + 正文文件 size/mtime → bookHash，再删对话/向量/分词 */
+async function clearAiReadingTracesForReadingDataPath(
+  sessionPath: string,
+  meta: FileMetaRecord | null | undefined,
+): Promise<void> {
+  const session = sessionPath.trim();
+  if (!session) return;
+  const sessionKey = normalizeFileMetaPathKey(session);
+  const curKey = currentFile.value?.trim()
+    ? normalizeFileMetaPathKey(currentFile.value)
+    : "";
+  let physical = "";
+  if (curKey && sessionKey === curKey && physicalReaderPath.value?.trim()) {
+    physical = physicalReaderPath.value.trim();
+  } else {
+    const converted = meta?.convertedMdPath?.trim() ?? "";
+    if (converted) {
+      try {
+        const st = await window.colorTxt.stat(converted);
+        if (st.isFile) physical = converted;
+      } catch {
+        /* fall through */
+      }
+    }
+    if (!physical) physical = session;
+  }
+  try {
+    await clearAiReadingTracesForBook({
+      sessionPath: session,
+      physicalPath: physical,
+    });
+  } catch {
+    /* AI 库不可用或路径失效时不阻断清除阅读数据 */
+  }
+}
+
 /**
- * 清除若干路径的阅读数据（进度/书签/高亮/笔记/角色卡及立绘）。
- * 保留电子书转换路径等空壳 meta；不关闭当前打开的文件。
+ * 清除若干路径的阅读数据（进度/书签/高亮/笔记/角色卡及立绘），
+ * 并清除对应 AI 对话、向量索引与分词缓存。
+ * 从 file.meta 删除路径并移出最近打开 → 直接覆盖写盘（不合并）→ 他窗经 storage 按磁盘重载。
+ * 不关闭当前打开的文件。先落盘，再异步清 AI / 立绘。
  */
 async function clearReadingDataForPaths(
   paths: string[],
@@ -1638,66 +1685,56 @@ async function clearReadingDataForPaths(
   }
   if (unique.length === 0) return false;
 
-  let anyCleared = false;
-  let touchedCurrent = false;
+  type ClearJob = {
+    path: string;
+    pathKey: string;
+    prevExact: FileMetaRecord | null;
+    isCurrent: boolean;
+  };
+  const jobs: ClearJob[] = [];
   const cur = currentFile.value?.trim() ?? "";
   const curKey = cur ? normalizeFileMetaPathKey(cur) : "";
 
   for (const path of unique) {
-    const key = fileHistoryKey(path);
+    const historyKey = fileHistoryKey(path);
     const pathKey = normalizeFileMetaPathKey(path);
     const shown = findFileMetaRecord(fileMetaRecords.value, path);
-    const hadProgress = metaProgressByPathKey.value.has(key);
+    const hadProgress = metaProgressByPathKey.value.has(historyKey);
     if (!metaHasClearableReadingData(shown) && !hadProgress) continue;
-
-    await removePortraitCacheForBook(path);
-
     const prevExact =
       fileMetaRecords.value.find(
         (m) => normalizeFileMetaPathKey(m.path) === pathKey,
       ) ?? null;
-    const withoutExact = fileMetaRecords.value.filter(
-      (m) => normalizeFileMetaPathKey(m.path) !== pathKey,
-    );
-    const cleared: FileMetaRecord = {
-      path: prevExact?.path ?? path,
-      fileName: fileNameKey(prevExact?.path ?? path),
-      bookmarks: [],
-      updatedAt: Date.now(),
-    };
-    if (prevExact?.convertedMdPath)
-      cleared.convertedMdPath = prevExact.convertedMdPath;
-    if (prevExact?.sourceMtimeMsAtConvert != null) {
-      cleared.sourceMtimeMsAtConvert = prevExact.sourceMtimeMsAtConvert;
-    }
-    if (prevExact?.lastOpenedAt != null) {
-      cleared.lastOpenedAt = prevExact.lastOpenedAt;
-    }
-    fileMetaRecords.value = [cleared, ...withoutExact];
-
-    if (metaProgressByPathKey.value.has(key)) {
-      const m = new Map(metaProgressByPathKey.value);
-      m.delete(key);
-      metaProgressByPathKey.value = m;
-    }
-    anyCleared = true;
-    if (curKey && pathKey === curKey) touchedCurrent = true;
+    jobs.push({
+      path,
+      pathKey,
+      prevExact,
+      isCurrent: Boolean(curKey && pathKey === curKey),
+    });
   }
 
-  if (!anyCleared) {
+  if (jobs.length === 0) {
     if (options?.toast !== false) {
       appToast("没有可清除的阅读数据", { kind: "info" });
     }
     return false;
   }
 
-  persistFileMeta();
+  const touchedCurrent = jobs.some((j) => j.isCurrent);
+  removeFileMetaPaths(jobs.map((j) => j.pathKey));
+
   if (touchedCurrent) {
     void refreshReaderHighlightDisplayLayer();
     bumpAnnotationDisplayEpoch();
+    void readerSidebarRef.value?.reloadAiAssistantAfterChatHistoryCleared?.();
   }
   if (options?.toast !== false) {
     appToast("已清除阅读数据", { kind: "success" });
+  }
+
+  for (const job of jobs) {
+    await clearAiReadingTracesForReadingDataPath(job.path, job.prevExact);
+    await removePortraitCacheForBook(job.path);
   }
   return true;
 }
@@ -1709,7 +1746,7 @@ async function clearCurrentFileReadingData() {
     return;
   }
   const ok = await appConfirm(
-    "将清除当前文件的阅读进度、书签、高亮词、笔记、角色卡（含立绘）等数据；不会删除文件本身。",
+    "将清除当前文件的阅读进度、书签、高亮词、笔记、角色卡（含立绘）、AI 对话记录、向量索引与分词缓存等数据，并从最近打开中移除；不会删除文件本身。",
     "清除阅读数据",
   );
   if (!ok) return;
@@ -1726,11 +1763,18 @@ async function onClearAllReadingData() {
     appToast("没有可清除的阅读数据", { kind: "info" });
     return;
   }
-  const ok = await appConfirm(
-    "将清除全部文件的阅读进度、书签、高亮词、笔记、角色卡（含立绘）等数据；不会删除文件本身。",
-    "清空阅读数据",
-  );
-  if (!ok) return;
+  const r = await window.colorTxt.showMessageBox({
+    type: "warning",
+    title: APP_DISPLAY_NAME,
+    buttons: ["取消", "清空"],
+    defaultId: 1,
+    cancelId: 0,
+    message: "是否清空全部阅读数据？",
+    detail:
+      "将清除全部文件的阅读数据；不会删除文件本身。",
+    noLink: true,
+  });
+  if (r.response !== 1) return;
   await clearReadingDataForPaths(paths);
 }
 
@@ -3560,13 +3604,15 @@ useAppShellThemeWatch({
         <div
           v-show="isFullscreenView"
           class="resizer resizer--fullscreenSidebar"
+          :class="{ 'resizer--active': resizingSidebar }"
           @mousedown="startResizeSidebar"
         ></div>
       </div>
       <div
         v-show="showSidebar && !isFullscreenView"
         class="resizer"
-        :style="{ left: `${sidebarWidthForLayout - 3}px` }"
+        :class="{ 'resizer--active': resizingSidebar }"
+        :style="{ left: `calc(${sidebarWidthForLayout}px - var(--app-sash-size, 4px) / 2)` }"
         @mousedown="startResizeSidebar"
       ></div>
       <div
@@ -3861,6 +3907,7 @@ useAppShellThemeWatch({
       :chapter-rules="chapterRuleState.rules"
       :chapter-rule-error-text="chapterRuleErrorText"
       :reader-edit-mode="readerEditMode"
+      :replace-rule-scope-book-name="replaceRuleScopeBookName"
       :editing-bookmark-line="editingBookmarkLine"
       :can-bookmark="canBookmark"
       :add-bookmark-dialog-preview="addBookmarkDialogPreview"
@@ -3912,6 +3959,7 @@ useAppShellThemeWatch({
       @clear-reading-data-paths="onClearReadingDataPaths"
       @clear-all-reading-data="onClearAllReadingData"
       @remove-missing-reading-data-files="onRemoveMissingReadingDataFiles"
+      @open-reading-data-path="(p) => void openFilePath(p)"
       @apply-replace-rule-format="onApplyReplaceRuleFormat"
     />
   </div>

@@ -656,6 +656,9 @@ async function onNetworkImport() {
     showImport.value = true;
   } catch (e) {
     console.error(e);
+    appToast(e instanceof Error ? e.message : "网络导入失败", {
+      kind: "warning",
+    });
   }
 }
 

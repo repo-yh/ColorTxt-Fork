@@ -12,6 +12,7 @@ import {
 } from "./windowBounds";
 import { attachWindowCloseRequestGuard } from "./windowCloseGuard";
 import { attachWebContentsExternalLinkPolicy } from "./webContentsExternalLinks";
+import { attachEditableContextMenu } from "./editableContextMenu";
 import {
   destroyAllBackstageWebViews,
   isBackstageWebViewWindow,
@@ -85,6 +86,7 @@ export function createMainWindowFactory(maps: MainWindowMaps): CreateMainWindow 
     win.setMenuBarVisibility(false);
     win.removeMenu();
     attachWebContentsExternalLinkPolicy(win.webContents);
+    attachEditableContextMenu(win);
     shouldRestoreSessionByWindowId.set(win.id, shouldRestoreSession);
     if (openFindBook) {
       findBookWindowByWindowId.set(win.id, true);

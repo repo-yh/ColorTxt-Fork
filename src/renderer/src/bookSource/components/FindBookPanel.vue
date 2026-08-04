@@ -2102,6 +2102,8 @@ function onBack() {
       v-model="showReplaceRulePanel"
       bucket="findBook"
       :edit-format-mode="replaceRuleEditFormatMode"
+      :scope-book-name="readerDetail?.name || selectedBook?.name || ''"
+      :scope-book-origin="selectedBook?.origin || ''"
       @apply-format="onApplyReplaceRuleFormat"
     />
   </AppModal>

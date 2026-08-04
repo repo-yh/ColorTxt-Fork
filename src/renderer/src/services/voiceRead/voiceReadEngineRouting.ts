@@ -33,6 +33,8 @@ export function voiceReadChunkUnitsForEngine(engine: VoiceReadEngineId): number 
 export function voiceReadRequiresSerialChunkFetch(
   settings: VoiceReadSettings,
 ): boolean {
+  // Windows SAPI COM / PowerShell 桥不宜并行多段合成
+  if (settings.engine === "winSapi") return true;
   if (settings.engine !== "mimo") return false;
   return isMimoTtsVoiceCloneModel(
     normalizeMimoTtsModel(settings.engineConfig.mimoModel),

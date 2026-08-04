@@ -129,6 +129,11 @@ export function deleteBookSegmentCache(bookHash: string, cfg?: AIConfig): void {
     .run(bookHash);
 }
 
+export function deleteAllSegmentCache(cfg?: AIConfig): void {
+  const database = openSegmentDb(cfg);
+  database.prepare(`DELETE FROM seg_chapter_freq`).run();
+}
+
 export function closeSegmentDb(): void {
   if (db) {
     try {

@@ -65,6 +65,8 @@ const props = defineProps<{
   chapterRuleErrorText: string;
   /** 编辑态打开文本替换时面板主按钮为「应用」 */
   readerEditMode?: boolean;
+  /** 主窗口文本替换「当前书名」建议：打开文件的文件名；无打开文件则空 */
+  replaceRuleScopeBookName?: string;
   editingBookmarkLine: number | null;
   /** 编辑书签时「更新为当前行」是否可用（与顶栏书签一致：有文件、非加载、有正文行） */
   canBookmark: boolean;
@@ -138,6 +140,7 @@ const emit = defineEmits<{
   clearReadingDataPaths: [paths: string[]];
   clearAllReadingData: [];
   removeMissingReadingDataFiles: [];
+  openReadingDataPath: [path: string];
 }>();
 
 const showAboutPanel = defineModel<boolean>("showAboutPanel", {
@@ -311,6 +314,7 @@ onBeforeUnmount(() => {
     @clear-paths="emit('clearReadingDataPaths', $event)"
     @clear-all-reading-data="emit('clearAllReadingData')"
     @remove-missing-files="emit('removeMissingReadingDataFiles')"
+    @open-path="emit('openReadingDataPath', $event)"
   />
   <ChapterRulePanel
     v-model="showChapterRulePanel"
@@ -322,6 +326,7 @@ onBeforeUnmount(() => {
     v-model="showReplaceRulePanel"
     bucket="app"
     :edit-format-mode="readerEditMode === true"
+    :scope-book-name="replaceRuleScopeBookName ?? ''"
     @apply-format="emit('applyReplaceRuleFormat', $event)"
   />
 

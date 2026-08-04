@@ -82,7 +82,7 @@ export function formatMdInternalLink(params: MdInternalLinkParams): string {
   const icon = params.iconRel?.trim();
   if (icon) {
     const alt = truncateHint(params.alt || params.title || "") || "注";
-    return `[![${escapeMdLabel(alt)}](${icon})](#${frag}${titleAttr})`;
+    return `[![${escapeMdLabel(alt)}](${escapeMdUrl(icon)})](#${frag}${titleAttr})`;
   }
 
   const label = params.label.replace(/\s+/g, " ").trim();
@@ -96,8 +96,21 @@ function escapeMdLabel(s: string): string {
   return s;
 }
 
-function escapeMdUrl(s: string): string {
-  return s.replace(/\\/g, "\\\\").replace(/\)/g, "\\)");
+/**
+ * CommonMark / marked 链接与图片目标转义。
+ * `\`、`(`、`)` 必须转义；仅转义 `)` 时，路径中成对的 `(…)` 会被当成未闭合括号。
+ * 含空白时改用尖括号目标 `<…>`（括号在 `<>` 内无需再转义）。
+ */
+export function escapeMdUrl(s: string): string {
+  const t = s.trim();
+  if (!t) return t;
+  if (/\s/.test(t)) {
+    return `<${t.replace(/\\/g, "\\\\").replace(/>/g, "\\>")}>`;
+  }
+  return t
+    .replace(/\\/g, "\\\\")
+    .replace(/\(/g, "\\(")
+    .replace(/\)/g, "\\)");
 }
 
 export function isMdExternalLinkHref(href: string): boolean {
@@ -127,7 +140,7 @@ export function formatMdExternalLink(params: MdExternalLinkParams): string {
 export function formatMdBlockImage(rel: string, alt = ""): string {
   const url = rel.trim();
   if (!url) return "";
-  return `![${escapeMdLabel(alt.trim() || " ")}](${url})`;
+  return `![${escapeMdLabel(alt.trim() || " ")}](${escapeMdUrl(url)})`;
 }
 
 /** 从 logical target（`stem#frag` 或 `stem`）得到 `#fragment` 用全局 id */

@@ -49,6 +49,8 @@ export function useTxtStreamPipeline(deps: {
   textConvertDigit: Ref<TextConvertWidthMode>;
   /** 文本替换（阅读展示在转换前套用） */
   replaceRules: Ref<ReplaceRule[]>;
+  /** 替换范围 / 排除范围匹配用书名（主窗口为当前文件名） */
+  replaceRuleBookName: Ref<string>;
   chapterMinCharCount: Ref<number>;
   currentFileIsMarkdown: Ref<boolean>;
   /** 展示正文写入 Monaco 且插图/内链处理完成后 */
@@ -311,7 +313,7 @@ export function useTxtStreamPipeline(deps: {
     if (!deps.readerEditMode.value) {
       const contentRules = filterEnabledReplaceRules(
         deps.replaceRules.value,
-        "",
+        deps.replaceRuleBookName.value,
         "",
         "content",
       );

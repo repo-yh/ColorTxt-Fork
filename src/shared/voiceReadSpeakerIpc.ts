@@ -21,6 +21,13 @@ export type VoiceReadAttributeSpeakersRequest = {
   roster: { displayName: string; aliases: string[] }[];
   /** 为 true 时 AI 同时标注情绪（需引擎支持） */
   includeEmotion?: boolean;
+  /**
+   * 当前行之上的参考原文（远→近），仅供推断，不要求标注。
+   * 由渲染侧按「扩到首个非纯对白行后再多收一行」收集。
+   */
+  contextBefore?: string[];
+  /** 当前行之下的参考原文（近→远） */
+  contextAfter?: string[];
 };
 
 export type VoiceReadAttributeSpeakersResult =

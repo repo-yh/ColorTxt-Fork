@@ -29,6 +29,11 @@ const props = withDefaults(
     ariaLabel?: string;
     /** 建议列表最大高度（px），与 AppCustomSelect 默认一致 */
     scrollMaxHeight?: number;
+    /**
+     * 选中建议时：`replace` 覆盖原值（默认）；
+     * `append` 在末尾追加（已有内容加 `，` 分隔；已包含该建议则跳过）。
+     */
+    suggestionPickMode?: "replace" | "append";
   }>(),
   {
     modelValue: "",
@@ -38,6 +43,7 @@ const props = withDefaults(
     disabled: false,
     ariaLabel: "接口地址",
     scrollMaxHeight: 220,
+    suggestionPickMode: "replace",
   },
 );
 
@@ -153,7 +159,25 @@ function onInput(ev: Event) {
 }
 
 function pick(url: string) {
-  emit("update:modelValue", url);
+  const picked = url.trim();
+  if (!picked) {
+    focused.value = false;
+    return;
+  }
+  if (props.suggestionPickMode === "append") {
+    const cur = props.modelValue;
+    if (cur.includes(picked)) {
+      focused.value = false;
+      return;
+    }
+    const head = cur.trimEnd();
+    emit(
+      "update:modelValue",
+      head ? `${head.replace(/[，,]\s*$/, "")}，${picked}` : picked,
+    );
+  } else {
+    emit("update:modelValue", url);
+  }
   focused.value = false;
 }
 

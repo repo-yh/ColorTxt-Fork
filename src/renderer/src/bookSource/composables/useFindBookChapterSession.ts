@@ -15,6 +15,7 @@ import {
 } from "@shared/bookSource/replaceRuleApply";
 import { listReplaceRulesLocal } from "../replaceRuleLocalStore";
 import { formatPhysicalPlainTextForReader } from "../../reader/readerDisplayPipeline";
+import type { ReaderViewportRestoreAnchor } from "../../reader/readerViewportAnchor";
 import { applyTextDisplayConverts } from "../../services/textConvertApply";
 import { appConfirm } from "../../services/appDialog";
 import { appToast } from "../../services/appToast";
@@ -92,6 +93,30 @@ export function useFindBookChapterSession(deps: FindBookChapterSessionDeps) {
   /** 展示管线用规则缓存（原文在 lastChapter*；规则变更时刷新） */
   const cachedReplaceRules = ref<ReplaceRule[]>([]);
   const replaceRulesLoaded = ref(false);
+  /** 最近一次阅读渲染：展示行 → 管线物理行（进出编辑恢复视口用） */
+  const lastDisplayLineToPhysicalLine = ref<number[] | null>(null);
+
+  function viewportDisplayLineToPhysicalLine(displayLine: number): number {
+    const v = Math.max(1, Math.floor(displayLine));
+    const map = lastDisplayLineToPhysicalLine.value;
+    if (!map?.length) return v;
+    const idx = v - 1;
+    if (idx < 0) return 1;
+    if (idx >= map.length) return map[map.length - 1] ?? v;
+    return map[idx]!;
+  }
+
+  function captureEditViewportAnchor(): ReaderViewportRestoreAnchor {
+    return (
+      deps.readerRef.value?.captureViewportRestoreAnchor?.() ?? {
+        physicalLine: Math.max(
+          1,
+          Math.floor(deps.readerRef.value?.getViewportEndLine?.() ?? 1),
+        ),
+        wrappedLineIndex: 0,
+      }
+    );
+  }
 
   async function refreshReplaceRulesCache() {
     try {
@@ -220,6 +245,7 @@ export function useFindBookChapterSession(deps: FindBookChapterSessionDeps) {
     }
     const reader = deps.readerRef.value;
     if (!reader) return;
+    lastDisplayLineToPhysicalLine.value = formatted.displayLineToPhysicalLine;
     await reader.setFullText(formatted.text, {
       heavy: false,
       resetScroll: opts?.resetScroll ?? true,
@@ -240,11 +266,25 @@ export function useFindBookChapterSession(deps: FindBookChapterSessionDeps) {
     }
   }
 
-  /** 编辑态展示：缓存原文（章节名 + 正文），不经压缩空行等阅读管线 */
+  /**
+   * 编辑态展示：缓存原文（章节名 + 正文），不经压缩空行等阅读管线。
+   * 正文前若已带章节名则剥离后再拼回，与 renderChapterText 行结构对齐，避免进出编辑行号错位。
+   */
   function buildEditSourceText(): string {
     const rawTitle = lastChapterTitle.value.trim();
-    const body = lastChapterBody.value;
+    const body = stripLeadingChapterTitleFromBody(
+      lastChapterBody.value,
+      rawTitle,
+    );
     return rawTitle ? `${rawTitle}\n${body}` : body;
+  }
+
+  function settleReaderViewport(): Promise<void> {
+    return new Promise((resolve) => {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => resolve());
+      });
+    });
   }
 
   const chapterContentBusy = computed(
@@ -273,13 +313,23 @@ export function useFindBookChapterSession(deps: FindBookChapterSessionDeps) {
   async function onToggleReaderEdit() {
     if (readerEditMode.value) {
       if (!(await confirmIfReaderEditDiscard())) return;
+      // 编辑态下行号≈原文物理行；退出前采锚点，换展示文后按映射恢复
+      const exitAnchor = captureEditViewportAnchor();
       readerEditorDirty.value = false;
       readerEditMode.value = false;
+      await nextTick();
       // 退出编辑：lastChapter* 仍为原文，重跑展示管线（文本替换 → 转换 → …）
       if (lastChapterBody.value || lastChapterTitle.value) {
         await renderChapterText(lastChapterTitle.value, lastChapterBody.value, {
           resetScroll: false,
         });
+        // 等章节装饰 / sticky 布局稳定后再恢复，避免恢复后被 sticky 刷新顶偏
+        deps.readerRef.value?.refreshChapterStickyScroll?.();
+        await settleReaderViewport();
+        await deps.readerRef.value?.restoreViewportToRestoreAnchor?.(
+          exitAnchor,
+          lastDisplayLineToPhysicalLine.value ?? undefined,
+        );
       }
       return;
     }
@@ -287,6 +337,8 @@ export function useFindBookChapterSession(deps: FindBookChapterSessionDeps) {
       appToast("请等待当前章节加载完成后再进入编辑模式。", { kind: "info" });
       return;
     }
+    // 阅读展示行 ≠ 编辑原文行（压缩空行等）；先采物理锚点再换文
+    const enterAnchor = captureEditViewportAnchor();
     deps.exitVoiceRead();
     deps.stopTimedScroll();
     // 先进入编辑态再 setChapters，避免阅读态标题装饰残留（与主界面一致：编辑不渲标题样式）
@@ -309,6 +361,9 @@ export function useFindBookChapterSession(deps: FindBookChapterSessionDeps) {
       } else {
         reader.setChapters([]);
       }
+      reader.refreshChapterStickyScroll?.();
+      await settleReaderViewport();
+      await reader.restoreViewportToRestoreAnchor?.(enterAnchor);
     }
     deps.readerRef.value?.markReaderEditSaved?.();
     readerEditorDirty.value = false;
@@ -478,6 +533,7 @@ export function useFindBookChapterSession(deps: FindBookChapterSessionDeps) {
     lastChapterBody.value = "";
     lastChapterTitle.value = "";
     totalLineCount.value = 0;
+    lastDisplayLineToPhysicalLine.value = null;
   }
 
   function clearReaderEditFlags() {
@@ -517,5 +573,6 @@ export function useFindBookChapterSession(deps: FindBookChapterSessionDeps) {
     refreshCurrentChapterDisplay,
     resetChapterSessionUi,
     clearReaderEditFlags,
+    viewportDisplayLineToPhysicalLine,
   };
 }

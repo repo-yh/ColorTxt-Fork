@@ -28,6 +28,11 @@ export function buildReaderDiffSideEditorOptions(): editor.IEditorOptions {
     unicodeHighlight: { ...READER_UNICODE_HIGHLIGHT_DISABLED },
     renderControlCharacters: false,
     renderWhitespace: "none",
+    find: {
+      seedSearchStringFromSelection: "selection",
+    },
+    /** 查找栏挂件勿被 Diff 容器 overflow 裁切 */
+    fixedOverflowWidgets: true,
   };
 }
 

@@ -532,7 +532,6 @@ function onOpenDownloaded(name: string, ev: MouseEvent) {
   if (batchDownloading.value) return;
   const openPath = doneOpenPathByName.value[name]?.trim();
   if (!openPath) return;
-  modelValue.value = false;
   emit("openFile", openPath);
 }
 

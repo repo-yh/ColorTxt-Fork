@@ -1043,7 +1043,7 @@ defineExpose({ refreshSources });
 .findDiscoverKinds {
   display: flex;
   flex-wrap: wrap;
-  padding: 3px 10px 10px;
+  padding: 10px;
   background: var(--panel);
 }
 .findDiscoverKindsHint {
@@ -1051,7 +1051,7 @@ defineExpose({ refreshSources });
   text-align: center;
   color: var(--muted);
   font-size: 13px;
-  padding: 8px 0 4px;
+  padding: 4px;
   margin: 0;
 }
 .findDiscoverKindsHint--error {

@@ -29,7 +29,7 @@ import {
 } from "../constants/voiceRead";
 import {
   getVoiceReadEngineMeta,
-  VOICE_READ_ENGINE_REGISTRY,
+  listVoiceReadEnginesForPlatform,
 } from "@shared/voiceReadEngines";
 import {
   DEFAULT_DASHSCOPE_TTS_MODEL,
@@ -52,6 +52,13 @@ import {
   fetchMinimaxVoiceCatalog,
   minimaxVoiceCatalogError,
 } from "../services/voiceRead/minimaxVoiceCatalog";
+import {
+  fetchWinSapiVoiceCatalog,
+  winSapiVoiceCatalog,
+  winSapiVoiceCatalogError,
+  winSapiVoiceCatalogFetched,
+  winSapiVoiceCatalogLoading,
+} from "../services/voiceRead/winSapiVoiceCatalog";
 import { useSecretStorageHint } from "../composables/useSecretStorageHint";
 import type { ConnectionTestResult } from "../composables/useConnectionTest";
 import { appAlert } from "../services/appDialog";
@@ -173,7 +180,7 @@ const showDialogueGenderVoices = computed(
     draft.value.multi.aiSpeakerRecognitionEnabled !== false,
 );
 
-const engineOptions = VOICE_READ_ENGINE_REGISTRY.map((m) => ({
+const engineOptions = listVoiceReadEnginesForPlatform().map((m) => ({
   id: m.id,
   label: m.label,
   description: m.description,
@@ -220,6 +227,22 @@ const engineScrollItems: CustomSelectItem[] = engineOptions.map((o) => ({
   label: o.label,
   description: o.description,
 }));
+
+const showWinSapiHint = computed(() => draft.value.engine === "winSapi");
+
+/** 说明后的 warning 后缀：不可用 / 无音色；加载中不显示 */
+const winSapiHintStatus = computed((): "unavailable" | "empty" | null => {
+  if (draft.value.engine !== "winSapi") return null;
+  if (winSapiVoiceCatalogLoading.value) return null;
+  if (winSapiVoiceCatalogError.value.trim()) return "unavailable";
+  if (
+    winSapiVoiceCatalogFetched.value &&
+    (winSapiVoiceCatalog.value?.length ?? 0) === 0
+  ) {
+    return "empty";
+  }
+  return null;
+});
 
 const engineDisplayLabel = computed(() => {
   const hit = engineOptions.find((o) => o.id === draft.value.engine);
@@ -363,6 +386,9 @@ watch(
     if (engine === "minimax" && apiKey) {
       void fetchMinimaxVoiceCatalog(draft.value.engineConfig, { force: true });
     }
+    if (engine === "winSapi") {
+      void fetchWinSapiVoiceCatalog(draft.value.engineConfig, { force: true });
+    }
   },
   { immediate: true },
 );
@@ -375,7 +401,11 @@ function voiceScrollItemsForEngine(): CustomSelectItem[] {
   );
 }
 
-const voiceScrollItems = computed(() => voiceScrollItemsForEngine());
+const voiceScrollItems = computed(() => {
+  // 显式依赖动态音色目录，避免分组列表不刷新
+  void winSapiVoiceCatalog.value;
+  return voiceScrollItemsForEngine();
+});
 
 const voiceScrollHasOptions = computed(() =>
   voiceScrollItems.value.some((i) => i.kind === "item"),
@@ -447,12 +477,19 @@ watch(
   () => draft.value.engine,
   (eng, prev) => {
     if (eng === prev) return;
-    if (eng === "system") refreshSystemVoices();
-    const patch = resolveDefaultVoicePatchForEngine(eng, systemVoices.value);
-    patchDraft({
-      single: patch.single,
-      multi: { ...draft.value.multi, ...patch.multi },
-    });
+    void (async () => {
+      if (eng === "system") refreshSystemVoices();
+      if (eng === "winSapi") {
+        await fetchWinSapiVoiceCatalog(draft.value.engineConfig, {
+          force: true,
+        });
+      }
+      const patch = resolveDefaultVoicePatchForEngine(eng, systemVoices.value);
+      patchDraft({
+        single: patch.single,
+        multi: { ...draft.value.multi, ...patch.multi },
+      });
+    })();
   },
 );
 
@@ -817,6 +854,24 @@ onUnmounted(() => {
         />
       </div>
 
+      <p v-if="showWinSapiHint" class="settingsHint">
+        通过 Windows SAPI5 调用本机音色，需安装适配器与语音包，如
+        <a
+          href="https://github.com/gexgd0419/NaturalVoiceSAPIAdapter"
+          target="_blank"
+          rel="noreferrer"
+          >NaturalVoiceSAPIAdapter</a
+        >。<span
+          v-if="winSapiHintStatus === 'unavailable'"
+          class="settingsHintWarn"
+          >（当前不可用）</span
+        ><span
+          v-else-if="winSapiHintStatus === 'empty'"
+          class="settingsHintWarn"
+          >（未检测到音色）</span
+        >
+      </p>
+
       <template v-if="showApiKeyFields">
         <div v-if="draft.engine === 'dashscope'" class="settingsRow">
           <div class="settingsRowMain settingsRowMain--baseline">
@@ -970,6 +1025,10 @@ onUnmounted(() => {
             </div>
           </div>
           <p class="settingsHint">{{ secretStorageHint }}</p>
+          <p class="settingsHint">
+            按量付费密钥（sk-）与 Token Plan 密钥（tp-）将自动选用对应网关；Token Plan
+            默认中国集群。
+          </p>
         </div>
         <div v-if="showMimoModel" class="settingsRow">
           <div class="settingsRowMain settingsRowMain--baseline">
@@ -1357,6 +1416,10 @@ onUnmounted(() => {
 
 .settingsLabel--strong {
   font-weight: 600;
+}
+
+.settingsHintWarn {
+  color: var(--warning);
 }
 
 .iconOnly {

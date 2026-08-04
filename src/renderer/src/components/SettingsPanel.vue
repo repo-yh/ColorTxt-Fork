@@ -717,7 +717,7 @@ async function onClearCache() {
     cancelId: 0,
     message: "是否清除应用缓存？",
     detail: [
-      "将清除会话、最近打开、文件列表、收藏高亮词、阅读数据（含立绘）等本地缓存；",
+      "将清除会话、最近打开、文件列表、收藏高亮词、阅读数据等本地缓存；",
       "不会删除电子书转换的 .md 文件、书包解压的文件、找书下载的文件；",
       "不影响界面相关的设置（字号、主题、配色等）；",
       "清除后窗口会重新加载。",
@@ -729,6 +729,17 @@ async function onClearCache() {
     sessionStorage.setItem(skipUnloadPersistenceSessionKey, "1");
   } catch {
     // ignore
+  }
+
+  try {
+    await window.colorTxt.ai.threadDeleteAll();
+  } catch {
+    /* 库未初始化或删除失败不阻断清除 */
+  }
+  try {
+    await window.colorTxt.ai.indexDeleteAll();
+  } catch {
+    /* 库未初始化或删除失败不阻断清除 */
   }
 
   // 删除角色立绘缓存根目录（含各书立绘与草稿）

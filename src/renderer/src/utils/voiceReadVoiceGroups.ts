@@ -30,6 +30,7 @@ import {
 import { mimoVoiceGroupsToSelectItems } from "./voiceReadMimoVoiceSelect";
 import { MINIMAX_TTS_VOICES } from "../constants/voiceReadMinimax";
 import { minimaxVoiceCatalog } from "../services/voiceRead/minimaxVoiceCatalog";
+import { winSapiVoiceCatalog } from "../services/voiceRead/winSapiVoiceCatalog";
 import {
   findMimoTtsVoice,
   MIMO_TTS_VOICES,
@@ -279,6 +280,11 @@ export function listVoiceOptionsForEngine(
       }));
     case "edge":
       return EDGE_TTS_VOICES.map((v) => ({ id: v.id, label: v.label }));
+    case "winSapi":
+      return winSapiVoiceOptions().map((v) => ({
+        id: v.id,
+        label: v.label,
+      }));
     case "dashscope":
       return DASHSCOPE_TTS_VOICES.map((v) => ({ id: v.id, label: v.label }));
     case "minimax":
@@ -358,12 +364,34 @@ function minimaxVoiceOptions(): readonly VoiceReadVoiceOption[] {
   return MINIMAX_TTS_VOICES.map((v) => ({ id: v.id, label: v.label }));
 }
 
+function winSapiVoiceOptions(): readonly VoiceReadVoiceOption[] {
+  return winSapiVoiceCatalog.value ?? [];
+}
+
+function groupWinSapiVoices(
+  voices: readonly VoiceReadVoiceOption[],
+): VoiceOptionGroup[] {
+  const grouped = new Map<string, VoiceSelectOption[]>();
+  for (const v of voices) {
+    const locale = normalizeLocaleCode(v.locale || "und");
+    const bucket = grouped.get(locale) ?? [];
+    bucket.push({ id: v.id, label: v.label });
+    grouped.set(locale, bucket);
+  }
+  return Array.from(grouped.entries())
+    .sort(([a], [b]) => compareVoiceLanguage(a, b))
+    .map(([locale, options]) => [locale, options] as const);
+}
+
 export function getVoiceGroupsForEngine(
   engine: VoiceReadEngineId,
   systemVoices: SpeechSynthesisVoice[],
 ): VoiceOptionGroup[] | "flat" {
   if (engine === "system") return groupSystemVoices(systemVoices);
   if (engine === "edge") return groupEdgeTtsVoices();
+  if (engine === "winSapi" && winSapiVoiceOptions().length) {
+    return groupWinSapiVoices(winSapiVoiceOptions());
+  }
   if (engine === "minimax" && minimaxVoiceCatalog.value?.length) {
     return groupMinimaxVoices(minimaxVoiceCatalog.value);
   }
@@ -386,6 +414,11 @@ export function voiceSelectItemsForEngine(
       groupEdgeTtsVoicesRaw(),
       getLocaleDisplayLabel,
     );
+  }
+  if (engine === "winSapi") {
+    const groups = groupWinSapiVoices(winSapiVoiceOptions());
+    if (groups.length === 0) return [];
+    return voiceGroupsToSelectItems(groups);
   }
   if (engine === "minimax") {
     const voices = minimaxVoiceOptions();
@@ -422,6 +455,46 @@ export function resolveDefaultVoicePatchForEngine(
   let singleVoiceId = defaultSingleVoiceIdForEngine(engine);
   if (engine === "system") {
     singleVoiceId = systemVoices[0]?.voiceURI ?? "";
+  }
+  if (engine === "winSapi") {
+    const voices = winSapiVoiceOptions();
+    const isNatural = (label: string) =>
+      /\bNatural\b/i.test(label) ||
+      (!/Desktop/i.test(label) &&
+        /Microsoft\s+(Xiaoxiao|Yunxi|Yunjian|Yunyang|Xiaochen|Xiaoyi)\b/i.test(
+          label,
+        ));
+    const zhNatural = voices.find(
+      (v) =>
+        isNatural(v.label) && (v.locale ?? "").toLowerCase().startsWith("zh"),
+    );
+    singleVoiceId =
+      zhNatural?.id ||
+      voices.find((v) => isNatural(v.label))?.id ||
+      voices.find((v) => (v.locale ?? "").toLowerCase().startsWith("zh"))?.id ||
+      voices[0]?.id ||
+      "";
+    const multiBase = singleVoiceId;
+    return {
+      single: { voiceId: singleVoiceId },
+      multi: {
+        narrationVoiceId: multiBase,
+        dialogueVoiceId: multiBase,
+        dialogueMaleVoiceId:
+          voices.find(
+            (v) =>
+              isNatural(v.label) &&
+              (v.gender === "male" || /yunxi|yunjian|kangkang/i.test(v.label)),
+          )?.id || multiBase,
+        dialogueFemaleVoiceId:
+          voices.find(
+            (v) =>
+              isNatural(v.label) &&
+              (v.gender === "female" ||
+                /xiaoxiao|xiaoyi|huihui|yaoyao/i.test(v.label)),
+          )?.id || multiBase,
+      },
+    };
   }
   return {
     single: { voiceId: singleVoiceId },
@@ -463,6 +536,9 @@ export function resolveVoiceReadDisplayLabel(
   }
   if (engine === "mimo") {
     return findMimoTtsVoice(id)?.label ?? id;
+  }
+  if (engine === "winSapi") {
+    return winSapiVoiceOptions().find((v) => v.id === id)?.label ?? id;
   }
   const flat = listVoiceOptionsForEngine(engine, systemVoices);
   const hit = flat.find((v) => v.id === id);

@@ -61,6 +61,11 @@ export function useBookSourceApi() {
     const res = await api.bookSourceFetchUrl(url.trim());
     if (!res.ok || !res.text) throw new Error(res.message ?? "加载失败");
     const sources = parseBookSourceJson(res.text);
+    if (!sources.length) {
+      throw new Error(
+        "未解析到有效书源（需含 bookSourceUrl / bookSourceName）",
+      );
+    }
     return api.bookSourceImportPreview(sources);
   }
 

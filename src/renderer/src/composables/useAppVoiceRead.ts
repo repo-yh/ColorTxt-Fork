@@ -26,6 +26,10 @@ import {
   invalidateCachedQuoteAttributions,
   voiceReadSpeakerCacheKey,
 } from "../services/voiceRead/voiceReadSpeakerCache";
+import {
+  collectVoiceReadSpeakerLineContext,
+  voiceReadSpeakerContextCacheToken,
+} from "../services/voiceRead/voiceReadSpeakerContext";
 
 export type VoiceReadMode = "off" | "playing" | "paused";
 export type VoiceReadSynthesizingPhase = "ai" | "tts";
@@ -151,6 +155,24 @@ export function useAppVoiceRead(deps: {
   /** 识别/合成/播放中：拦截侧栏跳转，避免与批次播放冲突 */
   const isVoiceReadNavigationBlocked = computed(() => mode.value === "playing");
 
+  function getReaderLineContent(lineNo: number): string {
+    return deps.readerRef.value?.getEditorLineContent?.(lineNo) ?? "";
+  }
+
+  function speakerContextForLine(
+    settings: VoiceReadSettings,
+    lineNo: number,
+  ) {
+    const reader = deps.readerRef.value;
+    const maxLineNo = reader?.getModelLineCount?.() ?? undefined;
+    return collectVoiceReadSpeakerLineContext({
+      lineNo,
+      quoteStyles: settings.multi.dialogueQuoteStyles,
+      getLine: getReaderLineContent,
+      maxLineNo,
+    });
+  }
+
   async function buildLineSpeakChunksWithSpeakers(
     settings: VoiceReadSettings,
     lineNo: number,
@@ -174,6 +196,7 @@ export function useAppVoiceRead(deps: {
       return first;
     }
     const dialogueTexts = first.dialogueSegments.map((d) => d.text);
+    const ctx = speakerContextForLine(settings, lineNo);
     const bookPath = deps.currentFile.value?.trim() ?? "";
     const cacheKey = voiceReadSpeakerCacheKey(
       bookPath,
@@ -182,6 +205,7 @@ export function useAppVoiceRead(deps: {
       dialogueTexts,
       roster,
       emotionOn,
+      voiceReadSpeakerContextCacheToken(ctx),
     );
     const { quotes, narrationEmotion } = await attributeDialogueQuotes(
       rawLine,
@@ -189,6 +213,7 @@ export function useAppVoiceRead(deps: {
       roster,
       cacheKey,
       emotionOn,
+      ctx,
     );
     return buildLineSpeakChunks(settings, rawLine, roster, {
       carry,
@@ -218,6 +243,7 @@ export function useAppVoiceRead(deps: {
     });
     if (first.dialogueSegments.length === 0) return;
     const dialogueTexts = first.dialogueSegments.map((d) => d.text);
+    const ctx = speakerContextForLine(settings, lineNo);
     const bookPath = deps.currentFile.value?.trim() ?? "";
     invalidateCachedQuoteAttributions(
       voiceReadSpeakerCacheKey(
@@ -227,6 +253,7 @@ export function useAppVoiceRead(deps: {
         dialogueTexts,
         roster,
         emotionOn,
+        voiceReadSpeakerContextCacheToken(ctx),
       ),
     );
   }

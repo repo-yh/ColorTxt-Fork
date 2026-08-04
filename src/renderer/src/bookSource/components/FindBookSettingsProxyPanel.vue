@@ -58,9 +58,9 @@ const proxyTestSuggestions: readonly ApiEndpointSuggestionItem[] = [
     description: "https://www.google.com",
   },
   {
-    id: "https://github.com/",
+    id: "https://github.com",
     label: "GitHub",
-    description: "https://github.com/",
+    description: "https://github.com",
   },
 ];
 

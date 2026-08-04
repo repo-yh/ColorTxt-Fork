@@ -61,6 +61,23 @@ export function computeWrappedLineIndexInModelLine(
   return Math.max(0, Math.min(idx, maxIndex));
 }
 
+/**
+ * 压缩空行等会在同一物理行下插入空白展示行；锚点若落在空白行，
+ * 恢复时又对齐到首条正文展示行，会造成每次切换下移一行。采锚时上移到非空行。
+ */
+function preferNonBlankDisplayLineForAnchor(
+  model: monaco.editor.ITextModel,
+  displayLine: number,
+): number {
+  let d = Math.max(1, Math.floor(displayLine));
+  const max = Math.max(1, model.getLineCount());
+  d = Math.min(d, max);
+  while (d > 1 && model.getLineContent(d).trim().length === 0) {
+    d -= 1;
+  }
+  return d;
+}
+
 export function captureReaderViewportRestoreAnchor(
   editor: monaco.editor.IStandaloneCodeEditor,
   model: monaco.editor.ITextModel,
@@ -75,8 +92,9 @@ export function captureReaderViewportRestoreAnchor(
   const scrollTop = Math.max(0, editor.getScrollTop());
   const offsetHeights = Math.max(1, Math.floor(anchorSlotFromTop)) - 1;
   const targetY = scrollTop + offsetHeights * lineHeightPx;
-  const displayLine = findModelLineAtContentY(editor, model, targetY);
-  if (displayLine == null) return null;
+  const hitLine = findModelLineAtContentY(editor, model, targetY);
+  if (hitLine == null) return null;
+  const displayLine = preferNonBlankDisplayLineForAnchor(model, hitLine);
   const physicalLine = Math.max(1, Math.floor(resolvePhysicalLine(displayLine)));
   const wrappedLineIndex = computeWrappedLineIndexInModelLine(
     editor,
@@ -90,13 +108,31 @@ export function resolveDisplayLineForViewportRestore(
   physicalLine: number,
   modelLineCount: number,
   displayLineToPhysicalLine?: readonly number[],
+  getDisplayLineContent?: (displayLine: number) => string,
 ): number {
   const p = Math.max(1, Math.floor(physicalLine));
-  const display =
-    displayLineToPhysicalLine && displayLineToPhysicalLine.length > 0
-      ? physicalLineToFilteredDisplayLine(p, displayLineToPhysicalLine)
-      : p;
-  return Math.max(1, Math.min(display, Math.max(1, modelLineCount)));
+  const max = Math.max(1, modelLineCount);
+  if (displayLineToPhysicalLine && displayLineToPhysicalLine.length > 0) {
+    // 同一物理行多条展示行时，优先落到非空正文行（跳过 keepOneBlank 插入的空行）
+    if (getDisplayLineContent) {
+      let firstExact = 0;
+      for (let i = 0; i < displayLineToPhysicalLine.length; i++) {
+        if (displayLineToPhysicalLine[i] !== p) continue;
+        const d = i + 1;
+        if (!firstExact) firstExact = d;
+        if (getDisplayLineContent(d).trim().length > 0) {
+          return Math.max(1, Math.min(d, max));
+        }
+      }
+      if (firstExact) return Math.max(1, Math.min(firstExact, max));
+    }
+    const display = physicalLineToFilteredDisplayLine(
+      p,
+      displayLineToPhysicalLine,
+    );
+    return Math.max(1, Math.min(display, max));
+  }
+  return Math.max(1, Math.min(p, max));
 }
 
 /**
@@ -118,6 +154,7 @@ export function computeScrollTopForReaderViewportRestoreAnchor(
     anchor.physicalLine,
     model.getLineCount(),
     displayLineToPhysicalLine,
+    (d) => model.getLineContent(d),
   );
   const lineTop = editor.getTopForLineNumber(displayLine);
   const lineBottom = editor.getBottomForLineNumber(displayLine);

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import AppModal from "../../components/AppModal.vue";
+import AppContextMenu from "../../components/AppContextMenu.vue";
 import AppShellMenuTeleport from "../../components/AppShellMenuTeleport.vue";
 import CategoryPickerMenu from "../../components/CategoryPickerMenu.vue";
 import IconButton from "../../components/IconButton.vue";
@@ -108,6 +109,65 @@ const {
 
 function bindMorePanel(el: HTMLElement | null) {
   morePanelRef.value = el;
+}
+
+const bookDetailMetaEl = ref<HTMLElement | null>(null);
+const metaContextMenuOpen = ref(false);
+const metaContextMenuX = ref(0);
+const metaContextMenuY = ref(0);
+const metaContextMenuHasSelection = ref(false);
+
+const metaContextMenuItems = computed(() => [
+  {
+    id: "copy",
+    label: "复制",
+    disabled: !metaContextMenuHasSelection.value,
+  },
+  { id: "sep-select-all", separator: true as const },
+  { id: "selectAll", label: "全选" },
+]);
+
+function metaHasTextSelection(): boolean {
+  const el = bookDetailMetaEl.value;
+  const sel = window.getSelection();
+  if (!el || !sel || sel.isCollapsed || !sel.toString()) return false;
+  return (
+    !!sel.anchorNode &&
+    !!sel.focusNode &&
+    el.contains(sel.anchorNode) &&
+    el.contains(sel.focusNode)
+  );
+}
+
+function onMetaContextMenu(ev: MouseEvent) {
+  ev.preventDefault();
+  ev.stopPropagation();
+  metaContextMenuHasSelection.value = metaHasTextSelection();
+  metaContextMenuX.value = ev.clientX;
+  metaContextMenuY.value = ev.clientY;
+  metaContextMenuOpen.value = true;
+}
+
+function closeMetaContextMenu() {
+  metaContextMenuOpen.value = false;
+}
+
+function onMetaContextMenuSelect(id: string) {
+  closeMetaContextMenu();
+  const el = bookDetailMetaEl.value;
+  if (!el) return;
+  if (id === "selectAll") {
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    const sel = window.getSelection();
+    sel?.removeAllRanges();
+    sel?.addRange(range);
+    return;
+  }
+  if (id === "copy") {
+    if (!metaHasTextSelection()) return;
+    document.execCommand("copy");
+  }
 }
 
 const { loading, error, logs, detail, chapters, load, reset } =
@@ -910,6 +970,15 @@ async function onDownloadOrStop() {
 
     <BookSourceLoginPanel v-model="showLogin" :source="loginSource" />
     <ReaderImageLightbox v-model="coverLightboxSrc" />
+    <AppContextMenu
+      :open="metaContextMenuOpen"
+      :x="metaContextMenuX"
+      :y="metaContextMenuY"
+      :items="metaContextMenuItems"
+      :min-width="96"
+      @close="closeMetaContextMenu"
+      @select="onMetaContextMenuSelect"
+    />
     <div class="bookDetailShell">
       <BookSourceCenterState v-if="loading">
         <span class="bookDetailLoadingHint" aria-live="polite">
@@ -938,7 +1007,11 @@ async function onDownloadOrStop() {
               @click="openCoverLightbox"
               @error="coverFailed = true"
             />
-            <div class="bookDetailMeta">
+            <div
+              ref="bookDetailMetaEl"
+              class="bookDetailMeta"
+              @contextmenu="onMetaContextMenu"
+            >
               <h1 class="bookDetailName">{{ displayName }}</h1>
               <p class="bookDetailAuthor">{{ formatBookAuthor(displayAuthor) }}</p>
               <div v-if="kindTags.length" class="bookDetailTags">

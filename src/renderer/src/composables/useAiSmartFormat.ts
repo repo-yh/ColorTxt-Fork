@@ -11,6 +11,7 @@ import {
   type AiSmartFormatSettings,
 } from "@shared/aiSmartFormatTypes";
 import {
+  revertDeDiDeParticleSubstitutions,
   tryRecoverFormatOutputScope,
   validateFormatOutputPreserved,
 } from "@shared/formatOutputValidation";
@@ -30,7 +31,11 @@ import {
 } from "../aiSmartFormat/aiSmartFormatTextPostProcess";
 import type { SmartFormatReviewSession } from "../aiSmartFormat/aiSmartFormatReviewTypes";
 import type { Chapter } from "../chapter";
-import { appAlert } from "../services/appDialog";
+import {
+  SMART_FORMAT_DISCARD_CONFIRM_MESSAGE,
+  SMART_FORMAT_DISCARD_CONFIRM_TITLE,
+} from "../aiSmartFormat/smartFormatDiscardConfirm";
+import { appAlert, appConfirm } from "../services/appDialog";
 import { appToast } from "../services/appToast";
 import { isRetryableAiRequestError } from "@shared/aiRequestRetry";
 import {
@@ -293,7 +298,7 @@ export function useAiSmartFormat(deps: {
           message: `第 ${index + 1}/${total} 段：${result.error}`,
         };
       }
-      working = result.text;
+      working = revertDeDiDeParticleSubstitutions(baseline, result.text);
       const validationOpts = {
         restoreGarbledChars: settings.restoreGarbledChars,
         restoreAsteriskMasks: settings.restoreAsteriskMasks,
@@ -545,7 +550,12 @@ export function useAiSmartFormat(deps: {
     }
     appToast("已应用排版结果", { kind: "success" });
   }
-  function discardSmartFormatReview() {
+  async function discardSmartFormatReview() {
+    const ok = await appConfirm(
+      SMART_FORMAT_DISCARD_CONFIRM_MESSAGE,
+      SMART_FORMAT_DISCARD_CONFIRM_TITLE,
+    );
+    if (!ok) return;
     closeReview();
     appToast("已放弃排版结果", { kind: "info" });
   }

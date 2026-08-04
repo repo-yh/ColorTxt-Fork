@@ -5,6 +5,10 @@ import IconButton from "../../components/IconButton.vue";
 import SwitchToggle from "../../components/SwitchToggle.vue";
 import AppCheckbox from "../../components/AppCheckbox.vue";
 import AutoResizeTextarea from "../../components/AutoResizeTextarea.vue";
+import HighlightedCodeTextarea from "../../components/HighlightedCodeTextarea.vue";
+import ApiEndpointInput, {
+  type ApiEndpointSuggestionItem,
+} from "../../components/ApiEndpointInput.vue";
 import AppShellMenuTeleport from "../../components/AppShellMenuTeleport.vue";
 import { useAnchoredAppShellMenu } from "../../composables/useAnchoredAppShellMenu";
 import {
@@ -12,6 +16,9 @@ import {
   useSortableReorder,
 } from "../../composables/useSortableReorder";
 import { icons } from "../../icons";
+import { EDIT_BOOK_SOURCE_TEXTAREA_MAX_HEIGHT_PX } from "../editBookSourceFields";
+import type { BookSourceMonacoLanguage } from "../formatBookSourceFieldText";
+import BookSourceFieldMonacoModal from "./BookSourceFieldMonacoModal.vue";
 import {
   displayReplaceRuleName,
   isReplaceRuleValid,
@@ -39,8 +46,47 @@ const props = withDefaults(
      * 保存规则后由父级写入当前编辑缓冲区。
      */
     editFormatMode?: boolean;
+    /**
+     * 「替换范围 / 排除范围」焦点建议：当前书名。
+     * 主窗口为打开文件的文件名；找书为当前阅读/选中书籍名。无则不展示该书名建议。
+     */
+    scopeBookName?: string;
+    /** 找书：当前阅读书籍书源 URL（主窗口不传） */
+    scopeBookOrigin?: string;
   }>(),
-  { bucket: "findBook", editFormatMode: false },
+  {
+    bucket: "findBook",
+    editFormatMode: false,
+    scopeBookName: "",
+    scopeBookOrigin: "",
+  },
+);
+
+/** 与「设置 → 代理 → 测试」相同的 ApiEndpointInput 建议形态 */
+const scopeSuggestionItems = computed((): ApiEndpointSuggestionItem[] => {
+  const out: ApiEndpointSuggestionItem[] = [];
+  const name = props.scopeBookName.trim();
+  const origin = props.scopeBookOrigin.trim();
+  if (name) {
+    out.push({
+      id: name,
+      label: "当前书名",
+      description: name,
+    });
+  }
+  // 仅找书有书源 URL 建议；主窗口只有「当前书名」
+  if (props.bucket === "findBook" && origin) {
+    out.push({
+      id: origin,
+      label: "当前书源",
+      description: origin,
+    });
+  }
+  return out;
+});
+
+const scopeFieldPlaceholder = computed(() =>
+  props.bucket === "findBook" ? "书名或书源 URL（可拼多个）" : "书名（可拼多个）",
 );
 
 const emit = defineEmits<{
@@ -127,6 +173,41 @@ const editModalTitle = computed(() =>
   editingRuleId.value == null ? "新增替换规则" : "编辑替换规则",
 );
 
+type ReplaceRuleCodeField = "pattern" | "replacement";
+
+const monacoOpen = ref(false);
+const monacoTitle = ref("");
+const monacoLanguage = ref<BookSourceMonacoLanguage>("plaintext");
+const monacoInitialText = ref("");
+const monacoField = ref<ReplaceRuleCodeField | null>(null);
+
+function openReplaceRuleMonaco(field: ReplaceRuleCodeField) {
+  const draft = editing.value;
+  if (!draft) return;
+  monacoField.value = field;
+  if (field === "pattern") {
+    monacoTitle.value = "替换规则";
+    monacoLanguage.value = "plaintext";
+    monacoInitialText.value = draft.pattern;
+  } else {
+    monacoTitle.value = "替换为";
+    /** 正则「替换为」可含 `@js:`，与书源规则字段一样用 JS 着色（诊断已关） */
+    monacoLanguage.value = "javascript";
+    monacoInitialText.value = draft.replacement;
+  }
+  monacoOpen.value = true;
+}
+
+function onReplaceRuleMonacoConfirm(text: string) {
+  const field = monacoField.value;
+  const draft = editing.value;
+  if (field && draft) {
+    if (field === "pattern") draft.pattern = text;
+    else draft.replacement = text;
+  }
+  monacoField.value = null;
+}
+
 function loadLocalRules() {
   items.value = listReplaceRulesLocal(props.bucket).map(cloneRule);
 }
@@ -146,16 +227,90 @@ watch(modelValue, (open) => {
 watch(
   modelValue,
   (open) => {
-    if (!open) showEdit.value = false;
+    if (!open) {
+      showEdit.value = false;
+      monacoOpen.value = false;
+    }
   },
   { flush: "sync" },
+);
+
+const editFieldsRef = ref<HTMLElement | null>(null);
+/** 仅在实际出现纵向滚动条时加右侧内边距（对齐 AppCustomSelect / CategoryPickerMenu） */
+const editFieldsHasScrollbar = ref(false);
+let editFieldsRo: ResizeObserver | null = null;
+
+function updateEditFieldsScrollbarFlag() {
+  const el = editFieldsRef.value;
+  if (!el) {
+    editFieldsHasScrollbar.value = false;
+    return;
+  }
+  editFieldsHasScrollbar.value = el.scrollHeight - el.clientHeight > 0.5;
+}
+
+function teardownEditFieldsRo() {
+  editFieldsRo?.disconnect();
+  editFieldsRo = null;
+}
+
+function ensureEditFieldsRo() {
+  teardownEditFieldsRo();
+  const el = editFieldsRef.value;
+  if (!el) {
+    editFieldsHasScrollbar.value = false;
+    return;
+  }
+  updateEditFieldsScrollbarFlag();
+  if (typeof ResizeObserver === "undefined") return;
+  editFieldsRo = new ResizeObserver(() => {
+    updateEditFieldsScrollbarFlag();
+  });
+  editFieldsRo.observe(el);
+  for (const child of el.children) {
+    editFieldsRo.observe(child);
+  }
+}
+
+watch(showEdit, (open) => {
+  if (!open) {
+    monacoOpen.value = false;
+    teardownEditFieldsRo();
+    editFieldsHasScrollbar.value = false;
+    return;
+  }
+  void nextTick(() => {
+    ensureEditFieldsRo();
+    requestAnimationFrame(updateEditFieldsScrollbarFlag);
+  });
+});
+
+watch(
+  () =>
+    editing.value
+      ? [
+          editing.value.pattern,
+          editing.value.replacement,
+          editing.value.name,
+          editing.value.scope,
+          editing.value.excludeScope,
+        ]
+      : null,
+  async () => {
+    if (!showEdit.value) return;
+    await nextTick();
+    updateEditFieldsScrollbarFlag();
+  },
 );
 
 watch(ruleCount, () => {
   void nextTick(syncRuleTableHeadScrollbarPad);
 });
 
-onBeforeUnmount(teardownRuleTableBodyScrollRo);
+onBeforeUnmount(() => {
+  teardownRuleTableBodyScrollRo();
+  teardownEditFieldsRo();
+});
 
 useSortableReorder({
   containerRef: ruleTableBodyRef,
@@ -377,20 +532,19 @@ function moveRule(fromIndex: number, toIndex: number) {
   items.value = arr;
 }
 
-/** 列表「替换范围」列：空=全部（对齐 Legado scope） */
+/** 列表「替换范围」列：空=全部 */
 function displayReplaceRuleScope(rule: Pick<ReplaceRule, "scope">): string {
   const scope = rule.scope?.trim() ?? "";
   return scope || "全部";
 }
 
-const showScopeColumn = computed(() => props.bucket === "findBook");
 </script>
 
 <template>
   <AppModal
     v-model="modelValue"
     title="文本替换"
-    :max-width="showScopeColumn ? '760px' : '680px'"
+    max-width="760px"
     :mask-closable="false"
     :esc-closable="true"
   >
@@ -459,14 +613,14 @@ const showScopeColumn = computed(() => props.bucket === "findBook");
           <colgroup>
             <col class="colCheck" />
             <col class="colRule" />
-            <col v-if="showScopeColumn" class="colScope" />
+            <col class="colScope" />
             <col class="colActions" />
           </colgroup>
           <thead>
             <tr>
               <th class="colCheck" scope="col" aria-label="启用"></th>
               <th class="colRule" scope="col">替换规则</th>
-              <th v-if="showScopeColumn" class="colScope" scope="col">替换范围</th>
+              <th class="colScope" scope="col">替换范围</th>
               <th class="colActions" scope="col">操作</th>
             </tr>
           </thead>
@@ -478,7 +632,7 @@ const showScopeColumn = computed(() => props.bucket === "findBook");
           <colgroup>
             <col class="colCheck" />
             <col class="colRule" />
-            <col v-if="showScopeColumn" class="colScope" />
+            <col class="colScope" />
             <col class="colActions" />
           </colgroup>
           <tbody ref="ruleTableBodyRef">
@@ -504,7 +658,7 @@ const showScopeColumn = computed(() => props.bucket === "findBook");
                   </template>
                 </div>
               </td>
-              <td v-if="showScopeColumn" class="cellScope">
+              <td class="cellScope">
                 <span
                   class="scopeText"
                   :class="{ 'scopeText--all': !(item.scope?.trim()) }"
@@ -593,7 +747,11 @@ const showScopeColumn = computed(() => props.bucket === "findBook");
     :body-scroll="false"
   >
     <div v-if="editing" class="editShell">
-      <div class="editFields">
+      <div
+        ref="editFieldsRef"
+        class="editFields"
+        :class="{ 'editFields--scrollbarPad': editFieldsHasScrollbar }"
+      >
         <label class="editField">
           <span class="editFieldLabel">
             <span class="editFieldLabelTitle">名称</span>
@@ -604,57 +762,85 @@ const showScopeColumn = computed(() => props.bucket === "findBook");
             v-model="editing.name"
           />
         </label>
-        <label class="editField">
-          <span class="editFieldLabel">
+        <div class="editField">
+          <div class="editFieldLabel">
             <span class="editFieldLabelTitle">替换规则</span>
-          </span>
-          <AutoResizeTextarea
+            <IconButton
+              class="editFieldMonacoBtn"
+              :icon-html="icons.sourceCode"
+              title="编辑器"
+              aria-label="编辑器"
+              @click.stop="openReplaceRuleMonaco('pattern')"
+            />
+          </div>
+          <HighlightedCodeTextarea
             class="editFieldInput"
+            :max-height="EDIT_BOOK_SOURCE_TEXTAREA_MAX_HEIGHT_PX"
             v-model="editing.pattern"
           />
-        </label>
+        </div>
         <div class="editCheckRow">
           <AppCheckbox class="editCheck" v-model="editing.isRegex" label="使用正则表达式" />
         </div>
-        <label class="editField">
-          <span class="editFieldLabel">
+        <div class="editField">
+          <div class="editFieldLabel">
             <span class="editFieldLabelTitle">替换为</span>
             <span class="editFieldLabelKey">（可选；正则下可用 @js:）</span>
-          </span>
-          <AutoResizeTextarea
+            <IconButton
+              class="editFieldMonacoBtn"
+              :icon-html="icons.sourceCode"
+              title="编辑器"
+              aria-label="编辑器"
+              @click.stop="openReplaceRuleMonaco('replacement')"
+            />
+          </div>
+          <HighlightedCodeTextarea
             class="editFieldInput"
+            :max-height="EDIT_BOOK_SOURCE_TEXTAREA_MAX_HEIGHT_PX"
             v-model="editing.replacement"
             placeholder="纯文本，或 @js: 脚本（绑定 result）"
           />
-        </label>
+        </div>
         <div class="editCheckRow editCheckRow--pair">
           <AppCheckbox class="editCheck" v-model="editing.scopeTitle" label="作用于标题" />
           <AppCheckbox class="editCheck" v-model="editing.scopeContent" label="作用于正文" />
         </div>
-        <template v-if="bucket === 'findBook'">
-          <label class="editField">
-            <span class="editFieldLabel">
-              <span class="editFieldLabelTitle">替换范围</span>
-              <span class="editFieldLabelKey">（可选）</span>
-            </span>
-            <AutoResizeTextarea
-              class="editFieldInput"
-              v-model="editing.scope"
-              placeholder="书名或书源 URL"
-            />
-          </label>
-          <label class="editField">
-            <span class="editFieldLabel">
-              <span class="editFieldLabelTitle">排除范围</span>
-              <span class="editFieldLabelKey">（可选）</span>
-            </span>
-            <AutoResizeTextarea
-              class="editFieldInput"
-              v-model="editing.excludeScope"
-              placeholder="书名或书源 URL"
-            />
-          </label>
-        </template>
+        <div class="editField">
+          <div class="editFieldLabel">
+            <span class="editFieldLabelTitle">替换范围</span>
+            <span class="editFieldLabelKey">（可选）</span>
+          </div>
+          <ApiEndpointInput
+            class="editFieldScopeInput"
+            input-class="editFieldScopeInputField"
+            :model-value="editing.scope ?? ''"
+            :suggestion-items="scopeSuggestionItems"
+            :suggestions="[]"
+            suggestion-pick-mode="append"
+            :placeholder="scopeFieldPlaceholder"
+            aria-label="替换范围"
+            :scroll-max-height="160"
+            @update:model-value="editing.scope = $event"
+          />
+        </div>
+        <div class="editField">
+          <div class="editFieldLabel">
+            <span class="editFieldLabelTitle">排除范围</span>
+            <span class="editFieldLabelKey">（可选）</span>
+          </div>
+          <ApiEndpointInput
+            class="editFieldScopeInput"
+            input-class="editFieldScopeInputField"
+            :model-value="editing.excludeScope ?? ''"
+            :suggestion-items="scopeSuggestionItems"
+            :suggestions="[]"
+            suggestion-pick-mode="append"
+            :placeholder="scopeFieldPlaceholder"
+            aria-label="排除范围"
+            :scroll-max-height="160"
+            @update:model-value="editing.excludeScope = $event"
+          />
+        </div>
       </div>
     </div>
     <template #footer>
@@ -680,6 +866,14 @@ const showScopeColumn = computed(() => props.bucket === "findBook");
       </div>
     </template>
   </AppModal>
+
+  <BookSourceFieldMonacoModal
+    v-model="monacoOpen"
+    :title="monacoTitle"
+    :language="monacoLanguage"
+    :initial-text="monacoInitialText"
+    @confirm="onReplaceRuleMonacoConfirm"
+  />
 </template>
 
 <style>
@@ -927,14 +1121,23 @@ const showScopeColumn = computed(() => props.bucket === "findBook");
   gap: 20px;
   padding: 10px 0;
 }
+/* 有纵向滚动条时：与轨道留出间距；无条时不加，避免右侧空一条 */
+.editFields--scrollbarPad {
+  padding-right: 8px;
+}
 .editField {
   display: flex;
   flex-direction: column;
   gap: 5px;
 }
 .editFieldLabel {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
   font-size: 12px;
   line-height: 1.4;
+  width: 100%;
 }
 .editFieldLabelTitle {
   font-weight: 600;
@@ -944,8 +1147,21 @@ const showScopeColumn = computed(() => props.bucket === "findBook");
   font-weight: 400;
   color: var(--muted);
 }
+.editFieldMonacoBtn {
+  flex-shrink: 0;
+  margin-left: auto;
+}
 .editFieldInput {
   width: 100%;
+}
+.editFieldScopeInput {
+  flex: 1 1 auto;
+  width: 100%;
+  max-width: 100%;
+}
+.editFieldScopeInput :deep(.editFieldScopeInputField) {
+  width: 100%;
+  box-sizing: border-box;
 }
 .editCheckRow {
   display: flex;

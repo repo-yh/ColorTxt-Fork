@@ -24,6 +24,7 @@ export {
 export type VoiceReadEngineId =
   | "system"
   | "edge"
+  | "winSapi"
   | "dashscope"
   | "minimax"
   | "mimo";
@@ -73,6 +74,18 @@ const ENGINE_LIST_BASE: VoiceReadEngineMetaBase[] = [
     supportsPitch: true,
     voiceSource: "dynamic",
     audioFormat: "mp3",
+    shortChunks: false,
+  },
+  {
+    id: "winSapi",
+    label: "讲述人自然语音",
+    description: "免费离线，通过 Windows SAPI5 调用本机音色",
+    kind: "ipc",
+    auth: "none",
+    supportsRate: true,
+    supportsPitch: false,
+    voiceSource: "dynamic",
+    audioFormat: "wav",
     shortChunks: false,
   },
   {
@@ -198,9 +211,34 @@ export function voiceReadEngineSupportsMultiVoiceScheme(
   return isMimoTtsPresetModel(normalizeMimoTtsModel(config.mimoModel));
 }
 
+/** Windows 专用引擎在非 Win 平台不可用 */
+export function voiceReadEngineAvailableOnPlatform(
+  engine: VoiceReadEngineId,
+): boolean {
+  if (engine !== "winSapi") return true;
+  if (typeof process !== "undefined" && process.platform) {
+    return process.platform === "win32";
+  }
+  if (typeof navigator !== "undefined") {
+    return (
+      /Win/i.test(navigator.platform || "") ||
+      /Windows/i.test(navigator.userAgent || "")
+    );
+  }
+  return false;
+}
+
+export function listVoiceReadEnginesForPlatform(): readonly VoiceReadEngineMetaResolved[] {
+  return VOICE_READ_ENGINE_REGISTRY.filter((m) =>
+    voiceReadEngineAvailableOnPlatform(m.id),
+  );
+}
+
 export function normalizeVoiceReadEngineId(
   raw: unknown,
   fallback: VoiceReadEngineId = "edge",
 ): VoiceReadEngineId {
-  return isVoiceReadEngineId(raw) ? raw : fallback;
+  if (!isVoiceReadEngineId(raw)) return fallback;
+  if (!voiceReadEngineAvailableOnPlatform(raw)) return fallback;
+  return raw;
 }

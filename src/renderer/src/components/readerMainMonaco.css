@@ -408,6 +408,14 @@ body > .overflowingContentWidgets
 }
 
 /*
+ * Diff 左右分栏 sash：与侧栏 .resizer 共用 --app-sash-* / --vscode-sash-*；
+ * standalone Monaco 未必挂 monaco-enable-motion，补上与 VS Code 一致的渐隐。
+ */
+.editorHost--diff .monaco-sash:before {
+  transition: background-color var(--app-sash-fade-duration, 0.1s) ease-out;
+}
+
+/*
  * 智能排版 Diff 预览：Monaco 中间 .gutter 工具栏（非左右编辑器边框）。
  * 背景与 AppHeader 顶栏一致（--bg）；差异块范围竖线为 .gutterItem > .background；
  * 「还原原文」按钮对齐 IconButton（圆角 4px、常态有底、hover 加深）。

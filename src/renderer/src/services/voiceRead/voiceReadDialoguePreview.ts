@@ -2,7 +2,10 @@ import type { VoiceReadEmotionId } from "@shared/voiceReadEmotion";
 import type { CharacterGender, CharacterRosterEntry } from "@shared/characterTypes";
 import type { VoiceReadQuoteAttribution } from "@shared/voiceReadSpeakerIpc";
 import { voiceReadEmotionActive } from "@shared/voiceReadEmotion";
-import type { VoiceReadSettings } from "../../constants/voiceRead";
+import type {
+  VoiceReadDialogueQuoteStyle,
+  VoiceReadSettings,
+} from "../../constants/voiceRead";
 import { hasVoiceReadSpeakableText } from "./voiceReadTextChunks";
 import type { VoiceReadQuoteCarry } from "./voiceReadSegments";
 import { buildLineSpeakChunks } from "./voiceReadLineBuild";
@@ -11,6 +14,10 @@ import {
   voiceReadSpeakerRosterToken,
   type VoiceReadSpeakerAttributionResult,
 } from "./voiceReadSpeakerCache";
+import {
+  collectVoiceReadSpeakerLineContext,
+  voiceReadSpeakerContextCacheToken,
+} from "./voiceReadSpeakerContext";
 import type { VoiceReadSpeakChunk } from "./voiceReadVoiceResolve";
 
 /** 设置页「对白语音」综合试听默认文案（旁白 + 男/女/默认对白） */
@@ -116,6 +123,7 @@ export function voiceReadSettingsPreviewSpeakerCacheKey(
   roster: readonly CharacterRosterEntry[],
   quoteStylesKey: string,
   includeEmotion = false,
+  contextToken = "",
 ): string {
   return [
     "settings-preview",
@@ -126,6 +134,7 @@ export function voiceReadSettingsPreviewSpeakerCacheKey(
     quoteStylesKey,
     voiceReadSpeakerRosterToken(roster),
     includeEmotion ? "emo1" : "emo0",
+    contextToken,
   ].join("\u0003");
 }
 
@@ -135,10 +144,19 @@ async function resolvePreviewLineAttribution(
   lineText: string,
   quoteTexts: string[],
   roster: readonly CharacterRosterEntry[],
+  quoteStyles: readonly VoiceReadDialogueQuoteStyle[],
   quoteStylesKey: string,
   useDefaultQuotes: boolean,
   includeEmotion: boolean,
+  previewLines: readonly string[],
 ): Promise<VoiceReadSpeakerAttributionResult> {
+  const ctx = collectVoiceReadSpeakerLineContext({
+    lineNo,
+    quoteStyles,
+    minLineNo: 0,
+    maxLineNo: Math.max(0, previewLines.length - 1),
+    getLine: (ln) => previewLines[ln] ?? "",
+  });
   const cacheKey = voiceReadSettingsPreviewSpeakerCacheKey(
     fullPreviewText,
     lineNo,
@@ -147,6 +165,7 @@ async function resolvePreviewLineAttribution(
     roster,
     quoteStylesKey,
     includeEmotion,
+    voiceReadSpeakerContextCacheToken(ctx),
   );
 
   if (useDefaultQuotes) {
@@ -164,6 +183,7 @@ async function resolvePreviewLineAttribution(
     roster,
     cacheKey,
     includeEmotion,
+    ctx,
   );
 }
 
@@ -234,9 +254,11 @@ export async function buildDialogueAiPreviewSpeakChunks(
       lineText,
       quoteTexts,
       roster,
+      settings.multi.dialogueQuoteStyles,
       quoteStylesKey,
       useDefaultQuotes,
       includeEmotion,
+      lines,
     );
 
     const built = buildLineSpeakChunks(settings, lineText, roster, {
