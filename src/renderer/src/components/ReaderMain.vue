@@ -2228,12 +2228,25 @@ function toggleFindWidget() {
   const e = getFindTargetEditor();
   if (!e) return;
   const findCtrl = e.getContribution(FIND_CONTROLLER_ID) as {
-    getState?: () => { isRevealed: boolean };
+    getState?: () => { isRevealed: boolean; searchString: string };
     closeFindWidget?: () => void;
   } | null;
   const revealed = findCtrl?.getState?.().isRevealed === true;
   e.focus();
   if (revealed) {
+    /** 有划词选中时：判断划词内容与当前查找词是否相等，不相同则查找新词 */
+    const selection = e.getSelection();
+    if (selection && !selection.isEmpty()) {
+      const m = e.getModel();
+      if (m) {
+        const selectedText = m.getValueInRange(selection);
+        const currentSearch = findCtrl?.getState?.()?.searchString ?? "";
+        if (selectedText && selectedText !== currentSearch) {
+          void openFindWithSearchStringAsync(selectedText);
+          return;
+        }
+      }
+    }
     /** Ctrl+F 关闭：不自动恢复内联搜索装饰器 */
     if (findCtrl?.closeFindWidget) {
       findCtrl.closeFindWidget();
