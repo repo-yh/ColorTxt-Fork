@@ -60,6 +60,7 @@ import {
 import { installReaderScrollKeyHandler } from "../monaco/readerKeyScroll";
 import {
   applyLeadIndentFullWidth,
+  buildChaptersFromPlainText,
   chapterTitleForDisplay,
   leadingWhitespaceColumnCount,
 } from "../chapter";
@@ -3024,6 +3025,137 @@ function countHighlightTermMatches(
   });
 }
 
+async function buildColoredHtml(
+  fullText: string,
+  filePath: string,
+  highlightWords: HighlightWordsByIndex | undefined,
+) {
+  const escapeHtml = (s: string) =>
+    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+  const palette =
+    lastAppThemeName === "vs"
+      ? props.readerSurfaceLight ?? defaultReaderPaletteLight
+      : props.readerSurfaceDark ?? defaultReaderPaletteDark;
+
+  const colorEnabled =
+    props.readerPaletteColorEnabled ?? defaultReaderPaletteColorEnabled;
+
+  const tokenColorMap: Record<string, string> = {
+    "": palette.bodyText,
+    "txtr.quoteInner": colorEnabled.txtrQuoteInner
+      ? palette.txtrQuoteInner
+      : palette.bodyText,
+    "txtr.bracketInner": colorEnabled.txtrBracketInner
+      ? palette.txtrBracketInner
+      : palette.bodyText,
+    "txtr.punctuation": colorEnabled.txtrPunctuation
+      ? palette.txtrPunctuation
+      : palette.bodyText,
+    "txtr.specialMarker": colorEnabled.txtrSpecialMarker
+      ? palette.txtrSpecialMarker
+      : palette.bodyText,
+    "txtr.number": colorEnabled.txtrNumber
+      ? palette.txtrNumber
+      : palette.bodyText,
+    "txtr.english": colorEnabled.txtrEnglish
+      ? palette.txtrEnglish
+      : palette.bodyText,
+  };
+
+  // highlight colors
+  for (const [idx, c] of (props.highlightColors ?? []).entries()) {
+    tokenColorMap[`txtr.customHighlight.${idx}`] = c;
+  }
+
+  // 如有高亮词，注册到 Monarch 再 tokenize；tokenize 后恢复原 Monarch
+  let restoreMonarch = false;
+  if (highlightWords) {
+    monaco.languages.setMonarchTokensProvider(
+      languageId,
+      createTxtrTextMonarchLanguage(
+        {
+          enabled: props.monacoCustomHighlight,
+          highlightColorsLength: props.highlightColors.length,
+          highlightWordsByIndex: highlightWords,
+        },
+        props.txtrDelimitedMatchCrossLine,
+        props.readerPaletteColorEnabled,
+      ),
+    );
+    restoreMonarch = true;
+  }
+
+  const tokenLines = await monaco.editor.tokenize(fullText, "txtr-text");
+
+  if (restoreMonarch) {
+    applyTxtrMonarchTokenizer();
+  }
+
+  const lines = fullText.split("\n");
+
+  // 章节检测
+  const chapters = buildChaptersFromPlainText(
+    fullText,
+    props.chapterMinCharCount ?? 0,
+  );
+  const chapterLineSet = new Set<number>();
+  const chapterList = chapters.map((c) => {
+    const titleText = chapterTitleForDisplay(c.title);
+    // 引擎检测多行标题时 lineNumber 常落在第二行；若该行不含标题文字则回退到上一行
+    const detectedLine = c.lineNumber;
+    const targetLine =
+      detectedLine > 0 &&
+      !lines[detectedLine]?.includes(titleText)
+        ? detectedLine - 1
+        : detectedLine;
+    chapterLineSet.add(targetLine);
+    return { title: titleText, line: targetLine };
+  });
+  let html = "";
+  for (let i = 0; i < lines.length; i++) {
+    const cls = chapterLineSet.has(i) ? ' class="chapter-title"' : "";
+    const line = lines[i];
+    if (line.length === 0) {
+      html += `<div id="L${i}"${cls}>&nbsp;</div>\n`;
+      continue;
+    }
+    const tokens = tokenLines[i];
+    if (!tokens || tokens.length === 0) {
+      html += `<div id="L${i}"${cls}><span style="color:${palette.bodyText}">${escapeHtml(line)}</span></div>\n`;
+      continue;
+    }
+    let spans = "";
+    let pos = 0;
+    for (let j = 0; j < tokens.length; j++) {
+      const t = tokens[j];
+      const nextOffset =
+        j + 1 < tokens.length ? tokens[j + 1].offset : line.length;
+      if (t.offset > pos) {
+        spans += escapeHtml(line.slice(pos, t.offset));
+      }
+      const color =
+        tokenColorMap[t.type] ??
+        tokenColorMap[t.type.replace(/\.txtr-text$/, "")] ??
+        palette.bodyText;
+      spans += `<span style="color:${color}">${escapeHtml(line.slice(t.offset, nextOffset))}</span>`;
+      pos = nextOffset;
+    }
+    if (pos < line.length) {
+      spans += escapeHtml(line.slice(pos));
+    }
+    html += `<div id="L${i}"${cls}>${spans}</div>\n`;
+  }
+
+  return {
+    ok: true as const,
+    html,
+    theme: lastAppThemeName,
+    file: filePath,
+    chapters: chapterList,
+  };
+}
+
 defineExpose({
   appendText,
   setFullText,
@@ -3128,95 +3260,26 @@ defineExpose({
   suppressHighlightTipForProgrammaticSelection,
   // Editor model access
   getModel: () => model.value ?? null,
+
+  generateColoredHtmlForText: async (
+    fullText: string,
+    filePath: string,
+    highlightWords: HighlightWordsByIndex | undefined,
+  ) => {
+    return buildColoredHtml(fullText, filePath, highlightWords);
+  },
+
   generateColoredHtml: async () => {
     const m = model.value;
     if (!m) return { ok: false as const, reason: "未打开文件" as const };
     const fullText = m.getValue();
     if (fullText.length === 0)
       return { ok: false as const, reason: "文件无内容" as const };
-
-    const escapeHtml = (s: string) =>
-      s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-
-    const palette =
-      lastAppThemeName === "vs"
-        ? props.readerSurfaceLight ?? defaultReaderPaletteLight
-        : props.readerSurfaceDark ?? defaultReaderPaletteDark;
-
-    const colorEnabled =
-      props.readerPaletteColorEnabled ?? defaultReaderPaletteColorEnabled;
-
-    const tokenColorMap: Record<string, string> = {
-      "": palette.bodyText,
-      "txtr.quoteInner": colorEnabled.txtrQuoteInner
-        ? palette.txtrQuoteInner
-        : palette.bodyText,
-      "txtr.bracketInner": colorEnabled.txtrBracketInner
-        ? palette.txtrBracketInner
-        : palette.bodyText,
-      "txtr.punctuation": colorEnabled.txtrPunctuation
-        ? palette.txtrPunctuation
-        : palette.bodyText,
-      "txtr.specialMarker": colorEnabled.txtrSpecialMarker
-        ? palette.txtrSpecialMarker
-        : palette.bodyText,
-      "txtr.number": colorEnabled.txtrNumber
-        ? palette.txtrNumber
-        : palette.bodyText,
-      "txtr.english": colorEnabled.txtrEnglish
-        ? palette.txtrEnglish
-        : palette.bodyText,
-    };
-    for (const [idx, c] of (props.highlightColors ?? []).entries()) {
-      tokenColorMap[`txtr.customHighlight.${idx}`] = c;
-    }
-
-    const tokenLines = await monaco.editor.tokenize(
+    return buildColoredHtml(
       fullText,
-      "txtr-text",
+      props.readerFilePath ?? "",
+      props.highlightWordsByIndex,
     );
-
-    const lines = fullText.split("\n");
-    let html = "";
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      if (line.length === 0) {
-        html += "<div>&nbsp;</div>\n";
-        continue;
-      }
-      const tokens = tokenLines[i];
-      if (!tokens || tokens.length === 0) {
-        html += `<div><span style="color:${palette.bodyText}">${escapeHtml(line)}</span></div>\n`;
-        continue;
-      }
-      let spans = "";
-      let pos = 0;
-      for (let j = 0; j < tokens.length; j++) {
-        const t = tokens[j];
-        const nextOffset =
-          j + 1 < tokens.length ? tokens[j + 1].offset : line.length;
-        if (t.offset > pos) {
-          spans += escapeHtml(line.slice(pos, t.offset));
-        }
-        const color =
-          tokenColorMap[t.type] ??
-          tokenColorMap[t.type.replace(/\.txtr-text$/, "")] ??
-          palette.bodyText;
-        spans += `<span style="color:${color}">${escapeHtml(line.slice(t.offset, nextOffset))}</span>`;
-        pos = nextOffset;
-      }
-      if (pos < line.length) {
-        spans += escapeHtml(line.slice(pos));
-      }
-      html += `<div>${spans}</div>\n`;
-    }
-
-    return {
-      ok: true as const,
-      html,
-      theme: lastAppThemeName,
-      file: props.readerFilePath ?? "",
-    };
   },
 });
 

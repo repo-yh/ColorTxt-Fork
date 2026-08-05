@@ -6,10 +6,24 @@ declare global {
   interface Window {
     colorTxt: ColorTxtApi;
     __COLORTXT_PRELOAD__?: boolean;
-    __colorTxtGenerateColoredHtml?: () => Promise<
+    __colorTxtGenerateColoredHtmlForText?: (
+      text: string,
+      filePath: string,
+    ) => Promise<
       | { ok: false; reason: string }
-      | { ok: true; html: string; theme: string; file: string }
+      | {
+          ok: true;
+          html: string;
+          theme: string;
+          file: string;
+          chapters: { title: string; line: number }[];
+        }
     >;
+    __colorTxtGetFileList?: () => Array<{
+      name: string;
+      path: string;
+      active: boolean;
+    }>;
   }
 }
 

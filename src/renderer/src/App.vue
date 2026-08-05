@@ -503,13 +503,38 @@ onMounted(() => {
   void refreshAiSidebarFlags();
   refreshReplaceRulesCache();
   window.addEventListener(appReplaceRulesChangedEvent, onReplaceRulesChanged);
-  window.__colorTxtGenerateColoredHtml = async () => {
-    const result = readerRef.value?.generateColoredHtml?.();
-    if (result) return result;
-    return {
-      ok: false as const,
-      reason: "阅读器未就绪" as const,
-    };
+  window.__colorTxtGenerateColoredHtmlForText = async (
+    text: string,
+    filePath: string,
+  ) => {
+    // 合并全局 + 文件级高亮词
+    let hl = highlightWordsByIndexGlobal.value;
+    const meta = findFileMetaRecord(fileMetaRecords.value, filePath);
+    if (meta?.highlightWordsByIndex) {
+      const merged: Record<string, any[]> = { ...hl };
+      for (const [idx, words] of Object.entries(
+        meta.highlightWordsByIndex,
+      )) {
+        merged[idx] = [...(merged[idx] ?? []), ...words];
+      }
+      hl = merged;
+    }
+    return (
+      readerRef.value?.generateColoredHtmlForText?.(text, filePath, hl) ?? {
+        ok: false as const,
+        reason: "阅读器未就绪" as const,
+      }
+    );
+  };
+  window.__colorTxtGetFileList = () => {
+    return txtFiles.value.map((f) => {
+      const meta = findFileMetaRecord(fileMetaRecords.value, f.path);
+      return {
+        name: meta?.fileName || f.name,
+        path: f.path,
+        active: f.path === currentFile.value,
+      };
+    });
   };
 });
 
@@ -633,11 +658,38 @@ watch(webDisplayEnabled, async (enabled) => {
       );
     } else {
       appToast("Web 展示服务已启动: http://localhost:8888", { kind: "success" });
+      // 立即预热当前文件
+      cacheCurrentFile();
     }
   } else {
     await window.colorTxt.webDisplay.stop();
   }
 });
+
+function cacheCurrentFile() {
+  const fp = currentFile.value;
+  if (!fp) return;
+  window.colorTxt.webDisplay.setCurrentFile(fp).catch(() => {});
+  const doCache = async () => {
+    const result = readerRef.value?.generateColoredHtml?.();
+    if (!result) return;
+    const r = await result;
+    if (r.ok) {
+      window.colorTxt.webDisplay.cacheContent(fp, r).catch(() => {});
+    }
+  };
+  doCache();
+}
+
+// 切书完成（loading → false）后异步预热缓存
+watch(
+  () => loading.value,
+  (wasLoading, prevLoading) => {
+    if (prevLoading && !wasLoading && currentFile.value && webDisplayEnabled.value) {
+      cacheCurrentFile();
+    }
+  },
+);
 
 /** 小于该字数的章节不纳入章节列表与导航 */
 const chapterMinCharCount = ref(defaultChapterMinCharCount);
@@ -780,6 +832,19 @@ const lineationColorsDark = ref<string[]>([...DEFAULT_LINEATION_COLORS_DARK]);
 /** 已收藏（全书通用）高亮词 */
 const highlightWordsByIndexGlobal = ref<HighlightWordsByIndex | undefined>(
   undefined,
+);
+
+// 高亮词变动时刷新缓存（全局词 + 当前文件级词）
+watch(
+  () => {
+    const meta = findFileMetaRecord(fileMetaRecords.value, currentFile.value ?? "");
+    return [highlightWordsByIndexGlobal.value, meta?.highlightWordsByIndex];
+  },
+  () => {
+    if (webDisplayEnabled.value && currentFile.value) {
+      cacheCurrentFile();
+    }
+  },
 );
 const lineationLastColors = ref<LineationLastColorPrefs>({
   ...DEFAULT_LINEATION_LAST_COLORS,
