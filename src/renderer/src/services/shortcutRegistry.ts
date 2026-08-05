@@ -17,6 +17,8 @@ export type ShortcutActionId =
   | "decreaseLineHeight"
   | "increaseLineHeight"
   | "toggleFind"
+  | "toggleReaderEdit"
+  | "editSelectedText"
   | "openChapterRules"
   | "toggleBookmark"
   | "toggleSidebar"
@@ -108,6 +110,18 @@ export const SHORTCUT_ACTIONS: ShortcutActionDef[] = [
   },
   { id: "toggleFind", scope: "window", desc: "查找", handlerKey: "toggleFind" },
   {
+    id: "toggleReaderEdit",
+    scope: "window",
+    desc: "进入/退出编辑模式",
+    handlerKey: "toggleReaderEdit",
+  },
+  {
+    id: "editSelectedText",
+    scope: "window",
+    desc: "编辑选中文本",
+    handlerKey: "editSelectedText",
+  },
+  {
     id: "openChapterRules",
     scope: "window",
     desc: "章节匹配规则",
@@ -196,6 +210,8 @@ export function createDefaultShortcutBindings(isMac: boolean): ShortcutBindingMa
     decreaseLineHeight: `${accel}+[`,
     increaseLineHeight: `${accel}+]`,
     toggleFind: `${accel}+F`,
+    toggleReaderEdit: `${accel}+/`,
+    editSelectedText: `${accel}+E`,
     openChapterRules: `${accel}+R`,
     toggleBookmark: `${accel}+D`,
     toggleSidebar: `${accel}+B`,

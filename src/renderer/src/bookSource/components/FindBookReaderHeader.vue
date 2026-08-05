@@ -48,6 +48,8 @@ const props = withDefaults(
     findShortcutLabel?: string;
     readerEditMode?: boolean;
     canEnterReaderEditMode?: boolean;
+    /** 保存章节缓存中 */
+    readerChapterSaving?: boolean;
     /** 有已启用的文本替换规则时工具栏按钮为激活态 */
     textReplaceActive?: boolean;
   }>(),
@@ -68,6 +70,7 @@ const props = withDefaults(
     findShortcutLabel: "",
     readerEditMode: false,
     canEnterReaderEditMode: false,
+    readerChapterSaving: false,
     textReplaceActive: false,
   },
 );
@@ -192,6 +195,7 @@ function onOpenTextReplace() {
         :icon-html="icons.save"
         title="保存到缓存"
         aria-label="保存到缓存"
+        :disabled="readerChapterSaving"
         @click="emit('saveReaderChapter')"
       />
     </div>

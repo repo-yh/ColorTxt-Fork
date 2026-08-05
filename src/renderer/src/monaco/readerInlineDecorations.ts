@@ -248,7 +248,8 @@ function chapterTitleStyleEndColumn(
 
 /**
  * 构建章节标题的 Monaco 模型装饰（仅 `inlineClassName` 着色）。
- * 标题前后留白由 {@link formatPhysicalLinesForReader} 在开启「压缩空行」时插入空行实现。
+ * 标题前后空行由 {@link formatPhysicalLinesForReader} 在开启「压缩空行」时按
+ * `chapterTitleBlankMode`（默认 `before2After1`）插入。
  */
 export function buildChapterTitleDecorations(
   monacoApi: typeof import("monaco-editor"),

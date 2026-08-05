@@ -197,6 +197,12 @@
   text-align: center;
 }
 
+.readerBusyHintLine {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15em;
+}
+
 /* 与 Monaco Diff 中间 sash 一致：4px 命中区、ew-resize、悬停延迟出蓝条、渐隐 */
 .resizer {
   position: absolute;

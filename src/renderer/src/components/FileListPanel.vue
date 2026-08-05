@@ -43,6 +43,7 @@ import { fileListEmptyHint, fileListDropHint, fileListNoMatchHint } from "../con
 import { useAnchoredAppShellMenu } from "../composables/useAnchoredAppShellMenu";
 import AppShellMenuTeleport from "./AppShellMenuTeleport.vue";
 import { appToast } from "../services/appToast";
+import { appLoading } from "../services/appLoading";
 
 const FILES_HEADER_MORE_MENU_W = 140;
 
@@ -167,22 +168,24 @@ async function onRemoveMissingFiles() {
   }
   removingMissingFiles.value = true;
   try {
-    const missing: string[] = [];
-    for (const p of paths) {
-      try {
-        // file:stat 对 ENOENT 返回 isFile/isDirectory 均为 false，不抛错
-        const st = await window.colorTxt.stat(p);
-        if (!st.isFile) missing.push(p);
-      } catch {
-        missing.push(p);
+    await appLoading.with("检查中", async () => {
+      const missing: string[] = [];
+      for (const p of paths) {
+        try {
+          // file:stat 对 ENOENT 返回 isFile/isDirectory 均为 false，不抛错
+          const st = await window.colorTxt.stat(p);
+          if (!st.isFile) missing.push(p);
+        } catch {
+          missing.push(p);
+        }
       }
-    }
-    if (missing.length === 0) {
-      appToast("没有失效文件", { kind: "info" });
-      return;
-    }
-    emit("removeFileList", missing);
-    appToast(`已移除 ${missing.length} 个失效文件`, { kind: "success" });
+      if (missing.length === 0) {
+        appToast("没有失效文件", { kind: "info" });
+        return;
+      }
+      emit("removeFileList", missing);
+      appToast(`已移除 ${missing.length} 个失效文件`, { kind: "success" });
+    });
   } finally {
     removingMissingFiles.value = false;
   }

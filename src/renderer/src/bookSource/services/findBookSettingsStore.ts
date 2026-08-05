@@ -1,6 +1,7 @@
 import {
   clampLineHeightMultipleForFontSize,
   defaultCompressBlankKeepOneBlank,
+  parseChapterTitleBlankMode,
   defaultCompressBlankLines,
   defaultChapterNavToolbarEnabled,
   defaultFullscreenReaderWidthPercent,
@@ -8,6 +9,7 @@ import {
   defaultShowSidebar,
   defaultLeadIndentFullWidth,
   defaultMonacoAdvancedWrapping,
+  defaultMonacoCjkWrapOptimize,
   defaultMonacoCustomHighlight,
   defaultMonacoSmoothScrolling,
   defaultMouseWheelScrollSensitivity,
@@ -18,12 +20,19 @@ import {
   defaultReaderEditShowLineNumbers,
   defaultReaderFontSize,
   defaultReaderLineHeightMultiple,
+  defaultLineSpacingPx,
+  clampLineSpacingPx,
+  defaultLetterSpacingPx,
+  clampLetterSpacingPx,
+  defaultReaderHorizontalInsetPx,
+  clampReaderHorizontalInsetPx,
   defaultStickyChapterTitleEnabled,
   defaultTxtrDelimitedMatchCrossLine,
   FIND_BOOK_SIDEBAR_MIN_WIDTH,
   normalizeLineHeightMultiple,
   persistKey,
   SIDEBAR_ACTIVITY_BAR_WIDTH,
+  type ChapterTitleBlankMode,
 } from "../../constants/appUi";
 import {
   defaultTimedScrollIntervalMs,
@@ -126,17 +135,22 @@ export function snapshotFindBookOnlySettingsFromStore(state: {
 export type SharedReaderSettingsSnapshot = {
   readerFontSize: number;
   readerLineHeightMultiple: number;
+  readerLineSpacingPx: number;
+  readerLetterSpacingPx: number;
+  readerHorizontalInsetPx: number;
   monacoFontFamily: string;
   pinnedOtherFonts: string[];
   monacoCustomHighlight: boolean;
   txtrDelimitedMatchCrossLine: boolean;
   compressBlankLines: boolean;
   compressBlankKeepOneBlank: boolean;
+  chapterTitleBlankMode: ChapterTitleBlankMode;
   leadIndentFullWidth: boolean;
   textConvertZh: TextConvertZhMode;
   textConvertLetter: TextConvertWidthMode;
   textConvertDigit: TextConvertWidthMode;
   monacoAdvancedWrapping: boolean;
+  monacoCjkWrapOptimize: boolean;
   monacoSmoothScrolling: boolean;
   mouseWheelScrollSensitivity: number;
   fastScrollSensitivity: number;
@@ -162,6 +176,18 @@ export function sharedReaderSettingsFromMainData(
       typeof data.lineHeightMultiple === "number"
         ? normalizeLineHeightMultiple(data.lineHeightMultiple)
         : normalizeLineHeightMultiple(defaultReaderLineHeightMultiple),
+    readerLineSpacingPx:
+      typeof data.lineSpacingPx === "number"
+        ? clampLineSpacingPx(data.lineSpacingPx)
+        : defaultLineSpacingPx,
+    readerLetterSpacingPx:
+      typeof data.letterSpacingPx === "number"
+        ? clampLetterSpacingPx(data.letterSpacingPx)
+        : defaultLetterSpacingPx,
+    readerHorizontalInsetPx:
+      typeof data.readerHorizontalInsetPx === "number"
+        ? clampReaderHorizontalInsetPx(data.readerHorizontalInsetPx)
+        : defaultReaderHorizontalInsetPx,
     monacoFontFamily:
       typeof data.fontFamily === "string" && data.fontFamily.trim()
         ? data.fontFamily.trim()
@@ -185,6 +211,9 @@ export function sharedReaderSettingsFromMainData(
       typeof data.compressBlankKeepOneBlank === "boolean"
         ? data.compressBlankKeepOneBlank
         : defaultCompressBlankKeepOneBlank,
+    chapterTitleBlankMode: parseChapterTitleBlankMode(
+      data.chapterTitleBlankMode,
+    ),
     leadIndentFullWidth:
       typeof data.leadIndentFullWidth === "boolean"
         ? data.leadIndentFullWidth
@@ -198,6 +227,10 @@ export function sharedReaderSettingsFromMainData(
       typeof data.monacoAdvancedWrapping === "boolean"
         ? data.monacoAdvancedWrapping
         : defaultMonacoAdvancedWrapping,
+    monacoCjkWrapOptimize:
+      typeof data.monacoCjkWrapOptimize === "boolean"
+        ? data.monacoCjkWrapOptimize
+        : defaultMonacoCjkWrapOptimize,
     monacoSmoothScrolling:
       typeof data.monacoSmoothScrolling === "boolean"
         ? data.monacoSmoothScrolling
@@ -247,17 +280,22 @@ export function snapshotSharedReaderSettingsForMain(
   return {
     fontSize: state.readerFontSize,
     lineHeightMultiple: state.readerLineHeightMultiple,
+    lineSpacingPx: state.readerLineSpacingPx,
+    letterSpacingPx: state.readerLetterSpacingPx,
+    readerHorizontalInsetPx: state.readerHorizontalInsetPx,
     fontFamily: state.monacoFontFamily,
     pinnedOtherFonts: [...state.pinnedOtherFonts],
     monacoCustomHighlight: state.monacoCustomHighlight,
     txtrDelimitedMatchCrossLine: state.txtrDelimitedMatchCrossLine,
     compressBlankLines: state.compressBlankLines,
     compressBlankKeepOneBlank: state.compressBlankKeepOneBlank,
+    chapterTitleBlankMode: state.chapterTitleBlankMode,
     leadIndentFullWidth: state.leadIndentFullWidth,
     textConvertZh: state.textConvertZh,
     textConvertLetter: state.textConvertLetter,
     textConvertDigit: state.textConvertDigit,
     monacoAdvancedWrapping: state.monacoAdvancedWrapping,
+    monacoCjkWrapOptimize: state.monacoCjkWrapOptimize,
     monacoSmoothScrolling: state.monacoSmoothScrolling,
     mouseWheelScrollSensitivity: state.mouseWheelScrollSensitivity,
     fastScrollSensitivity: state.fastScrollSensitivity,

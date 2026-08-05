@@ -1,4 +1,9 @@
 import {
+  chapterTitleBlankCounts,
+  defaultChapterTitleBlankMode,
+  type ChapterTitleBlankMode,
+} from "../constants/appUi";
+import {
   applyLeadIndentFullWidth,
   detectChapterTitle,
   filterChaptersByMinCharCount,
@@ -32,6 +37,11 @@ import { countCharsForLine } from "../utils/format";
 export type ReaderDisplayFormatOptions = {
   compressBlankLines: boolean;
   compressBlankKeepOneBlank: boolean;
+  /**
+   * 压缩空行时章节标题留白（`before1` / `before1After1` / `before2After1`）。
+   * 与「每行下方保留一个空行」独立：后者只作用于非标题正文行。
+   */
+  chapterTitleBlankMode: ChapterTitleBlankMode;
   leadIndentFullWidth: boolean;
   /** 与侧栏章节列表一致：不足最少字数的标题行不插入章节上下空行 */
   minCharCount?: number;
@@ -450,7 +460,11 @@ export function formatPhysicalLinesForReader(
   }
 
   const keepOneBlank = options.compressBlankKeepOneBlank;
-  const blanksAbove = keepOneBlank ? 1 : 2;
+  const titleBlanks = chapterTitleBlankCounts(
+    options.chapterTitleBlankMode ?? defaultChapterTitleBlankMode,
+  );
+  const blanksAbove = titleBlanks.before;
+  const blanksBelow = titleBlanks.after;
   const out: string[] = [];
   const displayLineToPhysicalLine: number[] = [];
 
@@ -531,7 +545,9 @@ export function formatPhysicalLinesForReader(
       }
       const titleDisplayLine = pushDisplay(shown, physicalLine, linkContext);
       chapterTitleDisplayLineByPhysical.set(physicalLine, titleDisplayLine);
-      pushDisplay("", physicalLine);
+      for (let i = 0; i < blanksBelow; i += 1) {
+        pushDisplay("", physicalLine);
+      }
     } else {
       pushDisplay(shown, physicalLine, linkContext);
       if (keepOneBlank) pushDisplay("", physicalLine);
@@ -671,7 +687,11 @@ export async function formatPhysicalLinesForReaderAsync(
   }
 
   const keepOneBlank = options.compressBlankKeepOneBlank;
-  const blanksAbove = keepOneBlank ? 1 : 2;
+  const titleBlanks = chapterTitleBlankCounts(
+    options.chapterTitleBlankMode ?? defaultChapterTitleBlankMode,
+  );
+  const blanksAbove = titleBlanks.before;
+  const blanksBelow = titleBlanks.after;
   const out: string[] = [];
   const displayLineToPhysicalLine: number[] = [];
 
@@ -757,7 +777,9 @@ export async function formatPhysicalLinesForReaderAsync(
       }
       const titleDisplayLine = pushDisplay(shown, physicalLine, linkContext);
       chapterTitleDisplayLineByPhysical.set(physicalLine, titleDisplayLine);
-      pushDisplay("", physicalLine);
+      for (let j = 0; j < blanksBelow; j += 1) {
+        pushDisplay("", physicalLine);
+      }
     } else {
       pushDisplay(shown, physicalLine, linkContext);
       if (keepOneBlank) pushDisplay("", physicalLine);

@@ -72,6 +72,8 @@ export function readerEditorLineHeight(
 export type ReaderEditorCreateOptionsInput = {
   fontSize: number;
   lineHeightMultiple: number;
+  /** Monaco `letterSpacing`（px） */
+  letterSpacingPx?: number;
   fontFamily: string;
   /**
    * 阅读器 Monaco 主题名（`txtr-reader` / `txtr-reader-dark`）。
@@ -101,6 +103,7 @@ export function buildReaderEditorSharedCoreOptions(
   | "theme"
   | "fontSize"
   | "lineHeight"
+  | "letterSpacing"
   | "fontFamily"
   | "automaticLayout"
   | "smoothScrolling"
@@ -125,6 +128,7 @@ export function buildReaderEditorSharedCoreOptions(
   const {
     fontSize,
     lineHeightMultiple,
+    letterSpacingPx = 0,
     fontFamily,
     theme = "txtr-reader",
     wrappingStrategyAdvanced = false,
@@ -138,6 +142,7 @@ export function buildReaderEditorSharedCoreOptions(
     theme,
     fontSize,
     lineHeight: readerEditorLineHeight(fontSize, lineHeightMultiple),
+    letterSpacing: letterSpacingPx,
     fontFamily,
     automaticLayout: true,
     smoothScrolling,
@@ -396,5 +401,14 @@ export function buildReaderEditorLineHeightUpdate(input: {
       input.fontSize,
       input.lineHeightMultiple,
     ),
+  };
+}
+
+/** 与 `setLetterSpacingPx` 同步：仅更新字间距 */
+export function buildReaderEditorLetterSpacingUpdate(input: {
+  letterSpacingPx: number;
+}): Pick<editor.IEditorOptions, "letterSpacing"> {
+  return {
+    letterSpacing: input.letterSpacingPx,
   };
 }

@@ -51,7 +51,8 @@
 | <img src="./src/renderer/src/assets/indent.svg" width="18" height="18" alt=""> | 行首缩进 | 在行首添加全角缩进 |
 | <img src="./src/renderer/src/assets/ebook.svg" width="18" height="18" alt=""> | 文件列表 | 拖放添加文件 / 目录（会递归读取子目录），支持分类 / 排序 / 过滤 |
 | <img src="./src/renderer/src/assets/find.svg" width="18" height="18" alt=""> | 全文搜索 | 检索所有匹配项并给出结果列表（区别于阅读区的逐个查找） |
-| <img src="./src/renderer/src/assets/font_family.svg" width="18" height="18" alt=""> | 字体 / 字号 / 行高 | 内置 `京華老宋体`，也可以选择系统中安装的任意字体 |
+| <img src="./src/renderer/src/assets/font_family.svg" width="18" height="18" alt=""> | 字体 | 可设置字体 / 字号 / 行高；内置 `京華老宋体`，也可以选择系统中安装的任意字体 |
+|  | 排版 | 可设置字间距 / 行间距 / 左右边距 |
 | <img src="./src/renderer/src/assets/dark.svg" width="18" height="18" alt=""> | 主题切换 | 内置明亮 / 暗黑两种主题 |
 | <img src="./src/renderer/src/assets/enter_fullscreen.svg" width="18" height="18" alt=""> | 全屏阅读 | **沉浸式阅读体验**，阅读区域宽度可自由调整 |
 |  | 粘性标题栏 | 章节标题会常驻顶部，看到哪里一目了然 |
@@ -64,11 +65,13 @@
 
 支持打开 `.md` 文件，章节按 ATX `#` 标题识别，章节列表按标题层级缩进。
 
-> 说明：只支持标题、链接、图片等少量 Markdown 语法，服务于小说文本。
+> [!NOTE]
+> 只支持标题、链接、图片等少量 Markdown 语法，服务于小说文本。
 
 支持打开常见的电子书格式（`.epub`/`.mobi`/`.azw3`/`.fb2`/`.fbz`/`.pdf`/`.chm`），打开时会转换为 `.md` 进行加载。
 
-> 说明：会舍弃掉电子书自带的样式，只提取里面的文本进行展示。
+> [!NOTE]
+> 会舍弃掉电子书自带的样式，只提取里面的文本进行展示。
 
 ### 关于「摸鱼快捷键」
 
@@ -76,18 +79,24 @@
 
 默认的快捷键是 `Ctrl`+`` ` ``，你也可以在「快捷键」面板中自定义。
 
-在 macOS 上，要隐藏程序坞图标，需要在 `系统设置` -> `桌面与程序坞` 中关掉 `在程序坞中显示建议App和最近使用的App`。
+> [!NOTE]
+> macOS 上，要隐藏程序坞图标，需要在 `系统设置` → `桌面与程序坞` 中关掉 `在程序坞中显示建议App和最近使用的App`。
 
+> [!WARNING]
 > 已知问题：在 Linux Wayland 上，全局快捷键会失效，这个暂时没有解决办法。
 
 ### 关于「高级换行策略」
 
 阅读器默认使用一套比较简单的换行算法，效率高，但不够准确，会出现该换行却没有换行的情况。这个问题连 VSCode 都没能完美解决。
 
+> [!IMPORTANT]
+> 彩读给 Monaco 打了补丁，「简单换行策略」下的中文自动换行效果已经得到了不错的改善，所以除非情况特殊，不建议开启「高级换行策略」
+
 「高级换行策略」则使用了一套更复杂的算法，能有效提高换行的准确性，但性能较差。当要处理的文件比较大时，会出现明显卡顿，要等计算完才能恢复。
 
 所以在做一些会影响布局的操作时（比如修改文字格式、调整窗口大小等），建议先关掉「高级换行策略」，等操作完后再重新开启。
 
+> [!WARNING]
 > 已知问题：启用「高级换行策略」会有很大的内存开销，且这个占用难以被释放，见 [#5311](https://github.com/microsoft/monaco-editor/issues/5311)。
 
 ### 关于「语音朗读」
@@ -170,6 +179,7 @@ OpenAI 接口拼接方式：
 
 <img src="./images/AI智能排版_Diff预览.jpg" width="600">
 
+> [!NOTE]
 > **不同模型的排版结果可能差异较大**，_请自行测试_。
 
 可在「设置 → 编辑」中自定义排版选项：
@@ -189,6 +199,7 @@ OpenAI 接口拼接方式：
 
 可通过「设置 → 技能 → 智能排版」自定义 AI 排版行为。
 
+> [!NOTE]
 > 「最大 Token 数」会限制 AI 单次回复内容长度，所以排版时会根据该设置进行分段，如果想减少分段数（请求次数），可以适当调高该值，如改为 8192。
 
 ### 关于「书包」
@@ -266,4 +277,4 @@ ColorTxt/
 - 基于 [@node-rs/jieba](https://github.com/napi-rs/node-rs/tree/main/packages/jieba) 实现中文分词，以支持词云生成
 - 基于 [OpenCC](https://github.com/byvoid/opencc) 实现简繁互转
 - 划线/笔记功能的交互，参考了 [微信读书网页版](https://weread.qq.com/)
-- 书源解析逻辑参考：[legado-E（阅读Sigma）源码](https://github.com/Luoyacheng/legado-E) | [Legado_Max 帮助文档](https://github.com/youfengknight/Legado_Max/tree/main/app/src/main/assets/web/help/md) | [Legado 书源规则说明](https://mgz0227.github.io/The-tutorial-of-Legado/Rule/source.html) | [破冰的源教程](https://www.yuque.com/legado/yuan/pe61gy)
+- 书源解析逻辑参考：[legado-E（阅读Sigma）](https://github.com/Luoyacheng/legado-E)

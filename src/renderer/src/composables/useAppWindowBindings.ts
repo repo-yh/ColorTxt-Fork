@@ -79,6 +79,8 @@ export function useAppWindowBindings(deps: {
   currentTheme: Ref<string>;
   readerFontSize: Ref<number>;
   readerLineHeightMultiple: Ref<number>;
+  readerLineSpacingPx: Ref<number>;
+  readerLetterSpacingPx: Ref<number>;
   monacoFontFamily: Ref<string>;
   fileEncoding: Ref<string>;
   loading: Ref<boolean>;
@@ -117,6 +119,8 @@ export function useAppWindowBindings(deps: {
   /** 主窗口无书源面板；找书窗口内由对应快捷键处理 */
   openBookSource?: () => void;
   toggleFind: () => void;
+  toggleReaderEdit: () => void;
+  editSelectedText: () => void;
   scrollDownLine: () => void;
   scrollUpLine: () => void;
   scrollPageUp: () => void;
@@ -153,6 +157,8 @@ export function useAppWindowBindings(deps: {
     deps.readerRef.value?.setLineHeightMultiple(
       deps.readerLineHeightMultiple.value,
     );
+    deps.readerRef.value?.setLineSpacingPx(deps.readerLineSpacingPx.value);
+    deps.readerRef.value?.setLetterSpacingPx(deps.readerLetterSpacingPx.value);
     deps.readerRef.value?.setFontFamily(deps.monacoFontFamily.value);
 
     const flushChapterListAfterFullscreenMs = 50;
@@ -260,6 +266,8 @@ export function useAppWindowBindings(deps: {
           jumpToPrevChapter: deps.jumpToPrevChapter,
           jumpToNextChapter: deps.jumpToNextChapter,
           toggleFind: deps.toggleFind,
+          toggleReaderEdit: deps.toggleReaderEdit,
+          editSelectedText: deps.editSelectedText,
           scrollDownLine: deps.scrollDownLine,
           scrollUpLine: deps.scrollUpLine,
           scrollPageUp: deps.scrollPageUp,

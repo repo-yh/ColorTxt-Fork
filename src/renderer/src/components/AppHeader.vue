@@ -71,6 +71,8 @@ const props = withDefaults(
     aiSmartFormatRunning?: boolean;
     /** 智能排版 Diff 预览中：禁止退出编辑模式 */
     smartFormatReviewActive?: boolean;
+    /** 整文件写盘中：禁用保存按钮 */
+    readerFileSaving?: boolean;
   }>(),
   {
     inFullscreen: false,
@@ -92,6 +94,7 @@ const props = withDefaults(
     canUseAiSmartFormat: false,
     aiSmartFormatRunning: false,
     smartFormatReviewActive: false,
+    readerFileSaving: false,
     pinnedOtherFonts: () => [],
     textConvertZh: "off",
     textConvertLetter: "off",
@@ -185,7 +188,9 @@ const showFormatToolbarInMore = computed(() => compactFormatToolbar.value);
       :icon-html="icons.save"
       title="保存"
       aria-label="保存"
-      :disabled="aiSmartFormatRunning || smartFormatReviewActive"
+      :disabled="
+        readerFileSaving || aiSmartFormatRunning || smartFormatReviewActive
+      "
       @click="emit('saveReaderFile')"
     />
     <template

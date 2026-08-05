@@ -40,9 +40,19 @@ import {
   buildReaderEditorCreateOptions,
   buildReaderEditorFontSizeUpdate,
   buildReaderEditorLineHeightUpdate,
+  buildReaderEditorLetterSpacingUpdate,
   buildReaderMonacoModeEditorOptions,
   buildReaderOverviewRulerBorder,
 } from "../monaco/readerEditorOptions";
+import {
+  isCjkWrapOptimizeEnabled,
+  setCjkWrapOptimizeEnabled,
+} from "../monaco/cjkWrapOptimize";
+import {
+  getLineSpacingPx,
+  setLineSpacingPx as applyMonacoLineSpacingPx,
+  clampLineSpacingPx as clampMonacoLineSpacingPx,
+} from "../monaco/lineSpacing";
 import {
   createTxtrTextMonarchLanguage,
   type TxtrMonarchHighlightOptions,
@@ -90,13 +100,16 @@ import AppContextMenu from "./AppContextMenu.vue";
 import ReaderSelectionToolbar from "./ReaderSelectionToolbar.vue";
 import ReaderNoteInputPanel from "./ReaderNoteInputPanel.vue";
 import ReaderImageLightbox from "./ReaderImageLightbox.vue";
+import ReaderPartialEditPanel from "./ReaderPartialEditPanel.vue";
 import VoiceReadResumeGuide from "./VoiceReadResumeGuide.vue";
 import "./readerMainMonaco.css";
 import {
   defaultChapterMinCharCount,
+  defaultChapterTitleBlankMode,
   defaultCompressBlankLines,
   defaultLeadIndentFullWidth,
   defaultMonacoAdvancedWrapping,
+  defaultMonacoCjkWrapOptimize,
   defaultMonacoCustomHighlight,
   defaultMonacoSmoothScrolling,
   defaultMouseWheelScrollSensitivity,
@@ -106,9 +119,15 @@ import {
   defaultReaderEditMinimap,
   defaultTxtrDelimitedMatchCrossLine,
   defaultReaderLineHeightMultiple,
+  defaultLineSpacingPx,
+  defaultLetterSpacingPx,
+  defaultReaderHorizontalInsetPx,
+  effectiveReaderHorizontalInsetPx,
+  maxPartialEditSelectionChars,
   defaultReaderPaletteDark,
   defaultReaderPaletteLight,
   defaultReaderPaletteColorEnabled,
+  type ChapterTitleBlankMode,
   type ReaderSurfaceColorEnabled,
   type ReaderSurfacePalette,
 } from "../constants/appUi";
@@ -134,6 +153,13 @@ import {
 } from "../utils/modalStack";
 import { yieldToUi } from "../ebook/yieldToUi";
 import { appAlert } from "../services/appDialog";
+import { appToast } from "../services/appToast";
+import {
+  annotationColumnMapOptions,
+  getTextInPhysicalRangeFromLines,
+  monacoRangeToPhysicalRange,
+  type AnnotationRange,
+} from "../utils/readerAnnotations";
 import type { SmartFormatReviewSession } from "../aiSmartFormat/aiSmartFormatReviewTypes";
 import {
   useReaderSmartFormatDiff,
@@ -147,12 +173,18 @@ import { icons } from "../icons";
 const HL_FLOAT_Z_INDEX = READER_HL_FLOAT_ROOT_Z_INDEX;
 
 const editorEl = ref<HTMLDivElement | null>(null);
+const editorShellEl = ref<HTMLDivElement | null>(null);
+const contentRootEl = ref<HTMLElement | null>(null);
 const diffHostEl = ref<HTMLDivElement | null>(null);
 
 const editorEditContextMenuOpen = ref(false);
 const editorEditContextMenuX = ref(0);
 const editorEditContextMenuY = ref(0);
 const editorEditContextMenuHasSelection = ref(false);
+
+const partialEditOpen = ref(false);
+const partialEditDraft = ref("");
+const partialEditRange = ref<AnnotationRange | null>(null);
 
 const diffReviewContextMenuOpen = ref(false);
 const diffReviewContextMenuX = ref(0);
@@ -203,6 +235,13 @@ const editorEditContextMenuItems = computed(() => {
     });
     items.push({ id: "sep-select-all", separator: true });
     items.push({ id: "selectAll", label: "全选" });
+    items.push({ id: "sep-edit", separator: true });
+    items.push({
+      id: "edit-selection",
+      label: "编辑选中文本",
+      iconHtml: icons.edit,
+      disabled: !editorEditContextMenuHasSelection.value,
+    });
     return items;
   }
   items.push(
@@ -210,6 +249,8 @@ const editorEditContextMenuItems = computed(() => {
     { id: "copy", label: "复制" },
     { id: "paste", label: "粘贴" },
   );
+  items.push({ id: "sep-select-all", separator: true });
+  items.push({ id: "selectAll", label: "全选" });
   if (
     props.aiFeaturesEnabled &&
     props.canUseAiSmartFormat &&
@@ -221,11 +262,6 @@ const editorEditContextMenuItems = computed(() => {
       label: "AI 智能排版：选中文本",
       iconHtml: icons.aiCompose,
       disabled: !editorEditContextMenuHasSelection.value,
-    });
-    items.push({
-      id: "ai-format-full",
-      label: "AI 智能排版：全文",
-      iconHtml: icons.aiCompose,
     });
   }
   return items;
@@ -328,10 +364,20 @@ const props = withDefaults(
     monacoCustomHighlight?: boolean;
     /** 与「内容上色」同时生效：成对引号/括号是否允许跨行 */
     txtrDelimitedMatchCrossLine?: boolean;
-    /** 为 true 时由数据层压缩空行并标准化章节留白（标题下 1 行；标题上 1 或 2 行取决于「保留一个空行」） */
+    /** 为 true 时由数据层压缩空行；章节标题留白由「章节标题前后保留空行」控制 */
     compressBlankLines?: boolean;
     /** Monaco 高级换行策略（wrappingStrategy: advanced） */
     monacoAdvancedWrapping?: boolean;
+    /**
+     * 简单换行下将 ——/…… 等按全角估算；开启高级换行时运行时自动停用。
+     */
+    monacoCjkWrapOptimize?: boolean;
+    /** 每个物理行结束后的额外间距（px） */
+    lineSpacingPx?: number;
+    /** Monaco 字间距（px） */
+    letterSpacingPx?: number;
+    /** 正文左右边距（px）；收窄编辑器宿主，不改 Monaco 布局算法 */
+    horizontalInsetPx?: number;
     /** Monaco 平滑滚动（滚轮、revealLine、setScrollTop 等） */
     monacoSmoothScrolling?: boolean;
     /** Monaco 滚轮滚动倍率 */
@@ -412,6 +458,10 @@ const props = withDefaults(
     txtrDelimitedMatchCrossLine: defaultTxtrDelimitedMatchCrossLine,
     compressBlankLines: defaultCompressBlankLines,
     monacoAdvancedWrapping: defaultMonacoAdvancedWrapping,
+    monacoCjkWrapOptimize: defaultMonacoCjkWrapOptimize,
+    lineSpacingPx: defaultLineSpacingPx,
+    letterSpacingPx: defaultLetterSpacingPx,
+    horizontalInsetPx: defaultReaderHorizontalInsetPx,
     monacoSmoothScrolling: defaultMonacoSmoothScrolling,
     mouseWheelScrollSensitivity: defaultMouseWheelScrollSensitivity,
     fastScrollSensitivity: defaultFastScrollSensitivity,
@@ -455,6 +505,8 @@ const emit = defineEmits<{
   viewportTopLineChange: [lineNumber: number];
   viewportEndLineChange: [lineNumber: number];
   viewportVisualProgressChange: [percent: number, atBottom: boolean];
+  /** 仅布局变化（行间距 / 换行优化等）且视口锚点已恢复；供侧栏章节列表强制重居中 */
+  layoutViewportRestored: [];
   addHighlightTerm: [payload: { text: string; colorIndex: number }];
   removeHighlightTerm: [payload: { text: string }];
   upsertReaderAnnotation: [annotation: ReaderAnnotationRecord];
@@ -471,6 +523,9 @@ const emit = defineEmits<{
   readerEditCursorChange: [
     payload: { line: number; column: number; selectionLength: number },
   ];
+  applyPartialPhysicalEdit: [
+    payload: { range: AnnotationRange; text: string },
+  ];
   voiceReadResume: [];
   aiSmartFormatFull: [];
   aiSmartFormatSelection: [];
@@ -484,6 +539,101 @@ const smartFormatRunning = ref(false);
 const smartFormatReviewActive = computed(
   () => props.smartFormatReviewSession != null,
 );
+
+const horizontalInsetDesired = computed(
+  () => Math.max(0, props.horizontalInsetPx ?? 0),
+);
+
+/** 按窗格宽度压缩后的实际单侧边距（保证正文宿主 ≥ 阅读区最小宽） */
+const appliedHorizontalInsetPx = ref(0);
+
+const horizontalInsetActive = computed(
+  () => appliedHorizontalInsetPx.value > 0,
+);
+
+/** 窗口模式：把竖条 fixed 到窗格右缘时用的视口坐标 */
+const windowInsetChromePinVars = ref<Record<string, string>>({});
+
+const horizontalInsetWindowPin = computed(
+  () => horizontalInsetActive.value && !props.readerFullscreen,
+);
+
+const horizontalInsetStyle = computed(() => {
+  if (!horizontalInsetActive.value) return undefined;
+  return {
+    "--reader-h-inset": `${appliedHorizontalInsetPx.value}px`,
+    ...windowInsetChromePinVars.value,
+  };
+});
+
+function syncAppliedHorizontalInset() {
+  const paneW = contentRootEl.value?.clientWidth ?? 0;
+  const next = effectiveReaderHorizontalInsetPx(
+    horizontalInsetDesired.value,
+    paneW,
+  );
+  const changed = next !== appliedHorizontalInsetPx.value;
+  appliedHorizontalInsetPx.value = next;
+  return changed;
+}
+
+function syncWindowInsetChromePin() {
+  if (!horizontalInsetWindowPin.value) {
+    windowInsetChromePinVars.value = {};
+    return;
+  }
+  const pane = contentRootEl.value;
+  if (!pane) {
+    windowInsetChromePinVars.value = {};
+    return;
+  }
+  const paneRect = pane.getBoundingClientRect();
+  const host =
+    editor.value?.getDomNode() ??
+    editorEl.value ??
+    pane;
+  const hostRect = host.getBoundingClientRect();
+  windowInsetChromePinVars.value = {
+    "--reader-sb-top": `${Math.round(hostRect.top)}px`,
+    "--reader-sb-height": `${Math.round(hostRect.height)}px`,
+    "--reader-sb-right": `${Math.max(0, Math.round(window.innerWidth - paneRect.right))}px`,
+  };
+}
+
+function syncHorizontalInsetLayout() {
+  const insetChanged = syncAppliedHorizontalInset();
+  syncWindowInsetChromePin();
+  if (insetChanged) {
+    requestAnimationFrame(() => {
+      editor.value?.layout();
+      smartFormatDiffEditor.value?.layout();
+      syncWindowInsetChromePin();
+    });
+  }
+}
+
+let horizontalInsetLayoutRo: ResizeObserver | null = null;
+
+function teardownHorizontalInsetLayout() {
+  horizontalInsetLayoutRo?.disconnect();
+  horizontalInsetLayoutRo = null;
+  window.removeEventListener("resize", syncHorizontalInsetLayout);
+}
+
+function setupHorizontalInsetLayout() {
+  teardownHorizontalInsetLayout();
+  syncHorizontalInsetLayout();
+  // 设定边距 > 0 时持续观察：窄窗会压到 0，拉宽后仍需恢复
+  if (horizontalInsetDesired.value <= 0) return;
+  const pane = contentRootEl.value;
+  if (!pane) return;
+  horizontalInsetLayoutRo = new ResizeObserver(() => {
+    syncHorizontalInsetLayout();
+  });
+  horizontalInsetLayoutRo.observe(pane);
+  if (editorEl.value) horizontalInsetLayoutRo.observe(editorEl.value);
+  window.addEventListener("resize", syncHorizontalInsetLayout);
+}
 
 const readerAnn = useReaderAnnotations({
   editor,
@@ -560,6 +710,7 @@ function getDiffEditorOptionsInput(): import("../monaco/readerEditorOptions").Re
   return {
     fontSize,
     lineHeightMultiple,
+    letterSpacingPx: props.letterSpacingPx,
     fontFamily: currentFontFamily,
     theme: readerMonacoThemeForAppTheme(lastAppThemeName),
     smoothScrolling: props.monacoSmoothScrolling,
@@ -907,6 +1058,7 @@ function readerFormatOptions(
   return {
     compressBlankLines: false,
     compressBlankKeepOneBlank: false,
+    chapterTitleBlankMode: defaultChapterTitleBlankMode,
     leadIndentFullWidth: false,
     minCharCount: ctx.chapterMinCharCount,
     isMarkdown: ctx.isMarkdown,
@@ -962,6 +1114,7 @@ async function applyEditFormatAsync(
 
 async function applyEditFormatCompressBlankLines(
   keepOneBlank: boolean,
+  chapterTitleBlankMode: ChapterTitleBlankMode = defaultChapterTitleBlankMode,
 ): Promise<boolean> {
   return applyEditFormat((plain) =>
     formatPhysicalPlainTextForReader(
@@ -969,6 +1122,7 @@ async function applyEditFormatCompressBlankLines(
       readerFormatOptions({
         compressBlankLines: true,
         compressBlankKeepOneBlank: keepOneBlank,
+        chapterTitleBlankMode,
       }),
     ),
   );
@@ -1047,9 +1201,15 @@ function applySmartFormatReviewFormat(
 
 function applySmartFormatReviewCompressBlankLines(
   keepOneBlank: boolean,
+  chapterTitleBlankMode: ChapterTitleBlankMode = defaultChapterTitleBlankMode,
 ): boolean {
   return applySmartFormatReviewFormat((plain) =>
-    compressBlankLinesInText(plain, smartFormatPostProcessContext(), keepOneBlank),
+    compressBlankLinesInText(
+      plain,
+      smartFormatPostProcessContext(),
+      keepOneBlank,
+      chapterTitleBlankMode,
+    ),
   );
 }
 
@@ -1082,12 +1242,14 @@ function applyEditFormatCompressBlankLinesInRange(
   startLine: number,
   endLine: number,
   keepOneBlank: boolean,
+  chapterTitleBlankMode: ChapterTitleBlankMode = defaultChapterTitleBlankMode,
 ): boolean {
   return applyEditFormatInLineRange(startLine, endLine, (plain) =>
     compressBlankLinesInText(
       plain,
       smartFormatPostProcessContext(),
       keepOneBlank,
+      chapterTitleBlankMode,
     ),
   );
 }
@@ -1160,7 +1322,44 @@ watch(
 watch(
   () => props.monacoAdvancedWrapping,
   (advanced) => {
-    setWrappingStrategyAdvanced(advanced);
+    void applyWrappingLayoutChange(() => {
+      setWrappingStrategyAdvanced(advanced);
+      const next = effectiveCjkWrapOptimize();
+      if (isCjkWrapOptimizeEnabled() !== next) {
+        setCjkWrapOptimizeEnabled(next);
+      }
+      forceWrappingRecalc();
+    });
+  },
+);
+
+watch(
+  () => props.monacoCjkWrapOptimize,
+  () => {
+    void syncCjkWrapOptimizeFlag(true);
+  },
+);
+
+watch(
+  () => props.lineSpacingPx,
+  (px) => {
+    void setLineSpacingPx(px);
+  },
+);
+
+watch(
+  () => props.letterSpacingPx,
+  (px) => {
+    setLetterSpacingPx(px);
+  },
+);
+
+watch(
+  () => [props.horizontalInsetPx, props.readerFullscreen] as const,
+  () => {
+    void nextTick(() => {
+      setupHorizontalInsetLayout();
+    });
   },
 );
 
@@ -1736,9 +1935,81 @@ function setLineHeightMultiple(multiple: number) {
   }
 }
 
+/**
+ * 仅改布局（折行/行间距等）、不改展示行映射时：按 Monaco 展示行采锚并恢复，
+ * 避免 scrollTop 不变导致视口漂；并通知外层重居中章节列表。
+ */
+async function applyWrappingLayoutChange(
+  work: () => void,
+): Promise<void> {
+  const e = editor.value;
+  const m = model.value;
+  const displayAnchor =
+    e && m
+      ? captureReaderViewportRestoreAnchor(e, m, (displayLine) => displayLine)
+      : null;
+  beginProgrammaticScroll();
+  work();
+  if (displayAnchor) {
+    await restoreViewportToRestoreAnchor(displayAnchor);
+  } else {
+    emitProbeLine(false);
+  }
+  emit("layoutViewportRestored");
+}
+
+async function setLineSpacingPx(px: number): Promise<void> {
+  const next = clampMonacoLineSpacingPx(px);
+  if (next === getLineSpacingPx()) return;
+  await applyWrappingLayoutChange(() => {
+    applyMonacoLineSpacingPx(next);
+  });
+}
+
+function setLetterSpacingPx(px: number) {
+  const e = editor.value;
+  if (!e) return;
+  e.updateOptions(
+    buildReaderEditorLetterSpacingUpdate({
+      letterSpacingPx: px,
+    }),
+  );
+  if (smartFormatReviewActive.value) {
+    syncDiffEditorTypography();
+  }
+}
+
 function setWrappingStrategyAdvanced(advanced: boolean) {
   editor.value?.updateOptions({
     wrappingStrategy: advanced ? "advanced" : "simple",
+  });
+}
+
+function effectiveCjkWrapOptimize(): boolean {
+  return props.monacoCjkWrapOptimize && !props.monacoAdvancedWrapping;
+}
+
+/** 切换中文换行优化后强制重建折行映射（仅改 flag 不会触发 setWrappingSettings） */
+function forceWrappingRecalc() {
+  const e = editor.value;
+  if (!e) return;
+  const current = e.getOption(monaco.editor.EditorOption.wordBreak);
+  const bounced = current === "keepAll" ? "normal" : "keepAll";
+  e.updateOptions({ wordBreak: bounced });
+  e.updateOptions({ wordBreak: current });
+}
+
+async function syncCjkWrapOptimizeFlag(recalcIfChanged: boolean): Promise<void> {
+  const next = effectiveCjkWrapOptimize();
+  const prev = isCjkWrapOptimizeEnabled();
+  if (prev === next) return;
+  if (!recalcIfChanged) {
+    setCjkWrapOptimizeEnabled(next);
+    return;
+  }
+  await applyWrappingLayoutChange(() => {
+    setCjkWrapOptimizeEnabled(next);
+    forceWrappingRecalc();
   });
 }
 
@@ -2188,7 +2459,13 @@ function onEditorEditContextMenuSelect(id: string) {
     e.trigger("keyboard", "editor.action.selectAll", null);
     return;
   }
-  if (!props.readerEditMode || smartFormatRunning.value) return;
+  if (!props.readerEditMode) {
+    if (id === "edit-selection") {
+      tryOpenPartialEditFromSelection();
+    }
+    return;
+  }
+  if (smartFormatRunning.value) return;
   if (id === "cut") {
     e.focus();
     e.trigger("keyboard", "editor.action.clipboardCutAction", null);
@@ -2200,11 +2477,63 @@ function onEditorEditContextMenuSelect(id: string) {
   }
   if (id === "ai-format-selection") {
     emit("aiSmartFormatSelection");
+  }
+}
+
+function partialEditColumnMap() {
+  return annotationColumnMapOptions({
+    readerEditMode: false,
+    leadIndentFullWidth: props.leadIndentFullWidth === true,
+  });
+}
+
+function tryOpenPartialEditFromSelection() {
+  if (props.readerEditMode) return;
+  if (props.streamLoading) {
+    appToast("请等待当前文件加载完成后再编辑。", { kind: "info" });
     return;
   }
-  if (id === "ai-format-full") {
-    emit("aiSmartFormatFull");
+  const getPhys = props.getPhysicalLineContent;
+  const displayToPhysical = props.ebookDisplayLineToPhysical;
+  if (typeof getPhys !== "function" || typeof displayToPhysical !== "function") {
+    appToast("当前内容暂不支持编辑选中文本，请使用顶栏进入编辑模式。", {
+      kind: "info",
+    });
+    return;
   }
+  const sel = getSelectionRange();
+  if (!sel || sel.isEmpty()) return;
+  const columnMap = partialEditColumnMap();
+  const range = monacoRangeToPhysicalRange(
+    sel,
+    displayToPhysical,
+    getPhys,
+    columnMap,
+  );
+  const text = getTextInPhysicalRangeFromLines(
+    getPhys,
+    range,
+    "physical",
+    columnMap,
+  );
+  if (text.length > maxPartialEditSelectionChars) {
+    void appAlert(
+      `选取内容过大（超过 ${maxPartialEditSelectionChars} 字），请缩小选区。`,
+    );
+    return;
+  }
+  partialEditRange.value = range;
+  partialEditDraft.value = text;
+  partialEditOpen.value = true;
+}
+
+function onPartialEditConfirm(text: string) {
+  const range = partialEditRange.value;
+  partialEditOpen.value = false;
+  partialEditRange.value = null;
+  if (!range) return;
+  if (text === partialEditDraft.value) return;
+  emit("applyPartialPhysicalEdit", { range, text });
 }
 
 const FIND_CONTROLLER_ID = "editor.contrib.findController";
@@ -2429,6 +2758,45 @@ function delegateEditorWheelFromBrowserEvent(ev: WheelEvent) {
     delegateScrollFromMouseWheelEvent?(browserEvent: WheelEvent): void;
   };
   ed.delegateScrollFromMouseWheelEvent?.(ev);
+}
+
+/**
+ * 左右留白落在 `.editorShell` 的 padding 上，滚轮/点击不会进 Monaco；
+ * 与全屏「阅读区外两侧空白」同样委托给正文滚动。
+ */
+function eventOverHorizontalInsetGutter(ev: MouseEvent | WheelEvent): boolean {
+  if (!horizontalInsetActive.value) return false;
+  if (smartFormatReviewActive.value) return false;
+  const host = editorEl.value;
+  const shell = editorShellEl.value;
+  if (!host || !shell) return false;
+  const t = ev.target;
+  if (t instanceof Node) {
+    if (host.contains(t)) return false;
+    if (diffHostEl.value?.contains(t)) return false;
+  }
+  const hostRect = host.getBoundingClientRect();
+  const shellRect = shell.getBoundingClientRect();
+  if (ev.clientY < hostRect.top || ev.clientY > hostRect.bottom) return false;
+  return (
+    (ev.clientX >= shellRect.left && ev.clientX < hostRect.left) ||
+    (ev.clientX > hostRect.right && ev.clientX <= shellRect.right)
+  );
+}
+
+function onHorizontalInsetGutterWheel(ev: WheelEvent) {
+  if (!eventOverHorizontalInsetGutter(ev)) return;
+  if (props.voiceReadScrollLocked) return;
+  // 须先委托：Monaco 若见 defaultPrevented 会直接 return
+  delegateEditorWheelFromBrowserEvent(ev);
+  ev.preventDefault();
+}
+
+function onHorizontalInsetGutterMouseDown(ev: MouseEvent) {
+  if (ev.button !== 0) return;
+  if (!eventOverHorizontalInsetGutter(ev)) return;
+  ev.preventDefault();
+  editor.value?.focus();
 }
 
 function scrollByLineStep(direction: -1 | 1) {
@@ -2666,6 +3034,8 @@ defineExpose({
   setTheme,
   setFontSize,
   setLineHeightMultiple,
+  setLineSpacingPx,
+  setLetterSpacingPx,
   setFontFamily,
   setWrappingStrategyAdvanced,
   resetToTop,
@@ -2711,6 +3081,7 @@ defineExpose({
   getSelectedText,
   getSelectionRange,
   applyEditLineRangePatch,
+  tryOpenPartialEditFromSelection,
   getSmartFormatPostProcessContext: smartFormatPostProcessContext,
   getSmartFormatReviewModifiedText,
   focusSmartFormatAppliedRange,
@@ -2848,6 +3219,9 @@ onMounted(() => {
 
   ensureStickyChapterBarClickDisabled();
 
+  syncCjkWrapOptimizeFlag(false);
+  applyMonacoLineSpacingPx(props.lineSpacingPx);
+
   editor.value = monaco.editor.create(editorEl.value!, {
     model: m,
     /** 脚注悬停/补全等溢出挂件挂到专用容器，脱离 `.editorHost { overflow:hidden }` */
@@ -2855,6 +3229,7 @@ onMounted(() => {
     ...buildReaderEditorCreateOptions({
       fontSize: READER_EDITOR_DEFAULT_FONT_SIZE,
       lineHeightMultiple,
+      letterSpacingPx: props.letterSpacingPx,
       fontFamily: currentFontFamily,
       theme: readerMonacoThemeForAppTheme(lastAppThemeName),
       wrappingStrategyAdvanced: props.monacoAdvancedWrapping,
@@ -3012,10 +3387,12 @@ onMounted(() => {
     syncStickyScrollToStreamState();
     syncMinimapCursorLineDecoration();
     syncChapterMinimapSectionHeaderDecorations();
+    setupHorizontalInsetLayout();
   }
 });
 
 onBeforeUnmount(() => {
+  teardownHorizontalInsetLayout();
   if (stickyChapterScrollRefreshRaf != null) {
     cancelAnimationFrame(stickyChapterScrollRefreshRaf);
     stickyChapterScrollRefreshRaf = null;
@@ -3120,6 +3497,7 @@ onMounted(() => {
       closeHighlightFloatUi();
     }
   });
+  setupHorizontalInsetLayout();
 });
 
 watch(smartFormatReviewActive, (active) => {
@@ -3152,15 +3530,22 @@ watch(smartFormatReviewActive, (active) => {
 
 <template>
   <main
+    ref="contentRootEl"
     class="content"
     :class="{
       'content--readerEdit': readerEditMode,
       'content--readerEditMinimap': readerEditMode && readerEditMinimap,
+      'content--hInset': horizontalInsetActive,
+      'content--hInsetWindowPin': horizontalInsetWindowPin,
     }"
+    :style="horizontalInsetStyle"
   >
     <div
+      ref="editorShellEl"
       class="editorShell"
       :class="{ 'editorShell--smartFormatReview': smartFormatReviewActive }"
+      @wheel="onHorizontalInsetGutterWheel"
+      @mousedown="onHorizontalInsetGutterMouseDown"
     >
       <SmartFormatReviewBar
         v-if="smartFormatReviewActive"
@@ -3243,9 +3628,15 @@ watch(smartFormatReviewActive, (active) => {
       :x="editorEditContextMenuX"
       :y="editorEditContextMenuY"
       :items="editorEditContextMenuItems"
-      :min-width="readerEditMode ? 200 : 96"
+      :min-width="readerEditMode ? 200 : 168"
       @close="closeEditorEditContextMenu"
       @select="onEditorEditContextMenuSelect"
+    />
+    <ReaderPartialEditPanel
+      v-model:open="partialEditOpen"
+      :draft="partialEditDraft"
+      :monaco-font-family="monacoFontFamily"
+      @confirm="onPartialEditConfirm"
     />
     <AppContextMenu
       :open="diffReviewContextMenuOpen"
@@ -3276,6 +3667,47 @@ watch(smartFormatReviewActive, (active) => {
   min-height: 0;
   display: flex;
   flex-direction: column;
+}
+
+/** 左右边距：收窄 Monaco 宿主，换行随 automaticLayout 变窄 */
+.content.content--hInset .editorShell {
+  padding-left: var(--reader-h-inset);
+  padding-right: var(--reader-h-inset);
+  box-sizing: border-box;
+}
+
+/*
+ * 窗口模式：竖条/概览尺/小地图 fixed 到阅读窗格右缘（全屏仍走 appShell 的 right:0）。
+ * 勿用负 right 伸出：会被 Monaco overflow-guard 裁掉导致「滚动条消失」。
+ */
+.content.content--hInsetWindowPin {
+  --txtr-window-scrollbar-size: 14px;
+}
+
+.content.content--hInsetWindowPin
+  .editorHost:not(.editorHost--diff)
+  :deep(.monaco-editor .monaco-scrollable-element > .scrollbar.vertical),
+.content.content--hInsetWindowPin
+  .editorHost:not(.editorHost--diff)
+  :deep(.monaco-editor .decorationsOverviewRuler) {
+  position: fixed !important;
+  left: auto !important;
+  right: var(--reader-sb-right, 0px) !important;
+  top: var(--reader-sb-top, 0px) !important;
+  height: var(--reader-sb-height, 100%) !important;
+}
+
+.content.content--hInsetWindowPin.content--readerEditMinimap
+  .editorHost:not(.editorHost--diff)
+  :deep(.monaco-editor .minimap) {
+  position: fixed !important;
+  left: auto !important;
+  right: calc(
+    var(--reader-sb-right, 0px) + var(--txtr-window-scrollbar-size)
+  ) !important;
+  top: var(--reader-sb-top, 0px) !important;
+  height: var(--reader-sb-height, 100%) !important;
+  z-index: 9;
 }
 
 .editorShell--smartFormatReview .editorHost--diff {

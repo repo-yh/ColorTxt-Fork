@@ -123,6 +123,8 @@ export function useFindBookPanelShortcuts(deps: {
         jumpToPrevChapter: () => {},
         jumpToNextChapter: () => {},
         toggleFind: () => {},
+        toggleReaderEdit: () => {},
+        editSelectedText: () => {},
         scrollDownLine: () => {},
         scrollUpLine: () => {},
         scrollPageUp: () => {},

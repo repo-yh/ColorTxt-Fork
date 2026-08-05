@@ -2,6 +2,10 @@ import {
   formatPhysicalPlainTextForReader,
   type ReaderDisplayFormatOptions,
 } from "../reader/readerDisplayPipeline";
+import {
+  defaultChapterTitleBlankMode,
+  type ChapterTitleBlankMode,
+} from "../constants/appUi";
 
 /** 智能排版后置处理（压缩空行 / 行首缩进）所需的编辑上下文 */
 export type SmartFormatPostProcessContext = {
@@ -18,6 +22,7 @@ export function buildSmartFormatPostProcessOptions(
   return {
     compressBlankLines: false,
     compressBlankKeepOneBlank: false,
+    chapterTitleBlankMode: defaultChapterTitleBlankMode,
     leadIndentFullWidth: false,
     minCharCount: ctx.chapterMinCharCount,
     isMarkdown: ctx.isMarkdown,
@@ -31,12 +36,14 @@ export function compressBlankLinesInText(
   plain: string,
   ctx: SmartFormatPostProcessContext,
   keepOneBlank: boolean,
+  chapterTitleBlankMode: ChapterTitleBlankMode = defaultChapterTitleBlankMode,
 ): string {
   return formatPhysicalPlainTextForReader(
     plain,
     buildSmartFormatPostProcessOptions(ctx, {
       compressBlankLines: true,
       compressBlankKeepOneBlank: keepOneBlank,
+      chapterTitleBlankMode,
     }),
   ).text;
 }
@@ -59,10 +66,16 @@ export function applySmartFormatPostProcessToText(
   >,
   ctx: SmartFormatPostProcessContext,
   keepOneBlank: boolean,
+  chapterTitleBlankMode: ChapterTitleBlankMode = defaultChapterTitleBlankMode,
 ): string {
   let result = text;
   if (settings.autoCompressBlank) {
-    result = compressBlankLinesInText(result, ctx, keepOneBlank);
+    result = compressBlankLinesInText(
+      result,
+      ctx,
+      keepOneBlank,
+      chapterTitleBlankMode,
+    );
   }
   if (settings.autoLeadIndent) {
     result = leadIndentFullWidthInText(result, ctx);

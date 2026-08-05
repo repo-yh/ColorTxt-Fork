@@ -34,8 +34,10 @@ import {
   clampLineHeightMultipleForFontSize,
   defaultChapterMinCharCount,
   defaultCompressBlankKeepOneBlank,
+  defaultChapterTitleBlankMode,
   defaultFullscreenReaderWidthPercent,
   defaultFullscreenShowSystemTime,
+  defaultMonacoCjkWrapOptimize,
   defaultMonacoSmoothScrolling,
   defaultMouseWheelScrollSensitivity,
   defaultFastScrollSensitivity,
@@ -49,6 +51,12 @@ import {
   defaultEditAutoRefreshChapterList,
   defaultReaderFontSize,
   defaultReaderLineHeightMultiple,
+  defaultLineSpacingPx,
+  clampLineSpacingPx,
+  defaultLetterSpacingPx,
+  clampLetterSpacingPx,
+  defaultReaderHorizontalInsetPx,
+  clampReaderHorizontalInsetPx,
   defaultRecentFilesHistoryLimit,
   defaultDragDropAction,
   type DragDropAction,
@@ -60,6 +68,7 @@ import {
   skipUnloadPersistenceSessionKey,
   skipSettingsPersistenceSessionKey,
   APP_DISPLAY_NAME,
+  type ChapterTitleBlankMode,
 } from "../constants/appUi";
 import {
   defaultTimedScrollIntervalMs,
@@ -124,6 +133,7 @@ export type SettingsApplyPayload = {
   fullscreenReaderWidthPercent: number;
   fullscreenShowSystemTime: boolean;
   monacoSmoothScrolling: boolean;
+  monacoCjkWrapOptimize: boolean;
   mouseWheelScrollSensitivity: number;
   fastScrollSensitivity: number;
   stickyChapterTitleEnabled: boolean;
@@ -135,6 +145,10 @@ export type SettingsApplyPayload = {
   aiSmartFormat: AiSmartFormatSettings;
   fontSize: number;
   lineHeightMultiple: number;
+  lineSpacingPx: number;
+  letterSpacingPx: number;
+  readerHorizontalInsetPx: number;
+  chapterTitleBlankMode: ChapterTitleBlankMode;
   compressBlankKeepOneBlank: boolean;
   txtrDelimitedMatchCrossLine: boolean;
   timedScroll: TimedScrollSettings;
@@ -167,7 +181,11 @@ const props = defineProps<{
   fullscreenShowSystemTime: boolean;
   readerFontSize: number;
   readerLineHeightMultiple: number;
+  readerLineSpacingPx: number;
+  readerLetterSpacingPx: number;
+  readerHorizontalInsetPx: number;
   monacoSmoothScrolling: boolean;
+  monacoCjkWrapOptimize: boolean;
   mouseWheelScrollSensitivity: number;
   fastScrollSensitivity: number;
   stickyChapterTitleEnabled: boolean;
@@ -177,6 +195,7 @@ const props = defineProps<{
   readerEditMinimap: boolean;
   editAutoRefreshChapterList: boolean;
   aiSmartFormat: AiSmartFormatSettings;
+  chapterTitleBlankMode: ChapterTitleBlankMode;
   compressBlankKeepOneBlank: boolean;
   monacoCustomHighlight: boolean;
   txtrDelimitedMatchCrossLine: boolean;
@@ -231,7 +250,11 @@ const draftFullscreenReaderWidthPercent = ref(50);
 const draftFullscreenShowSystemTime = ref(defaultFullscreenShowSystemTime);
 const draftFontSize = ref(14);
 const draftLineHeightMultiple = ref(1.5);
+const draftLineSpacingPx = ref(defaultLineSpacingPx);
+const draftLetterSpacingPx = ref(defaultLetterSpacingPx);
+const draftReaderHorizontalInsetPx = ref(defaultReaderHorizontalInsetPx);
 const draftMonacoSmoothScrolling = ref(true);
+const draftMonacoCjkWrapOptimize = ref(defaultMonacoCjkWrapOptimize);
 const draftMouseWheelScrollSensitivity = ref(
   defaultMouseWheelScrollSensitivity,
 );
@@ -245,6 +268,9 @@ const draftEditAutoRefreshChapterList = ref(defaultEditAutoRefreshChapterList);
 const draftAiSmartFormat = ref<AiSmartFormatSettings>({
   ...defaultAiSmartFormatSettings,
 });
+const draftChapterTitleBlankMode = ref(
+  defaultChapterTitleBlankMode,
+);
 const draftCompressBlankKeepOneBlank = ref(false);
 const draftTxtrDelimitedMatchCrossLine = ref(
   defaultTxtrDelimitedMatchCrossLine,
@@ -302,7 +328,13 @@ function syncDraftFromProps() {
     props.readerFontSize,
     props.readerLineHeightMultiple,
   );
+  draftLineSpacingPx.value = clampLineSpacingPx(props.readerLineSpacingPx);
+  draftLetterSpacingPx.value = clampLetterSpacingPx(props.readerLetterSpacingPx);
+  draftReaderHorizontalInsetPx.value = clampReaderHorizontalInsetPx(
+    props.readerHorizontalInsetPx,
+  );
   draftMonacoSmoothScrolling.value = props.monacoSmoothScrolling;
+  draftMonacoCjkWrapOptimize.value = props.monacoCjkWrapOptimize;
   draftMouseWheelScrollSensitivity.value = clampMouseWheelScrollSensitivity(
     props.mouseWheelScrollSensitivity,
   );
@@ -316,6 +348,8 @@ function syncDraftFromProps() {
   draftReaderEditMinimap.value = props.readerEditMinimap;
   draftEditAutoRefreshChapterList.value = props.editAutoRefreshChapterList;
   draftAiSmartFormat.value = mergeAiSmartFormatSettings(props.aiSmartFormat);
+  draftChapterTitleBlankMode.value =
+    props.chapterTitleBlankMode;
   draftCompressBlankKeepOneBlank.value = props.compressBlankKeepOneBlank;
   draftTxtrDelimitedMatchCrossLine.value = props.txtrDelimitedMatchCrossLine;
   const timedScrollMerged = mergeTimedScrollSettings(props.timedScrollSettings);
@@ -448,11 +482,17 @@ function resetReadingDraft() {
     defaultReaderFontSize,
     defaultReaderLineHeightMultiple,
   );
+  draftLineSpacingPx.value = defaultLineSpacingPx;
+  draftLetterSpacingPx.value = defaultLetterSpacingPx;
+  draftReaderHorizontalInsetPx.value = defaultReaderHorizontalInsetPx;
   draftMonacoSmoothScrolling.value = defaultMonacoSmoothScrolling;
+  draftMonacoCjkWrapOptimize.value = defaultMonacoCjkWrapOptimize;
   draftMouseWheelScrollSensitivity.value = defaultMouseWheelScrollSensitivity;
   draftFastScrollSensitivity.value = defaultFastScrollSensitivity;
   draftStickyChapterTitleEnabled.value = defaultStickyChapterTitleEnabled;
   draftChapterNavToolbarEnabled.value = defaultChapterNavToolbarEnabled;
+  draftChapterTitleBlankMode.value =
+    defaultChapterTitleBlankMode;
   draftCompressBlankKeepOneBlank.value = defaultCompressBlankKeepOneBlank;
   draftTxtrDelimitedMatchCrossLine.value = defaultTxtrDelimitedMatchCrossLine;
   draftFullscreenReaderWidthPercent.value = defaultFullscreenReaderWidthPercent;
@@ -661,6 +701,7 @@ async function onConfirm() {
     fullscreenReaderWidthPercent: draftFullscreenReaderWidthPercent.value,
     fullscreenShowSystemTime: draftFullscreenShowSystemTime.value,
     monacoSmoothScrolling: draftMonacoSmoothScrolling.value,
+    monacoCjkWrapOptimize: draftMonacoCjkWrapOptimize.value,
     mouseWheelScrollSensitivity: clampMouseWheelScrollSensitivity(
       draftMouseWheelScrollSensitivity.value,
     ),
@@ -676,6 +717,12 @@ async function onConfirm() {
     aiSmartFormat: { ...draftAiSmartFormat.value },
     fontSize: draftFontSize.value,
     lineHeightMultiple: draftLineHeightMultiple.value,
+    lineSpacingPx: clampLineSpacingPx(draftLineSpacingPx.value),
+    letterSpacingPx: clampLetterSpacingPx(draftLetterSpacingPx.value),
+    readerHorizontalInsetPx: clampReaderHorizontalInsetPx(
+      draftReaderHorizontalInsetPx.value,
+    ),
+    chapterTitleBlankMode: draftChapterTitleBlankMode.value,
     compressBlankKeepOneBlank: draftCompressBlankKeepOneBlank.value,
     txtrDelimitedMatchCrossLine: draftTxtrDelimitedMatchCrossLine.value,
     timedScroll: mergeTimedScrollSettings({
@@ -920,7 +967,13 @@ async function onImportConfig(): Promise<void> {
               v-show="activeTab === 'reading'"
               v-model:draft-font-size="draftFontSize"
               v-model:draft-line-height-multiple="draftLineHeightMultiple"
+              v-model:draft-line-spacing-px="draftLineSpacingPx"
+              v-model:draft-letter-spacing-px="draftLetterSpacingPx"
+              v-model:draft-reader-horizontal-inset-px="
+                draftReaderHorizontalInsetPx
+              "
               v-model:draft-monaco-smooth-scrolling="draftMonacoSmoothScrolling"
+              v-model:draft-monaco-cjk-wrap-optimize="draftMonacoCjkWrapOptimize"
               v-model:draft-mouse-wheel-scroll-sensitivity="
                 draftMouseWheelScrollSensitivity
               "
@@ -930,6 +983,9 @@ async function onImportConfig(): Promise<void> {
               "
               v-model:draft-chapter-nav-toolbar-enabled="
                 draftChapterNavToolbarEnabled
+              "
+              v-model:draft-chapter-title-blank-mode="
+                draftChapterTitleBlankMode
               "
               v-model:draft-compress-blank-keep-one-blank="
                 draftCompressBlankKeepOneBlank

@@ -46,9 +46,10 @@ export function useFindBookReaderShortcuts(deps: {
   jumpToPrevChapter: () => void;
   jumpToNextChapter: () => void;
   toggleSidebar: () => void;
-  toggleFullscreen: () => void;
+  toggleFullscreen: () => void | Promise<void>;
   isVoiceReadScrollLocked?: Ref<boolean>;
   isVoiceReadBlocksFind?: Ref<boolean>;
+  toggleReaderEdit: () => void | Promise<void>;
 }) {
   const shortcutBindings = ref<ShortcutBindingMap>(
     mergeShortcutBindings(defaultShortcutBindings, loadMainShortcutBindings()),
@@ -99,6 +100,12 @@ export function useFindBookReaderShortcuts(deps: {
         toggleFind: () => {
           if (deps.isVoiceReadBlocksFind?.value) return;
           deps.readerRef.value?.toggleFindWidget?.();
+        },
+        toggleReaderEdit: () => {
+          void deps.toggleReaderEdit();
+        },
+        editSelectedText: () => {
+          deps.readerRef.value?.tryOpenPartialEditFromSelection?.();
         },
         scrollDownLine: () => deps.readerRef.value?.scrollByLineStep?.(1),
         scrollUpLine: () => deps.readerRef.value?.scrollByLineStep?.(-1),

@@ -46,7 +46,7 @@ export const readerEbookConvertingHintText = "转换中…";
 /** 彩读书包 ZIP 解析 / 解压阶段 */
 export const readerBookPackUnpackingHintText = "解包中…";
 /** 阅读区居中：正文流式读入且尚未写入任何行时 */
-export const readerTxtLoadingHintText = "加载中…";
+export const readerTxtLoadingHintText = "加载中";
 
 export const SIDEBAR_MIN_WIDTH = 250;
 export const SIDEBAR_MIN_READER_WIDTH = 300;
@@ -114,8 +114,65 @@ export const defaultMonacoCustomHighlight = true;
 export const defaultTxtrDelimitedMatchCrossLine = true;
 /** 为 true 时在加载文件流中丢弃空行（仅空格/缩进也视为空行） */
 export const defaultCompressBlankLines = false;
-/** 压缩空行时是否在每行正文下方保留一行空行（章节标题行除外） */
+/** 压缩空行时是否在每行（含非标题正文）下方保留一行空行 */
 export const defaultCompressBlankKeepOneBlank = false;
+
+/** 压缩空行时章节标题前后空行模式 */
+export type ChapterTitleBlankMode =
+  | "before1"
+  | "before1After1"
+  | "before2After1";
+
+export const defaultChapterTitleBlankMode: ChapterTitleBlankMode = "before2After1";
+
+export const CHAPTER_TITLE_BLANK_MODE_OPTIONS: readonly {
+  value: ChapterTitleBlankMode;
+  label: string;
+}[] = [
+  { value: "before1", label: "前面 1 空行" },
+  { value: "before1After1", label: "前面 1 空行，后面 1 空行" },
+  { value: "before2After1", label: "前面 2 空行，后面 1 空行" },
+];
+
+export function isChapterTitleBlankMode(
+  v: unknown,
+): v is ChapterTitleBlankMode {
+  return (
+    v === "before1" || v === "before1After1" || v === "before2After1"
+  );
+}
+
+export function parseChapterTitleBlankMode(
+  v: unknown,
+): ChapterTitleBlankMode {
+  return isChapterTitleBlankMode(v) ? v : defaultChapterTitleBlankMode;
+}
+
+export function chapterTitleBlankModeLabel(
+  mode: ChapterTitleBlankMode,
+): string {
+  return (
+    CHAPTER_TITLE_BLANK_MODE_OPTIONS.find((o) => o.value === mode)?.label ??
+    CHAPTER_TITLE_BLANK_MODE_OPTIONS[0]!.label
+  );
+}
+
+/** 章节标题前/后插入的空行数（仅压缩空行路径） */
+export function chapterTitleBlankCounts(mode: ChapterTitleBlankMode): {
+  before: number;
+  after: number;
+} {
+  switch (mode) {
+    case "before1After1":
+      return { before: 1, after: 1 };
+    case "before2After1":
+      return { before: 2, after: 1 };
+    case "before1":
+    default:
+      return { before: 1, after: 0 };
+  }
+}
+
 /** 为 true 时正文行统一行首两个全角空格（章节标题行与空行除外） */
 export const defaultLeadIndentFullWidth = false;
 export {
@@ -127,15 +184,51 @@ export const defaultShowChapterCounts = true;
 /** 章节列表与底栏总字数是否显示具体数值（关闭时 ≥1 万用「万字」简写） */
 export const defaultChapterCharCountExact = false;
 /** 少于该字数的片段不作为章节（作用于章节列表/导航） */
-export const defaultChapterMinCharCount = 1;
+export const defaultChapterMinCharCount = 0;
 export const minChapterMinCharCount = 0;
 export const maxChapterMinCharCount = 100000;
 export const defaultReaderFontSize = 24;
 export const defaultReaderLineHeightMultiple = 1.5;
+/** 每个物理行（model line）结束后的额外间距（px）；0 关闭 */
+export const defaultLineSpacingPx = 0;
+export const minLineSpacingPx = 0;
+export const maxLineSpacingPx = 100;
+export const lineSpacingPxStep = 1;
+
+export function clampLineSpacingPx(px: number): number {
+  if (!Number.isFinite(px)) return defaultLineSpacingPx;
+  return Math.max(
+    minLineSpacingPx,
+    Math.min(maxLineSpacingPx, Math.round(px)),
+  );
+}
+
+/** Monaco `letterSpacing`（px）；官方夹紧 -5～20 */
+export const defaultLetterSpacingPx = 0;
+export const minLetterSpacingPx = -5;
+export const maxLetterSpacingPx = 20;
+export const letterSpacingPxStep = 0.5;
+
+export function normalizeLetterSpacingPx(px: number): number {
+  return Math.round(px * 2) / 2;
+}
+
+export function clampLetterSpacingPx(px: number): number {
+  if (!Number.isFinite(px)) return defaultLetterSpacingPx;
+  return normalizeLetterSpacingPx(
+    Math.max(minLetterSpacingPx, Math.min(maxLetterSpacingPx, px)),
+  );
+}
+
 export const defaultRestoreSessionOnStartup = true;
 /** 是否监控当前打开文件并在磁盘变更后自动重新加载（默认关闭） */
 export const defaultSyncCurrentFile = false;
 export const defaultMonacoAdvancedWrapping = false;
+/**
+ * 简单换行下将 ——/…… 等按全角估算（Vite 包装 Monaco isFullWidthCharacter）。
+ * 开启高级换行时运行时自动停用。
+ */
+export const defaultMonacoCjkWrapOptimize = true;
 /** Monaco 阅读区：滚轮/跳转等是否使用平滑滚动动画 */
 export const defaultMonacoSmoothScrolling = true;
 /** Monaco `mouseWheelScrollSensitivity`：滚轮 delta 倍率 */
@@ -190,6 +283,48 @@ export const minFullscreenReaderWidthPercent = 30;
 export const maxFullscreenReaderWidthPercent = 100;
 /** 全屏时是否在左下角显示系统时间 */
 export const defaultFullscreenShowSystemTime = true;
+
+/**
+ * 阅读区正文左右边距（px）：收窄 Monaco 宿主，换行随变窄；
+ * 不修改 Monaco 布局算法。全屏下滚动条仍可由现有 CSS 钉在视口右侧。
+ * 实际应用值会按阅读窗格宽度压缩，保证正文宿主不少于
+ * {@link minReaderBodyWidthWithHorizontalInsetPx}。
+ */
+export const defaultReaderHorizontalInsetPx = 0;
+export const minReaderHorizontalInsetPx = 0;
+export const maxReaderHorizontalInsetPx = 160;
+export const readerHorizontalInsetPxStep = 1;
+/** 有左右边距时正文区最小宽；与侧栏拖拽时的阅读区最小宽一致 */
+export const minReaderBodyWidthWithHorizontalInsetPx = SIDEBAR_MIN_READER_WIDTH;
+
+/** 阅读模式「编辑选中文本」选区字数上限（按物理原文字符数） */
+export const maxPartialEditSelectionChars = 1000;
+
+export function clampReaderHorizontalInsetPx(px: number): number {
+  if (!Number.isFinite(px)) return defaultReaderHorizontalInsetPx;
+  return Math.max(
+    minReaderHorizontalInsetPx,
+    Math.min(maxReaderHorizontalInsetPx, Math.round(px)),
+  );
+}
+
+/**
+ * 按阅读窗格宽度压缩左右边距，避免两侧留白把正文挤没。
+ * 单侧实际边距 ≤ min(设定值, floor((窗格宽 − 正文最小宽) / 2))。
+ */
+export function effectiveReaderHorizontalInsetPx(
+  desiredPx: number,
+  readerPaneWidthPx: number,
+): number {
+  const desired = clampReaderHorizontalInsetPx(desiredPx);
+  if (desired <= 0) return 0;
+  const pane = Math.max(0, readerPaneWidthPx);
+  const maxPerSide = Math.max(
+    0,
+    Math.floor((pane - minReaderBodyWidthWithHorizontalInsetPx) / 2),
+  );
+  return Math.min(desired, maxPerSide);
+}
 
 export const minFontSize = 10;
 export const maxFontSize = 100;

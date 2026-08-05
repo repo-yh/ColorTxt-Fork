@@ -1,4 +1,5 @@
 import * as monaco from "monaco-editor";
+import { getLineSpacingPx } from "../monaco/lineSpacing";
 import { physicalLineToFilteredDisplayLine } from "./lineMapping";
 
 /** 切换排版/格式化前后用于恢复视口的锚点（源物理行 + 该行内自动换行视觉行下标） */
@@ -55,7 +56,11 @@ export function computeWrappedLineIndexInModelLine(
   const lineTop = editor.getTopForLineNumber(displayLine);
   if (!Number.isFinite(lineTop)) return 0;
   const lineBottom = editor.getBottomForLineNumber(displayLine);
-  const blockH = Math.max(0, lineBottom - lineTop);
+  // getBottom 含物理行后的行间距；折行带只按字高计算
+  const blockH = Math.max(
+    0,
+    lineBottom - lineTop - Math.max(0, getLineSpacingPx()),
+  );
   const maxIndex = Math.max(0, Math.floor((blockH - 1) / lineHeightPx));
   const idx = Math.floor((contentY - lineTop) / lineHeightPx);
   return Math.max(0, Math.min(idx, maxIndex));
@@ -160,7 +165,11 @@ export function computeScrollTopForReaderViewportRestoreAnchor(
   const lineBottom = editor.getBottomForLineNumber(displayLine);
   if (!Number.isFinite(lineTop) || !Number.isFinite(lineBottom)) return null;
 
-  const blockH = Math.max(0, lineBottom - lineTop);
+  // 与采锚一致：行块高度去掉物理行后的行间距
+  const blockH = Math.max(
+    0,
+    lineBottom - lineTop - Math.max(0, getLineSpacingPx()),
+  );
   const maxWrapped = Math.max(0, Math.floor((blockH - 1) / lineHeightPx));
   const wrappedIdx = Math.max(
     0,

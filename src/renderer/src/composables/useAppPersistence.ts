@@ -105,6 +105,9 @@ import {
   defaultRecentFilesHistoryLimit,
   maxFullscreenReaderWidthPercent,
   clampLineHeightMultipleForFontSize,
+  clampLineSpacingPx,
+  clampLetterSpacingPx,
+  clampReaderHorizontalInsetPx,
   maxFontSize,
   maxChapterMinCharCount,
   maxRecentFilesHistoryLimit,
@@ -119,11 +122,13 @@ import {
   fileListKey,
   fileMetaKey,
   persistKey,
+  parseChapterTitleBlankMode,
   recentFilesKey,
   sessionKey,
   skipSettingsPersistenceSessionKey,
   skipUnloadPersistenceSessionKey,
   APP_DISPLAY_NAME,
+  type ChapterTitleBlankMode,
   type ReaderSurfacePalette,
 } from "../constants/appUi";
 import { EBOOK_CONVERT_DEFAULT_SUBDIR } from "@shared/ebookConvertPaths";
@@ -215,6 +220,7 @@ export function useAppPersistence(deps: {
   monacoCustomHighlight: Ref<boolean>;
   compressBlankLines: Ref<boolean>;
   compressBlankKeepOneBlank: Ref<boolean>;
+  chapterTitleBlankMode: Ref<ChapterTitleBlankMode>;
   /** 与「内容上色」同时生效：成对引号/括号是否跨行 */
   txtrDelimitedMatchCrossLine: Ref<boolean>;
   leadIndentFullWidth: Ref<boolean>;
@@ -225,6 +231,9 @@ export function useAppPersistence(deps: {
   chapterCharCountExact: Ref<boolean>;
   readerFontSize: Ref<number>;
   readerLineHeightMultiple: Ref<number>;
+  readerLineSpacingPx: Ref<number>;
+  readerLetterSpacingPx: Ref<number>;
+  readerHorizontalInsetPx: Ref<number>;
   monacoFontFamily: Ref<string>;
   pinnedOtherFonts: Ref<string[]>;
   chapterRuleState: Ref<{ rules: ChapterMatchRule[] }>;
@@ -234,6 +243,7 @@ export function useAppPersistence(deps: {
   dragDropAction: Ref<string>;
   chapterMinCharCount: Ref<number>;
   monacoAdvancedWrapping: Ref<boolean>;
+  monacoCjkWrapOptimize: Ref<boolean>;
   monacoSmoothScrolling: Ref<boolean>;
   mouseWheelScrollSensitivity: Ref<number>;
   fastScrollSensitivity: Ref<number>;
@@ -347,11 +357,15 @@ export function useAppPersistence(deps: {
       showSidebar: deps.showSidebar.value,
       fontSize: deps.readerFontSize.value,
       lineHeightMultiple: deps.readerLineHeightMultiple.value,
+      lineSpacingPx: deps.readerLineSpacingPx.value,
+      letterSpacingPx: deps.readerLetterSpacingPx.value,
+      readerHorizontalInsetPx: deps.readerHorizontalInsetPx.value,
       fontFamily: deps.monacoFontFamily.value,
       pinnedOtherFonts: [...deps.pinnedOtherFonts.value],
       monacoCustomHighlight: deps.monacoCustomHighlight.value,
       compressBlankLines: deps.compressBlankLines.value,
       compressBlankKeepOneBlank: deps.compressBlankKeepOneBlank.value,
+      chapterTitleBlankMode: deps.chapterTitleBlankMode.value,
       txtrDelimitedMatchCrossLine: deps.txtrDelimitedMatchCrossLine.value,
       leadIndentFullWidth: deps.leadIndentFullWidth.value,
       textConvertZh: deps.textConvertZh.value,
@@ -366,6 +380,7 @@ export function useAppPersistence(deps: {
       dragDropAction: deps.dragDropAction.value,
       chapterMinCharCount: deps.chapterMinCharCount.value,
       monacoAdvancedWrapping: deps.monacoAdvancedWrapping.value,
+      monacoCjkWrapOptimize: deps.monacoCjkWrapOptimize.value,
       monacoSmoothScrolling: deps.monacoSmoothScrolling.value,
       mouseWheelScrollSensitivity: deps.mouseWheelScrollSensitivity.value,
       fastScrollSensitivity: deps.fastScrollSensitivity.value,
@@ -1111,6 +1126,12 @@ export function useAppPersistence(deps: {
         deps.compressBlankKeepOneBlank.value = data.compressBlankKeepOneBlank;
       }
 
+      if (data.chapterTitleBlankMode !== undefined) {
+        deps.chapterTitleBlankMode.value = parseChapterTitleBlankMode(
+          data.chapterTitleBlankMode,
+        );
+      }
+
       if (typeof data.txtrDelimitedMatchCrossLine === "boolean") {
         deps.txtrDelimitedMatchCrossLine.value =
           data.txtrDelimitedMatchCrossLine;
@@ -1154,6 +1175,22 @@ export function useAppPersistence(deps: {
         deps.readerLineHeightMultiple.value = clampLineHeightMultipleForFontSize(
           deps.readerFontSize.value,
           data.lineHeightMultiple,
+        );
+      }
+
+      if (typeof data.lineSpacingPx === "number") {
+        deps.readerLineSpacingPx.value = clampLineSpacingPx(data.lineSpacingPx);
+      }
+
+      if (typeof data.letterSpacingPx === "number") {
+        deps.readerLetterSpacingPx.value = clampLetterSpacingPx(
+          data.letterSpacingPx,
+        );
+      }
+
+      if (typeof data.readerHorizontalInsetPx === "number") {
+        deps.readerHorizontalInsetPx.value = clampReaderHorizontalInsetPx(
+          data.readerHorizontalInsetPx,
         );
       }
 
@@ -1209,6 +1246,9 @@ export function useAppPersistence(deps: {
     if (applyReaderUiPrefs) {
       if (typeof data.monacoAdvancedWrapping === "boolean") {
         deps.monacoAdvancedWrapping.value = data.monacoAdvancedWrapping;
+      }
+      if (typeof data.monacoCjkWrapOptimize === "boolean") {
+        deps.monacoCjkWrapOptimize.value = data.monacoCjkWrapOptimize;
       }
       if (typeof data.monacoSmoothScrolling === "boolean") {
         deps.monacoSmoothScrolling.value = data.monacoSmoothScrolling;

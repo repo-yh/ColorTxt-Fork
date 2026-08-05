@@ -198,17 +198,22 @@ const {
   sidebarWidth,
   readerFontSize,
   readerLineHeightMultiple,
+  readerLineSpacingPx,
+  readerLetterSpacingPx,
+  readerHorizontalInsetPx,
   monacoFontFamily,
   pinnedOtherFonts,
   monacoCustomHighlight,
   txtrDelimitedMatchCrossLine,
   compressBlankLines,
   compressBlankKeepOneBlank,
+  chapterTitleBlankMode,
   leadIndentFullWidth,
   textConvertZh,
   textConvertLetter,
   textConvertDigit,
   monacoAdvancedWrapping,
+  monacoCjkWrapOptimize,
   monacoSmoothScrolling,
   mouseWheelScrollSensitivity,
   fastScrollSensitivity,
@@ -530,6 +535,10 @@ async function scrollChapterListToCurrent(options?: {
   });
 }
 
+function onFindBookLayoutViewportRestored() {
+  void scrollChapterListToCurrent({ force: true, smooth: false });
+}
+
 /** 进入编辑前退出朗读 / 停止定时滚动（voice/timed 创建后回填） */
 let exitVoiceRead = () => {};
 let stopTimedScroll = () => {};
@@ -539,6 +548,7 @@ const {
   lastChapterBody,
   totalLineCount,
   readerEditMode,
+  readerChapterSaving,
   loading,
   showChapterLoadingUi,
   chapterLoading,
@@ -555,6 +565,7 @@ const {
   onReaderEditDirtyChange,
   onToggleReaderEdit,
   onSaveReaderChapter,
+  onApplyPartialPhysicalEdit,
   loadChapterAtDisplayIndex,
   isChapterLoading,
   refreshCurrentChapterDisplay,
@@ -562,6 +573,7 @@ const {
   clearReaderEditFlags,
   contentIndexFor,
   viewportDisplayLineToPhysicalLine,
+  getPhysicalLineContent,
 } = useFindBookChapterSession({
   readerRef,
   detail: () => props.detail,
@@ -576,6 +588,7 @@ const {
   textConvertDigit,
   compressBlankLines,
   compressBlankKeepOneBlank,
+  chapterTitleBlankMode,
   leadIndentFullWidth,
   chapterMinCharCount,
   effectiveCacheDir,
@@ -931,6 +944,7 @@ const { shortcutBindings } = useFindBookReaderShortcuts({
   toggleFullscreen: () => void toggleFullscreen(),
   isVoiceReadScrollLocked,
   isVoiceReadBlocksFind,
+  toggleReaderEdit: onToggleReaderEdit,
 });
 
 const isMacPlatform = /mac|iphone|ipad|ipod/i.test(navigator.platform || "");
@@ -981,6 +995,7 @@ async function toggleCompressBlankLines() {
   if (readerEditMode.value) {
     void readerRef.value?.applyEditFormatCompressBlankLines?.(
       compressBlankKeepOneBlank.value,
+      chapterTitleBlankMode.value,
     );
     return;
   }
@@ -1023,6 +1038,7 @@ async function setTextConvertDigitRead(mode: typeof textConvertDigit.value) {
 function onFormatEditCompressBlankLines() {
   void readerRef.value?.applyEditFormatCompressBlankLines?.(
     compressBlankKeepOneBlank.value,
+    chapterTitleBlankMode.value,
   );
 }
 
@@ -1473,6 +1489,8 @@ function applyReaderAppearance() {
   readerRef.value?.setTheme(currentTheme.value);
   readerRef.value?.setFontSize(readerFontSize.value);
   readerRef.value?.setLineHeightMultiple(readerLineHeightMultiple.value);
+  readerRef.value?.setLineSpacingPx(readerLineSpacingPx.value);
+  readerRef.value?.setLetterSpacingPx(readerLetterSpacingPx.value);
   readerRef.value?.setFontFamily(monacoFontFamily.value);
 }
 
@@ -1493,6 +1511,8 @@ watch(
   [
     readerFontSize,
     readerLineHeightMultiple,
+    readerLineSpacingPx,
+    readerLetterSpacingPx,
     monacoFontFamily,
     effectiveReaderSurfaceLight,
     effectiveReaderSurfaceDark,
@@ -1505,7 +1525,11 @@ watch(
 );
 
 watch(
-  [compressBlankKeepOneBlank, txtrDelimitedMatchCrossLine],
+  [
+    compressBlankKeepOneBlank,
+    chapterTitleBlankMode,
+    txtrDelimitedMatchCrossLine,
+  ],
   () => {
     if (!modelValue.value) return;
     void refreshCurrentChapterDisplay();
@@ -1832,6 +1856,7 @@ const modalRef = ref<InstanceType<typeof AppModal> | null>(null);
           :find-shortcut-label="findShortcutLabel"
           :reader-edit-mode="readerEditMode"
           :can-enter-reader-edit-mode="canEnterReaderEditMode"
+          :reader-chapter-saving="readerChapterSaving"
           :text-replace-active="textReplaceActive"
           @change-theme="onChangeTheme"
           @toggle-sidebar="onToggleSidebar"
@@ -2002,6 +2027,10 @@ const modalRef = ref<InstanceType<typeof AppModal> | null>(null);
             :lead-indent-full-width="leadIndentFullWidth"
             :chapter-min-char-count="chapterMinCharCount"
             :monaco-advanced-wrapping="monacoAdvancedWrapping"
+            :monaco-cjk-wrap-optimize="monacoCjkWrapOptimize"
+            :line-spacing-px="readerLineSpacingPx"
+            :letter-spacing-px="readerLetterSpacingPx"
+            :horizontal-inset-px="readerHorizontalInsetPx"
             :monaco-smooth-scrolling="monacoSmoothScrolling"
             :mouse-wheel-scroll-sensitivity="mouseWheelScrollSensitivity"
             :fast-scroll-sensitivity="fastScrollSensitivity"
@@ -2017,12 +2046,15 @@ const modalRef = ref<InstanceType<typeof AppModal> | null>(null);
             :reader-edit-show-line-numbers="readerEditShowLineNumbers"
             :reader-edit-minimap="readerEditMinimap"
             :ebook-display-line-to-physical="viewportDisplayLineToPhysicalLine"
+            :get-physical-line-content="getPhysicalLineContent"
             :monaco-font-family="monacoFontFamily"
             @viewport-top-line-change="readerUi.onViewportTopLineChange"
             @viewport-end-line-change="onFindBookViewportEndLineChange"
             @viewport-visual-progress-change="readerUi.onViewportVisualProgressChange"
+            @layout-viewport-restored="onFindBookLayoutViewportRestored"
             @reader-edit-dirty-change="onReaderEditDirtyChange"
             @reader-edit-save-request="onSaveReaderChapter"
+            @apply-partial-physical-edit="onApplyPartialPhysicalEdit"
           />
           <VoiceReadToolbar
             :visible="isVoiceReadActive"
@@ -2314,11 +2346,13 @@ const modalRef = ref<InstanceType<typeof AppModal> | null>(null);
   flex-shrink: 0;
 }
 .findBookReaderShell {
+  position: relative;
   display: flex;
   flex-direction: column;
   height: 100%;
   min-height: 0;
 }
+
 .findBookReaderHeaderWrap {
   flex-shrink: 0;
 }

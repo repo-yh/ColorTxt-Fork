@@ -16,6 +16,7 @@ import {
   buildReaderEditorFontSizeUpdate,
   type ReaderEditorCreateOptionsInput,
 } from "../monaco/readerEditorOptions";
+import { disableLineSpacingOnMonacoCodeEditor } from "../monaco/lineSpacing";
 import { readerMonacoThemeForAppTheme } from "../monaco/readerInlineDecorations";
 import {
   enhanceSmartFormatDiffRevertButtons,
@@ -163,6 +164,7 @@ export function useReaderSmartFormatDiff(deps: {
         fontSize: input.fontSize,
         lineHeightMultiple: input.lineHeightMultiple,
       }),
+      letterSpacing: input.letterSpacingPx ?? 0,
       fontFamily: input.fontFamily,
     };
     editor.getOriginalEditor().updateOptions(typography);
@@ -234,6 +236,14 @@ export function useReaderSmartFormatDiff(deps: {
       TXTR_LANGUAGE_ID,
     );
     editor.setModel({ original: originalModel, modified: modifiedModel });
+
+    /** 行间距是布局层全局默认值；Diff 两侧单独覆盖为 0，避免左右垂直对齐错位 */
+    const pinDiffLineSpacingOff = () => {
+      disableLineSpacingOnMonacoCodeEditor(editor.getOriginalEditor());
+      disableLineSpacingOnMonacoCodeEditor(editor.getModifiedEditor());
+    };
+    pinDiffLineSpacingOff();
+    requestAnimationFrame(pinDiffLineSpacingOff);
 
     applyDiffSideChrome(editor);
 

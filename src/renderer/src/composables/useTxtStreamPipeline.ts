@@ -7,6 +7,8 @@ import type ReaderMain from "../components/ReaderMain.vue";
 import {
   annotationColumnMapOptions,
   physicalColumnToDisplayColumn,
+  replaceTextInPhysicalLines,
+  type AnnotationRange,
 } from "../utils/readerAnnotations";
 import {
   physicalLineToChapterTitleDisplayLine,
@@ -14,6 +16,7 @@ import {
   shiftChapterTitleDisplayLineMap,
 } from "../reader/lineMapping";
 import { formatPhysicalLinesForReaderAsync } from "../reader/readerDisplayPipeline";
+import type { ChapterTitleBlankMode } from "../constants/appUi";
 import { visibleReaderLineFromPhysicalRaw } from "../ebook/ebookTitleMatch";
 import { stripMdInternalLinksFromPhysicalLinesAsync } from "../markdown/markdownInternalLinks";
 import { yieldToUi } from "../ebook/yieldToUi";
@@ -43,6 +46,7 @@ export function useTxtStreamPipeline(deps: {
   readerEditMode: Ref<boolean>;
   compressBlankLines: Ref<boolean>;
   compressBlankKeepOneBlank: Ref<boolean>;
+  chapterTitleBlankMode: Ref<ChapterTitleBlankMode>;
   leadIndentFullWidth: Ref<boolean>;
   textConvertZh: Ref<TextConvertZhMode>;
   textConvertLetter: Ref<TextConvertWidthMode>;
@@ -301,6 +305,7 @@ export function useTxtStreamPipeline(deps: {
       {
         compressBlankLines: deps.compressBlankLines.value,
         compressBlankKeepOneBlank: deps.compressBlankKeepOneBlank.value,
+        chapterTitleBlankMode: deps.chapterTitleBlankMode.value,
         leadIndentFullWidth: deps.leadIndentFullWidth.value,
         minCharCount: deps.chapterMinCharCount.value,
         isMarkdown: deps.currentFileIsMarkdown.value,
@@ -437,6 +442,27 @@ export function useTxtStreamPipeline(deps: {
     return physicalLineContents.join("\n");
   }
 
+  /** 预览物理区间替换后的全文；失败返回 null（不改内存） */
+  function buildPlainTextAfterPhysicalReplace(
+    range: AnnotationRange,
+    newText: string,
+  ): string | null {
+    const next = replaceTextInPhysicalLines(
+      physicalLineContents,
+      range,
+      newText,
+    );
+    if (!next) return null;
+    return next.join("\n");
+  }
+
+  /** 用纯文本覆盖物理行镜像（局部编辑写盘成功后提交） */
+  function commitPhysicalLinesFromPlainText(text: string) {
+    physicalLineContents = text.length > 0 ? text.split("\n") : [""];
+    deps.totalCharCount.value = text.length;
+    deps.totalLineCount.value = physicalLineContents.length;
+  }
+
   function resyncMirrorFromReader() {
     syncMirrorFromReaderModel();
   }
@@ -483,6 +509,8 @@ export function useTxtStreamPipeline(deps: {
     getDisplayLineContent,
     physicalSearchRangeToDisplayColumns,
     getPhysicalFilePlainText,
+    buildPlainTextAfterPhysicalReplace,
+    commitPhysicalLinesFromPlainText,
     resyncMirrorFromReader,
     resyncFormattedDisplayLinesFromReader,
     removeFilteredDisplayLinesAtOriginalIndices,

@@ -9,6 +9,7 @@ import {
 } from "@shared/aiSmartFormatTypes";
 import AppCustomSelect, { type CustomSelectItem } from "./AppCustomSelect.vue";
 import SwitchToggle from "./SwitchToggle.vue";
+import { icons } from "../icons.js";
 
 withDefaults(
   defineProps<{
@@ -101,7 +102,10 @@ function updateSmart<K extends keyof AiSmartFormatSettings>(
       v-if="showMainOnlyEditOptions && aiFeaturesEnabled && draftAiSmartFormat"
       class="settingsBody"
     >
-      <h3 class="settingsSectionTitle">AI 智能排版</h3>
+      <h3 class="settingsSectionTitle">
+        <span class="settingsIcon" v-html="icons.aiCompose" />
+        AI 智能排版
+      </h3>
 
       <div class="settingsSubsectionDivider" role="separator">
         <span class="settingsSubsectionDividerLabel">预处理</span>
@@ -369,5 +373,20 @@ function updateSmart<K extends keyof AiSmartFormatSettings>(
   font-size: 12px;
   line-height: 1.45;
   color: var(--muted);
+}
+
+.settingsIcon {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  vertical-align: middle;
+}
+.settingsIcon :deep(svg) {
+  width: 14px;
+  height: 14px;
+  display: block;
+}
+.settingsIcon :deep(svg path) {
+  fill: currentColor;
 }
 </style>

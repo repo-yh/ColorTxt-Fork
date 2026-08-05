@@ -13,6 +13,7 @@ import type { VoiceReadSettings } from "../constants/voiceRead";
 import type { TimedScrollSettings } from "../constants/timedScroll";
 import type { PomodoroSettings } from "../constants/pomodoro";
 import type { VoiceReadProfile } from "@shared/voiceReadProfiles";
+import type { ChapterTitleBlankMode } from "../constants/appUi";
 import type { CharacterRosterEntry } from "@shared/characterTypes";
 import { bookmarkNoteInputRefKey } from "../injectionKeys";
 import type { FileBookmarkItem } from "../stores/fileMetaStore";
@@ -46,7 +47,11 @@ const props = defineProps<{
   fullscreenShowSystemTime: boolean;
   readerFontSize: number;
   readerLineHeightMultiple: number;
+  readerLineSpacingPx: number;
+  readerLetterSpacingPx: number;
+  readerHorizontalInsetPx: number;
   monacoSmoothScrolling: boolean;
+  monacoCjkWrapOptimize: boolean;
   mouseWheelScrollSensitivity: number;
   fastScrollSensitivity: number;
   stickyChapterTitleEnabled: boolean;
@@ -56,6 +61,7 @@ const props = defineProps<{
   readerEditMinimap: boolean;
   editAutoRefreshChapterList: boolean;
   aiSmartFormat: import("@shared/aiSmartFormatTypes").AiSmartFormatSettings;
+  chapterTitleBlankMode: ChapterTitleBlankMode;
   compressBlankKeepOneBlank: boolean;
   monacoCustomHighlight: boolean;
   txtrDelimitedMatchCrossLine: boolean;
@@ -275,7 +281,11 @@ onBeforeUnmount(() => {
     :fullscreen-show-system-time="fullscreenShowSystemTime"
     :reader-font-size="readerFontSize"
     :reader-line-height-multiple="readerLineHeightMultiple"
+    :reader-line-spacing-px="readerLineSpacingPx"
+    :reader-letter-spacing-px="readerLetterSpacingPx"
+    :reader-horizontal-inset-px="readerHorizontalInsetPx"
     :monaco-smooth-scrolling="monacoSmoothScrolling"
+    :monaco-cjk-wrap-optimize="monacoCjkWrapOptimize"
     :mouse-wheel-scroll-sensitivity="mouseWheelScrollSensitivity"
     :fast-scroll-sensitivity="fastScrollSensitivity"
     :sticky-chapter-title-enabled="stickyChapterTitleEnabled"
@@ -285,6 +295,7 @@ onBeforeUnmount(() => {
     :reader-edit-minimap="readerEditMinimap"
     :edit-auto-refresh-chapter-list="editAutoRefreshChapterList"
     :ai-smart-format="aiSmartFormat"
+    :chapter-title-blank-mode="chapterTitleBlankMode"
     :compress-blank-keep-one-blank="compressBlankKeepOneBlank"
     :monaco-custom-highlight="monacoCustomHighlight"
     :txtr-delimited-match-cross-line="txtrDelimitedMatchCrossLine"

@@ -555,6 +555,43 @@ export function getTextInPhysicalRangeFromLines(
   return parts.join("\n");
 }
 
+/**
+ * 用 `newText` 替换物理行数组中的区间（列号为 1-based 物理列）。
+ * 成功返回新数组，失败返回 `null`（不修改入参）。
+ */
+export function replaceTextInPhysicalLines(
+  lines: readonly string[],
+  range: AnnotationRange,
+  newText: string,
+): string[] | null {
+  const { startPhysicalLine, startColumn, endPhysicalLine, endColumn } = range;
+  if (
+    startPhysicalLine < 1 ||
+    endPhysicalLine < startPhysicalLine ||
+    endPhysicalLine > lines.length
+  ) {
+    return null;
+  }
+  if (startColumn < 1 || endColumn < 1) return null;
+  const startLine = lines[startPhysicalLine - 1] ?? "";
+  const endLine = lines[endPhysicalLine - 1] ?? "";
+  if (startColumn - 1 > startLine.length) return null;
+  if (endColumn - 1 > endLine.length) return null;
+
+  const prefix = startLine.slice(0, startColumn - 1);
+  const suffix = endLine.slice(endColumn - 1);
+  const before = lines.slice(0, startPhysicalLine - 1);
+  const after = lines.slice(endPhysicalLine);
+  const parts = newText.split("\n");
+  if (parts.length === 1) {
+    return [...before, prefix + parts[0] + suffix, ...after];
+  }
+  const merged = parts.slice();
+  merged[0] = prefix + merged[0]!;
+  merged[merged.length - 1] = merged[merged.length - 1]! + suffix;
+  return [...before, ...merged, ...after];
+}
+
 /** 从内存中的展示层行数组截取原文 */
 export function getTextInDisplayRangeFromLines(
   getDisplayLineContent: (displayLine: number) => string,

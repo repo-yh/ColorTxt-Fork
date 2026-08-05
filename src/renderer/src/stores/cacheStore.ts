@@ -12,7 +12,12 @@ import {
   migrateTxtFileListAddedAt,
   type TxtFileItem,
 } from "../services/fileListService";
-import { persistedSettingsChangedEvent, persistKey } from "../constants/appUi";
+import {
+  parseChapterTitleBlankMode,
+  persistedSettingsChangedEvent,
+  persistKey,
+  type ChapterTitleBlankMode,
+} from "../constants/appUi";
 import {
   applyBaselineUpdates,
   mergeLocalPatchOntoDiskSettings,
@@ -62,6 +67,12 @@ export type PersistedSettingsData = {
   fontSize?: number;
   /** Monaco 行高倍数，实际行高 = round(fontSize * lineHeightMultiple) */
   lineHeightMultiple?: number;
+  /** 每个物理行结束后的额外间距（px） */
+  lineSpacingPx?: number;
+  /** Monaco 字间距（px） */
+  letterSpacingPx?: number;
+  /** 阅读区正文左右边距（px） */
+  readerHorizontalInsetPx?: number;
   fontFamily?: string;
   /** 阅读器字体弹框：钉在外层的「其他字体」名称列表 */
   pinnedOtherFonts?: string[];
@@ -70,8 +81,10 @@ export type PersistedSettingsData = {
   txtrDelimitedMatchCrossLine?: boolean;
   /** 是否在加载时过滤空行（仅空格/缩进也视为空行） */
   compressBlankLines?: boolean;
-  /** 压缩空行时是否在每行正文下方保留一行空行（章节标题行除外） */
+  /** 压缩空行时是否在每行（含章节标题）下方保留一行空行 */
   compressBlankKeepOneBlank?: boolean;
+  /** 压缩空行时章节标题前后空行模式 */
+  chapterTitleBlankMode?: ChapterTitleBlankMode;
   /** 是否为正文行统一行首两个全角空格（章节标题行与空行除外） */
   leadIndentFullWidth?: boolean;
   textConvertZh?: string;
@@ -92,6 +105,8 @@ export type PersistedSettingsData = {
   chapterMinCharCount?: number;
   /** Monaco 换行是否使用 advanced 策略（性能开销更大） */
   monacoAdvancedWrapping?: boolean;
+  /** 简单换行下中文标点全角估算；高级换行开启时运行时停用 */
+  monacoCjkWrapOptimize?: boolean;
   /** Monaco 阅读区平滑滚动（滚轮、程序性 setScrollTop/revealLine 等） */
   monacoSmoothScrolling?: boolean;
   /** Monaco 滚轮滚动倍率（`mouseWheelScrollSensitivity`） */
@@ -299,6 +314,24 @@ export function loadPersistedSettingsData(
   ) {
     data.lineHeightMultiple = obj.lineHeightMultiple;
   }
+  if (
+    typeof obj.lineSpacingPx === "number" &&
+    Number.isFinite(obj.lineSpacingPx)
+  ) {
+    data.lineSpacingPx = obj.lineSpacingPx;
+  }
+  if (
+    typeof obj.letterSpacingPx === "number" &&
+    Number.isFinite(obj.letterSpacingPx)
+  ) {
+    data.letterSpacingPx = obj.letterSpacingPx;
+  }
+  if (
+    typeof obj.readerHorizontalInsetPx === "number" &&
+    Number.isFinite(obj.readerHorizontalInsetPx)
+  ) {
+    data.readerHorizontalInsetPx = obj.readerHorizontalInsetPx;
+  }
   if (typeof obj.fontFamily === "string" && obj.fontFamily.trim()) {
     data.fontFamily = obj.fontFamily;
   }
@@ -318,6 +351,11 @@ export function loadPersistedSettingsData(
   }
   if (typeof obj.compressBlankKeepOneBlank === "boolean") {
     data.compressBlankKeepOneBlank = obj.compressBlankKeepOneBlank;
+  }
+  if (obj.chapterTitleBlankMode !== undefined) {
+    data.chapterTitleBlankMode = parseChapterTitleBlankMode(
+      obj.chapterTitleBlankMode,
+    );
   }
   if (typeof obj.leadIndentFullWidth === "boolean") {
     data.leadIndentFullWidth = obj.leadIndentFullWidth;
@@ -360,6 +398,9 @@ export function loadPersistedSettingsData(
   }
   if (typeof obj.monacoAdvancedWrapping === "boolean") {
     data.monacoAdvancedWrapping = obj.monacoAdvancedWrapping;
+  }
+  if (typeof obj.monacoCjkWrapOptimize === "boolean") {
+    data.monacoCjkWrapOptimize = obj.monacoCjkWrapOptimize;
   }
   if (typeof obj.monacoSmoothScrolling === "boolean") {
     data.monacoSmoothScrolling = obj.monacoSmoothScrolling;

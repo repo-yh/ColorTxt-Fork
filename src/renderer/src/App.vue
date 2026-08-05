@@ -25,8 +25,10 @@ import ReaderMain from "./components/ReaderMain.vue";
 import AppDialogHost from "./components/AppDialogHost.vue";
 import AppCaptchaHost from "./components/AppCaptchaHost.vue";
 import AppToastHost from "./components/AppToastHost.vue";
+import AppLoadingHost from "./components/AppLoadingHost.vue";
 import AppOverlays from "./components/AppOverlays.vue";
 import ReplaceFileModal from "./components/ReplaceFileModal.vue";
+import LoadingDotsBounce from "./components/LoadingDotsBounce.vue";
 import WebDavSyncPanel from "./components/WebDavSyncPanel.vue";
 import FullscreenSystemClock from "./components/FullscreenSystemClock.vue";
 import PomodoroBreakOverlay from "./components/PomodoroBreakOverlay.vue";
@@ -110,6 +112,7 @@ import {
 import {
   applyReaderSurfaceToDocument,
   defaultCompressBlankKeepOneBlank,
+  defaultChapterTitleBlankMode,
   defaultCompressBlankLines,
   defaultChapterMinCharCount,
   defaultFullscreenReaderWidthPercent,
@@ -119,6 +122,7 @@ import {
   defaultTextConvertLetterMode,
   defaultTextConvertZhMode,
   defaultMonacoAdvancedWrapping,
+  defaultMonacoCjkWrapOptimize,
   defaultMonacoCustomHighlight,
   defaultMonacoSmoothScrolling,
   defaultMouseWheelScrollSensitivity,
@@ -135,6 +139,12 @@ import {
   defaultReaderOpenHint,
   defaultReaderFontSize,
   defaultReaderLineHeightMultiple,
+  defaultLineSpacingPx,
+  clampLineSpacingPx,
+  defaultLetterSpacingPx,
+  clampLetterSpacingPx,
+  defaultReaderHorizontalInsetPx,
+  clampReaderHorizontalInsetPx,
   defaultReaderPaletteDark,
   defaultReaderPaletteLight,
   defaultReaderTheme,
@@ -167,6 +177,7 @@ import {
   minLineHeightMultiple,
   SIDEBAR_ACTIVITY_BAR_WIDTH,
   APP_DISPLAY_NAME,
+  type ChapterTitleBlankMode,
   type ReaderSurfaceColorEnabled,
   type ReaderSurfacePalette,
 } from "./constants/appUi";
@@ -215,6 +226,7 @@ import {
 import { useAiSmartFormat } from "./composables/useAiSmartFormat";
 import AiSmartFormatProgressModal from "./components/AiSmartFormatProgressModal.vue";
 import { appToast } from "./services/appToast";
+import { appLoading } from "./services/appLoading";
 import { appAlert, appConfirm } from "./services/appDialog";
 import { mergeShortcutBindings } from "./services/shortcutUtils";
 import {
@@ -540,7 +552,6 @@ const showReaderIdleHint = computed(() => !currentFile.value && !loading.value);
 const showReaderBusyHint = computed(
   () => loading.value && Boolean(currentFile.value),
 );
-const readerBusyHintText = computed(() => readerTxtLoadingHintText);
 /** 已打开文件且流式加载完成、正文行数与字数均为 0 时居中提示（仅只读；编辑模式不遮挡空白编辑区） */
 /** 字数 0 即视为无内容（Monaco 空模型仍可能计 1 行，勿与行数强绑定） */
 const showReaderEmptyHint = computed(
@@ -565,8 +576,12 @@ const currentTheme = ref(defaultReaderTheme);
 const monacoCustomHighlight = ref(defaultMonacoCustomHighlight);
 /** 为 true 时在加载文件流中丢弃空行（仅空格/缩进也视为空行） */
 const compressBlankLines = ref(defaultCompressBlankLines);
-/** 压缩空行时是否在每行正文下方保留一行空行（章节标题行除外） */
+/** 压缩空行时是否在每行（含章节标题）下方保留一行空行 */
 const compressBlankKeepOneBlank = ref(defaultCompressBlankKeepOneBlank);
+/** 压缩空行时章节标题前后空行模式 */
+const chapterTitleBlankMode = ref<ChapterTitleBlankMode>(
+  defaultChapterTitleBlankMode,
+);
 /** 与「内容上色」同时生效：Monarch 成对引号/括号是否跨行 */
 const txtrDelimitedMatchCrossLine = ref(defaultTxtrDelimitedMatchCrossLine);
 /** 为 true 时正文行统一行首两个全角空格（章节标题行与空行除外） */
@@ -576,6 +591,9 @@ const textConvertLetter = ref<TextConvertWidthMode>(defaultTextConvertLetterMode
 const textConvertDigit = ref<TextConvertWidthMode>(defaultTextConvertDigitMode);
 const readerFontSize = ref(defaultReaderFontSize);
 const readerLineHeightMultiple = ref(defaultReaderLineHeightMultiple);
+const readerLineSpacingPx = ref(defaultLineSpacingPx);
+const readerLetterSpacingPx = ref(defaultLetterSpacingPx);
+const readerHorizontalInsetPx = ref(defaultReaderHorizontalInsetPx);
 const monacoFontFamily = ref(READER_EDITOR_DEFAULT_FONT_FAMILY);
 /** 阅读器字体弹框：钉在外层的「其他字体」 */
 const pinnedOtherFonts = ref<string[]>([]);
@@ -597,6 +615,8 @@ const dragDropAction = ref<DragDropAction>(defaultDragDropAction);
 const chapterMinCharCount = ref(defaultChapterMinCharCount);
 /** Monaco wrappingStrategy：advanced 换行更优、更重 */
 const monacoAdvancedWrapping = ref(defaultMonacoAdvancedWrapping);
+/** 简单换行下中文标点全角估算（高级换行开启时运行时停用） */
+const monacoCjkWrapOptimize = ref(defaultMonacoCjkWrapOptimize);
 /** Monaco 阅读区平滑滚动（设置可关） */
 const monacoSmoothScrolling = ref(defaultMonacoSmoothScrolling);
 const mouseWheelScrollSensitivity = ref(defaultMouseWheelScrollSensitivity);
@@ -850,6 +870,8 @@ const readerEditorDirty = ref(false);
 const editorContentChangeEpoch = ref(0);
 
 const readerSaveEncoding = ref("utf8");
+/** 编辑态 / 编码另存：整文件写盘中（禁用保存按钮，防重复点） */
+const readerFileSaving = ref(false);
 
 type ReaderEditCursorStatus = {
   line: number;
@@ -933,20 +955,28 @@ function textForReaderDiskSave(): string {
 async function saveReaderBufferWithIpcEncoding(
   ipcEncoding: string,
 ): Promise<boolean> {
+  if (readerFileSaving.value) return false;
   const normalized = normalizeIpcEncoding(ipcEncoding);
   const p = physicalReaderPath.value;
   if (!p || !window.colorTxt?.writeTextFile) return false;
-  const text = textForReaderDiskSave();
-  const r = await window.colorTxt.writeTextFile(p, text, normalized);
-  if (!r.ok) {
-    void appAlert(r.message ?? "保存失败");
-    return false;
+  readerFileSaving.value = true;
+  try {
+    return await appLoading.with("保存中", async () => {
+      const text = textForReaderDiskSave();
+      const r = await window.colorTxt.writeTextFile(p, text, normalized);
+      if (!r.ok) {
+        void appAlert(r.message ?? "保存失败");
+        return false;
+      }
+      readerSaveEncoding.value = normalized;
+      fileEncoding.value = formatTextEncodingLabel(normalized);
+      readerRef.value?.markReaderEditSaved?.();
+      readerEditorDirty.value = false;
+      return true;
+    });
+  } finally {
+    readerFileSaving.value = false;
   }
-  readerSaveEncoding.value = normalized;
-  fileEncoding.value = formatTextEncodingLabel(normalized);
-  readerRef.value?.markReaderEditSaved?.();
-  readerEditorDirty.value = false;
-  return true;
 }
 
 /** 切书、关文件、编辑↔只读、关窗、退出应用等场景共用 */
@@ -982,6 +1012,7 @@ const stream = useTxtStreamPipeline({
   readerEditMode,
   compressBlankLines,
   compressBlankKeepOneBlank,
+  chapterTitleBlankMode,
   leadIndentFullWidth,
   textConvertZh,
   textConvertLetter,
@@ -1042,6 +1073,7 @@ const persistence = useAppPersistence({
   monacoCustomHighlight,
   compressBlankLines,
   compressBlankKeepOneBlank,
+  chapterTitleBlankMode,
   txtrDelimitedMatchCrossLine,
   leadIndentFullWidth,
   textConvertZh,
@@ -1051,6 +1083,9 @@ const persistence = useAppPersistence({
   chapterCharCountExact,
   readerFontSize,
   readerLineHeightMultiple,
+  readerLineSpacingPx,
+  readerLetterSpacingPx,
+  readerHorizontalInsetPx,
   monacoFontFamily,
   pinnedOtherFonts,
   chapterRuleState,
@@ -1060,6 +1095,7 @@ const persistence = useAppPersistence({
   dragDropAction,
   chapterMinCharCount,
   monacoAdvancedWrapping,
+  monacoCjkWrapOptimize,
   monacoSmoothScrolling,
   mouseWheelScrollSensitivity,
   fastScrollSensitivity,
@@ -1784,21 +1820,23 @@ async function onRemoveMissingReadingDataFiles() {
     appToast("没有可清除的阅读数据", { kind: "info" });
     return;
   }
-  const missing: string[] = [];
-  for (const p of paths) {
-    try {
-      // file:stat 对 ENOENT 返回 isFile/isDirectory 均为 false，不抛错
-      const st = await window.colorTxt.stat(p);
-      if (!st.isFile) missing.push(p);
-    } catch {
-      missing.push(p);
+  await appLoading.with("检查中", async () => {
+    const missing: string[] = [];
+    for (const p of paths) {
+      try {
+        // file:stat 对 ENOENT 返回 isFile/isDirectory 均为 false，不抛错
+        const st = await window.colorTxt.stat(p);
+        if (!st.isFile) missing.push(p);
+      } catch {
+        missing.push(p);
+      }
     }
-  }
-  if (missing.length === 0) {
-    appToast("没有失效文件", { kind: "info" });
-    return;
-  }
-  await clearReadingDataForPaths(missing);
+    if (missing.length === 0) {
+      appToast("没有失效文件", { kind: "info" });
+      return;
+    }
+    await clearReadingDataForPaths(missing);
+  });
 }
 
 function openReadingDataPanel() {
@@ -2005,6 +2043,12 @@ async function syncChaptersAfterViewportSettled() {
     // 退出编辑后 openFilePath 会保持 suppress 直至流式加载结束；此处解除以恢复滚动换章居中
     suppressChapterListAutoScroll.value = false;
   }
+}
+
+/** 行间距 / 换行优化等布局恢复后：activeChapterIdx 常不变，需强制重居中章节列表 */
+function onLayoutViewportRestored() {
+  if (suppressChapterListAutoScroll.value) return;
+  void readerSidebarRef.value?.centerActiveChapterInList?.(false);
 }
 
 const {
@@ -2284,6 +2328,72 @@ function applyChaptersFromReaderPlainText() {
   chapterNav.refreshChapterListFromReader();
 }
 
+async function onApplyPartialPhysicalEdit(payload: {
+  range: {
+    startPhysicalLine: number;
+    startColumn: number;
+    endPhysicalLine: number;
+    endColumn: number;
+  };
+  text: string;
+}) {
+  if (readerEditMode.value) return;
+  if (!canEnterReaderEditMode.value) {
+    appToast("请等待当前文件加载完成后再编辑。", { kind: "info" });
+    return;
+  }
+  const p = physicalReaderPath.value;
+  if (!p || !window.colorTxt?.writeTextFile) {
+    appToast("无法保存：文件路径不可用。", { kind: "danger" });
+    return;
+  }
+  const nextText = stream.buildPlainTextAfterPhysicalReplace(
+    payload.range,
+    payload.text,
+  );
+  if (nextText == null) {
+    appToast("无法应用局部编辑（选区映射失败）。", { kind: "danger" });
+    return;
+  }
+  if (readerFileSaving.value) return;
+  readerFileSaving.value = true;
+  try {
+    await appLoading.with("保存中", async () => {
+      const normalized = normalizeIpcEncoding(readerSaveEncoding.value);
+      const written = await window.colorTxt.writeTextFile(p, nextText, normalized);
+      if (!written.ok) {
+        void appAlert(written.message ?? "保存失败");
+        return;
+      }
+      readerSaveEncoding.value = normalized;
+      fileEncoding.value = formatTextEncodingLabel(normalized);
+      stream.commitPhysicalLinesFromPlainText(nextText);
+      const anchor =
+        captureViewportRestoreAnchor() ?? {
+          physicalLine: payload.range.startPhysicalLine,
+          wrappedLineIndex: 0,
+        };
+      await withChapterListScrollSuppressed(async () => {
+        const ok = await stream.applyReaderDisplayFromPhysicalLines(anchor);
+        if (!ok) {
+          appToast("已写入磁盘，但刷新阅读显示失败，请重新打开文件。", {
+            kind: "warning",
+          });
+          return;
+        }
+        await syncChaptersAfterViewportSettled();
+      });
+      revalidateCurrentFileAnnotations();
+      refreshCurrentFileAnnotationDisplayTexts();
+      bumpAnnotationDisplayEpoch();
+      readerRef.value?.refreshReaderAnnotationDecorations?.();
+      appToast("已保存局部修改", { kind: "success" });
+    });
+  } finally {
+    readerFileSaving.value = false;
+  }
+}
+
 async function onToggleReaderEdit() {
   if (readerEditMode.value && aiSmartFormatReviewSession.value) {
     appToast("排版预览进行中，请先点击「应用」或「放弃」。", { kind: "info" });
@@ -2353,12 +2463,14 @@ function onFormatEditCompressBlankLines() {
   if (aiSmartFormatReviewSession.value) {
     readerRef.value?.applySmartFormatReviewCompressBlankLines?.(
       compressBlankKeepOneBlank.value,
+      chapterTitleBlankMode.value,
     );
     return;
   }
   void runEditFormatWithChapterSync(() =>
     readerRef.value?.applyEditFormatCompressBlankLines?.(
       compressBlankKeepOneBlank.value,
+      chapterTitleBlankMode.value,
     ),
   );
 }
@@ -2408,6 +2520,7 @@ const smartFormatCtl = useAiSmartFormat({
   aiFeaturesEnabled,
   aiSkillOverrides,
   compressBlankKeepOneBlank,
+  chapterTitleBlankMode,
   runEditFormatWithChapterSync,
   onReaderEditDirty: () => {
     onReaderEditContentChange();
@@ -2901,6 +3014,8 @@ function applyReaderAppearanceFromSettings() {
   readerRef.value?.setTheme(currentTheme.value);
   readerRef.value?.setFontSize(readerFontSize.value);
   readerRef.value?.setLineHeightMultiple(readerLineHeightMultiple.value);
+  readerRef.value?.setLineSpacingPx(readerLineSpacingPx.value);
+  readerRef.value?.setLetterSpacingPx(readerLetterSpacingPx.value);
   readerRef.value?.setFontFamily(monacoFontFamily.value);
   readerRef.value?.setWrappingStrategyAdvanced(monacoAdvancedWrapping.value);
 }
@@ -3081,8 +3196,10 @@ onBeforeUnmount(() => {
 
 async function applySettings(payload: SettingsApplyPayload) {
   const prevCompressBlankKeepOneBlank = compressBlankKeepOneBlank.value;
+  const prevChapterTitleBlankMode = chapterTitleBlankMode.value;
   const prevChapterMinCharCount = chapterMinCharCount.value;
   monacoSmoothScrolling.value = payload.monacoSmoothScrolling;
+  monacoCjkWrapOptimize.value = payload.monacoCjkWrapOptimize;
   mouseWheelScrollSensitivity.value = clampMouseWheelScrollSensitivity(
     payload.mouseWheelScrollSensitivity,
   );
@@ -3099,6 +3216,7 @@ async function applySettings(payload: SettingsApplyPayload) {
   editAutoRefreshChapterList.value = payload.editAutoRefreshChapterList;
   aiSmartFormat.value = { ...payload.aiSmartFormat };
   compressBlankKeepOneBlank.value = payload.compressBlankKeepOneBlank;
+  chapterTitleBlankMode.value = payload.chapterTitleBlankMode;
   txtrDelimitedMatchCrossLine.value = payload.txtrDelimitedMatchCrossLine;
   restoreSessionOnStartup.value = payload.restoreSessionOnStartup;
   syncCurrentFile.value = payload.syncCurrentFile;
@@ -3161,10 +3279,30 @@ async function applySettings(payload: SettingsApplyPayload) {
     nextFontSize,
     payload.lineHeightMultiple,
   );
+  const nextLineSpacingPx = clampLineSpacingPx(payload.lineSpacingPx);
+  const nextLetterSpacingPx = clampLetterSpacingPx(payload.letterSpacingPx);
+  const nextReaderHorizontalInsetPx = clampReaderHorizontalInsetPx(
+    payload.readerHorizontalInsetPx,
+  );
+  const lineSpacingChanged = readerLineSpacingPx.value !== nextLineSpacingPx;
   readerFontSize.value = nextFontSize;
   readerLineHeightMultiple.value = nextLineHeightMultiple;
+  readerLineSpacingPx.value = nextLineSpacingPx;
+  readerLetterSpacingPx.value = nextLetterSpacingPx;
+  readerHorizontalInsetPx.value = nextReaderHorizontalInsetPx;
   readerRef.value?.setFontSize(nextFontSize);
   readerRef.value?.setLineHeightMultiple(nextLineHeightMultiple);
+  if (lineSpacingChanged) {
+    // 抑制高度变化中间态换章滚动；恢复视口后强制居中（idx 常不变不会触发 watch）
+    await withChapterListScrollSuppressed(async () => {
+      await readerRef.value?.setLineSpacingPx?.(nextLineSpacingPx);
+      await nextTick();
+      await readerSidebarRef.value?.centerActiveChapterInList?.(false);
+    });
+  } else {
+    await readerRef.value?.setLineSpacingPx?.(nextLineSpacingPx);
+  }
+  readerRef.value?.setLetterSpacingPx(nextLetterSpacingPx);
   aiSkillOverrides.value = mergeAiSkillOverrides(payload.aiSkillOverrides);
   aiCustomSkills.value = mergeAiCustomSkills(payload.aiCustomSkills ?? []);
   aiSkillsEnabled.value = mergeAiSkillsEnabled(
@@ -3208,7 +3346,8 @@ async function applySettings(payload: SettingsApplyPayload) {
   }
 
   if (
-    prevCompressBlankKeepOneBlank !== compressBlankKeepOneBlank.value &&
+    (prevCompressBlankKeepOneBlank !== compressBlankKeepOneBlank.value ||
+      prevChapterTitleBlankMode !== chapterTitleBlankMode.value) &&
     compressBlankLines.value &&
     currentFile.value &&
     !readerEditMode.value
@@ -3222,6 +3361,7 @@ async function applySettings(payload: SettingsApplyPayload) {
       const ok = await stream.applyReaderDisplayFromPhysicalLines(anchor);
       if (!ok) {
         compressBlankKeepOneBlank.value = prevCompressBlankKeepOneBlank;
+        chapterTitleBlankMode.value = prevChapterTitleBlankMode;
         persistSettings();
         return;
       }
@@ -3261,6 +3401,8 @@ useAppWindowBindings({
   currentTheme,
   readerFontSize,
   readerLineHeightMultiple,
+  readerLineSpacingPx,
+  readerLetterSpacingPx,
   monacoFontFamily,
   fileEncoding,
   loading,
@@ -3298,6 +3440,12 @@ useAppWindowBindings({
   },
   openFindBook: openFindBookWindow,
   toggleFind: onToggleFind,
+  toggleReaderEdit: () => {
+    void onToggleReaderEdit();
+  },
+  editSelectedText: () => {
+    readerRef.value?.tryOpenPartialEditFromSelection?.();
+  },
   scrollDownLine: () => readerRef.value?.scrollByLineStep?.(1),
   scrollUpLine: () => readerRef.value?.scrollByLineStep?.(-1),
   scrollPageUp: () => readerRef.value?.scrollByPageStep?.(-1),
@@ -3444,6 +3592,7 @@ useAppShellThemeWatch({
         :can-use-ai-smart-format="canUseAiSmartFormat"
         :ai-smart-format-running="aiSmartFormatRunning"
         :smart-format-review-active="aiSmartFormatReviewSession != null"
+        :reader-file-saving="readerFileSaving"
         @ai-smart-format-full="onAiSmartFormatFull"
         @voice-read-toggle="onVoiceReadToggle"
         @timed-scroll-toggle="toggleTimedScroll"
@@ -3643,6 +3792,10 @@ useAppShellThemeWatch({
           :lead-indent-full-width="leadIndentFullWidth"
           :chapter-min-char-count="chapterMinCharCount"
           :monaco-advanced-wrapping="monacoAdvancedWrapping"
+          :monaco-cjk-wrap-optimize="monacoCjkWrapOptimize"
+          :line-spacing-px="readerLineSpacingPx"
+          :letter-spacing-px="readerLetterSpacingPx"
+          :horizontal-inset-px="readerHorizontalInsetPx"
           :monaco-smooth-scrolling="monacoSmoothScrolling"
           :mouse-wheel-scroll-sensitivity="mouseWheelScrollSensitivity"
           :fast-scroll-sensitivity="fastScrollSensitivity"
@@ -3683,6 +3836,7 @@ useAppShellThemeWatch({
           @smart-format-review-apply="applySmartFormatReview()"
           @smart-format-review-discard="discardSmartFormatReview()"
           @probe-line-change="onProbeLineChange"
+          @layout-viewport-restored="onLayoutViewportRestored"
           @viewport-top-line-change="onViewportTopLineChange"
           @viewport-end-line-change="onViewportEndLineChange"
           @viewport-visual-progress-change="onViewportVisualProgressChange"
@@ -3699,6 +3853,7 @@ useAppShellThemeWatch({
           @reader-edit-load-failed="onReaderEditLoadFailed"
           @reader-edit-save-request="onSaveReaderFile"
           @reader-edit-cursor-change="onReaderEditCursorChange"
+          @apply-partial-physical-edit="onApplyPartialPhysicalEdit"
         />
         <VoiceReadToolbar
           :visible="isVoiceReadActive"
@@ -3740,7 +3895,9 @@ useAppShellThemeWatch({
           class="readerIdleHint"
           aria-live="polite"
         >
-          {{ readerBusyHintText }}
+          <span class="readerBusyHintLine">
+            {{ readerTxtLoadingHintText }}<LoadingDotsBounce />
+          </span>
         </div>
         <div
           v-if="showReaderEmptyHint"
@@ -3834,6 +3991,7 @@ useAppShellThemeWatch({
 
     <AppDialogHost />
     <AppCaptchaHost />
+    <AppLoadingHost />
     <AppToastHost />
     <AiSmartFormatProgressModal
       v-model="aiSmartFormatProgressOpen"
@@ -3889,8 +4047,13 @@ useAppShellThemeWatch({
       :fullscreen-show-system-time="fullscreenShowSystemTime"
       :reader-font-size="readerFontSize"
       :reader-line-height-multiple="readerLineHeightMultiple"
+      :reader-line-spacing-px="readerLineSpacingPx"
+      :reader-letter-spacing-px="readerLetterSpacingPx"
+      :reader-horizontal-inset-px="readerHorizontalInsetPx"
+      :chapter-title-blank-mode="chapterTitleBlankMode"
       :compress-blank-keep-one-blank="compressBlankKeepOneBlank"
       :monaco-smooth-scrolling="monacoSmoothScrolling"
+      :monaco-cjk-wrap-optimize="monacoCjkWrapOptimize"
       :mouse-wheel-scroll-sensitivity="mouseWheelScrollSensitivity"
       :fast-scroll-sensitivity="fastScrollSensitivity"
       :sticky-chapter-title-enabled="stickyChapterTitleEnabled"

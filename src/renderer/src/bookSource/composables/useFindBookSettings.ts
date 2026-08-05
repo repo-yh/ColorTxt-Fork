@@ -34,17 +34,22 @@ function createFindBookSettingsStore() {
   const proxy = ref<FindBookProxySettings>({ ...initial.proxy });
   const readerFontSize = ref(initial.readerFontSize);
   const readerLineHeightMultiple = ref(initial.readerLineHeightMultiple);
+  const readerLineSpacingPx = ref(initial.readerLineSpacingPx);
+  const readerLetterSpacingPx = ref(initial.readerLetterSpacingPx);
+  const readerHorizontalInsetPx = ref(initial.readerHorizontalInsetPx);
   const monacoFontFamily = ref(initial.monacoFontFamily);
   const pinnedOtherFonts = ref(initial.pinnedOtherFonts);
   const monacoCustomHighlight = ref(initial.monacoCustomHighlight);
   const txtrDelimitedMatchCrossLine = ref(initial.txtrDelimitedMatchCrossLine);
   const compressBlankLines = ref(initial.compressBlankLines);
   const compressBlankKeepOneBlank = ref(initial.compressBlankKeepOneBlank);
+  const chapterTitleBlankMode = ref(initial.chapterTitleBlankMode);
   const leadIndentFullWidth = ref(initial.leadIndentFullWidth);
   const textConvertZh = ref(initial.textConvertZh);
   const textConvertLetter = ref(initial.textConvertLetter);
   const textConvertDigit = ref(initial.textConvertDigit);
   const monacoAdvancedWrapping = ref(initial.monacoAdvancedWrapping);
+  const monacoCjkWrapOptimize = ref(initial.monacoCjkWrapOptimize);
   const monacoSmoothScrolling = ref(initial.monacoSmoothScrolling);
   const mouseWheelScrollSensitivity = ref(initial.mouseWheelScrollSensitivity);
   const fastScrollSensitivity = ref(initial.fastScrollSensitivity);
@@ -82,17 +87,22 @@ function createFindBookSettingsStore() {
     return {
       readerFontSize: readerFontSize.value,
       readerLineHeightMultiple: readerLineHeightMultiple.value,
+      readerLineSpacingPx: readerLineSpacingPx.value,
+      readerLetterSpacingPx: readerLetterSpacingPx.value,
+      readerHorizontalInsetPx: readerHorizontalInsetPx.value,
       monacoFontFamily: monacoFontFamily.value,
       pinnedOtherFonts: pinnedOtherFonts.value,
       monacoCustomHighlight: monacoCustomHighlight.value,
       txtrDelimitedMatchCrossLine: txtrDelimitedMatchCrossLine.value,
       compressBlankLines: compressBlankLines.value,
       compressBlankKeepOneBlank: compressBlankKeepOneBlank.value,
+      chapterTitleBlankMode: chapterTitleBlankMode.value,
       leadIndentFullWidth: leadIndentFullWidth.value,
       textConvertZh: textConvertZh.value,
       textConvertLetter: textConvertLetter.value,
       textConvertDigit: textConvertDigit.value,
       monacoAdvancedWrapping: monacoAdvancedWrapping.value,
+      monacoCjkWrapOptimize: monacoCjkWrapOptimize.value,
       monacoSmoothScrolling: monacoSmoothScrolling.value,
       mouseWheelScrollSensitivity: mouseWheelScrollSensitivity.value,
       fastScrollSensitivity: fastScrollSensitivity.value,
@@ -146,17 +156,22 @@ function createFindBookSettingsStore() {
     const shared = sharedReaderSettingsFromMainData(loadMainSettingsData());
     readerFontSize.value = shared.readerFontSize;
     readerLineHeightMultiple.value = shared.readerLineHeightMultiple;
+    readerLineSpacingPx.value = shared.readerLineSpacingPx;
+    readerLetterSpacingPx.value = shared.readerLetterSpacingPx;
+    readerHorizontalInsetPx.value = shared.readerHorizontalInsetPx;
     monacoFontFamily.value = shared.monacoFontFamily;
     pinnedOtherFonts.value = shared.pinnedOtherFonts;
     monacoCustomHighlight.value = shared.monacoCustomHighlight;
     txtrDelimitedMatchCrossLine.value = shared.txtrDelimitedMatchCrossLine;
     compressBlankLines.value = shared.compressBlankLines;
     compressBlankKeepOneBlank.value = shared.compressBlankKeepOneBlank;
+    chapterTitleBlankMode.value = shared.chapterTitleBlankMode;
     leadIndentFullWidth.value = shared.leadIndentFullWidth;
     textConvertZh.value = shared.textConvertZh;
     textConvertLetter.value = shared.textConvertLetter;
     textConvertDigit.value = shared.textConvertDigit;
     monacoAdvancedWrapping.value = shared.monacoAdvancedWrapping;
+    monacoCjkWrapOptimize.value = shared.monacoCjkWrapOptimize;
     monacoSmoothScrolling.value = shared.monacoSmoothScrolling;
     mouseWheelScrollSensitivity.value = shared.mouseWheelScrollSensitivity;
     fastScrollSensitivity.value = shared.fastScrollSensitivity;
@@ -188,17 +203,22 @@ function createFindBookSettingsStore() {
     syncHttpProxyToMain,
     readerFontSize,
     readerLineHeightMultiple,
+    readerLineSpacingPx,
+    readerLetterSpacingPx,
+    readerHorizontalInsetPx,
     monacoFontFamily,
     pinnedOtherFonts,
     monacoCustomHighlight,
     txtrDelimitedMatchCrossLine,
     compressBlankLines,
     compressBlankKeepOneBlank,
+    chapterTitleBlankMode,
     leadIndentFullWidth,
     textConvertZh,
     textConvertLetter,
     textConvertDigit,
     monacoAdvancedWrapping,
+    monacoCjkWrapOptimize,
     monacoSmoothScrolling,
     mouseWheelScrollSensitivity,
     fastScrollSensitivity,

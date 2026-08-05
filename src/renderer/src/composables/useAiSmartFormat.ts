@@ -29,6 +29,7 @@ import {
   applySmartFormatPostProcessToText,
   type SmartFormatPostProcessContext,
 } from "../aiSmartFormat/aiSmartFormatTextPostProcess";
+import type { ChapterTitleBlankMode } from "../constants/appUi";
 import type { SmartFormatReviewSession } from "../aiSmartFormat/aiSmartFormatReviewTypes";
 import type { Chapter } from "../chapter";
 import {
@@ -51,6 +52,7 @@ export function useAiSmartFormat(deps: {
   aiFeaturesEnabled: Ref<boolean>;
   aiSkillOverrides: Ref<Record<string, AiSkillUserOverride>>;
   compressBlankKeepOneBlank: Ref<boolean>;
+  chapterTitleBlankMode: Ref<ChapterTitleBlankMode>;
   runEditFormatWithChapterSync: (
     format: () => Promise<boolean | undefined> | boolean | undefined,
   ) => Promise<void>;
@@ -361,6 +363,7 @@ export function useAiSmartFormat(deps: {
       settings,
       readPostProcessContext(),
       deps.compressBlankKeepOneBlank.value,
+      deps.chapterTitleBlankMode.value,
     );
   }
 

@@ -19,8 +19,10 @@ import {
 } from "../services/findBookSettingsStore";
 import {
   defaultCompressBlankKeepOneBlank,
+  defaultChapterTitleBlankMode,
   defaultFullscreenReaderWidthPercent,
   defaultFullscreenShowSystemTime,
+  defaultMonacoCjkWrapOptimize,
   defaultMonacoSmoothScrolling,
   defaultMouseWheelScrollSensitivity,
   defaultFastScrollSensitivity,
@@ -30,6 +32,12 @@ import {
   defaultReaderEditShowLineNumbers,
   defaultReaderFontSize,
   defaultReaderLineHeightMultiple,
+  defaultLineSpacingPx,
+  clampLineSpacingPx,
+  defaultLetterSpacingPx,
+  clampLetterSpacingPx,
+  defaultReaderHorizontalInsetPx,
+  clampReaderHorizontalInsetPx,
   defaultStickyChapterTitleEnabled,
   defaultTxtrDelimitedMatchCrossLine,
   defaultChapterNavToolbarEnabled,
@@ -132,7 +140,11 @@ const draftWebDavPassword = ref("");
 const draftWebDavRemoteDir = ref("ColorTxt");
 const draftFontSize = ref(defaultReaderFontSize);
 const draftLineHeightMultiple = ref(defaultReaderLineHeightMultiple);
+const draftLineSpacingPx = ref(defaultLineSpacingPx);
+const draftLetterSpacingPx = ref(defaultLetterSpacingPx);
+const draftReaderHorizontalInsetPx = ref(defaultReaderHorizontalInsetPx);
 const draftMonacoSmoothScrolling = ref(defaultMonacoSmoothScrolling);
+const draftMonacoCjkWrapOptimize = ref(defaultMonacoCjkWrapOptimize);
 const draftMouseWheelScrollSensitivity = ref(
   defaultMouseWheelScrollSensitivity,
 );
@@ -141,6 +153,9 @@ const draftStickyChapterTitleEnabled = ref(defaultStickyChapterTitleEnabled);
 const draftChapterNavToolbarEnabled = ref(defaultChapterNavToolbarEnabled);
 const draftReaderEditShowLineNumbers = ref(defaultReaderEditShowLineNumbers);
 const draftReaderEditMinimap = ref(defaultReaderEditMinimap);
+const draftChapterTitleBlankMode = ref(
+  defaultChapterTitleBlankMode,
+);
 const draftCompressBlankKeepOneBlank = ref(defaultCompressBlankKeepOneBlank);
 const draftTxtrDelimitedMatchCrossLine = ref(defaultTxtrDelimitedMatchCrossLine);
 const draftFullscreenReaderWidthPercent = ref(defaultFullscreenReaderWidthPercent);
@@ -199,7 +214,15 @@ function syncSharedReaderDraftFromStore() {
     fb.readerFontSize.value,
     fb.readerLineHeightMultiple.value,
   );
+  draftLineSpacingPx.value = clampLineSpacingPx(fb.readerLineSpacingPx.value);
+  draftLetterSpacingPx.value = clampLetterSpacingPx(
+    fb.readerLetterSpacingPx.value,
+  );
+  draftReaderHorizontalInsetPx.value = clampReaderHorizontalInsetPx(
+    fb.readerHorizontalInsetPx.value,
+  );
   draftMonacoSmoothScrolling.value = fb.monacoSmoothScrolling.value;
+  draftMonacoCjkWrapOptimize.value = fb.monacoCjkWrapOptimize.value;
   draftMouseWheelScrollSensitivity.value = clampMouseWheelScrollSensitivity(
     fb.mouseWheelScrollSensitivity.value,
   );
@@ -210,6 +233,8 @@ function syncSharedReaderDraftFromStore() {
   draftChapterNavToolbarEnabled.value = fb.chapterNavToolbarEnabled.value;
   draftReaderEditShowLineNumbers.value = fb.readerEditShowLineNumbers.value;
   draftReaderEditMinimap.value = fb.readerEditMinimap.value;
+  draftChapterTitleBlankMode.value =
+    fb.chapterTitleBlankMode.value;
   draftCompressBlankKeepOneBlank.value = fb.compressBlankKeepOneBlank.value;
   draftTxtrDelimitedMatchCrossLine.value = fb.txtrDelimitedMatchCrossLine.value;
   draftFullscreenReaderWidthPercent.value = fb.fullscreenReaderWidthPercent.value;
@@ -280,11 +305,17 @@ function resetWebDavDraft() {
 function resetReadingDraft() {
   draftFontSize.value = defaultReaderFontSize;
   draftLineHeightMultiple.value = defaultReaderLineHeightMultiple;
+  draftLineSpacingPx.value = defaultLineSpacingPx;
+  draftLetterSpacingPx.value = defaultLetterSpacingPx;
+  draftReaderHorizontalInsetPx.value = defaultReaderHorizontalInsetPx;
   draftMonacoSmoothScrolling.value = defaultMonacoSmoothScrolling;
+  draftMonacoCjkWrapOptimize.value = defaultMonacoCjkWrapOptimize;
   draftMouseWheelScrollSensitivity.value = defaultMouseWheelScrollSensitivity;
   draftFastScrollSensitivity.value = defaultFastScrollSensitivity;
   draftStickyChapterTitleEnabled.value = defaultStickyChapterTitleEnabled;
   draftChapterNavToolbarEnabled.value = defaultChapterNavToolbarEnabled;
+  draftChapterTitleBlankMode.value =
+    defaultChapterTitleBlankMode;
   draftCompressBlankKeepOneBlank.value = defaultCompressBlankKeepOneBlank;
   draftTxtrDelimitedMatchCrossLine.value = defaultTxtrDelimitedMatchCrossLine;
   draftFullscreenReaderWidthPercent.value = defaultFullscreenReaderWidthPercent;
@@ -436,7 +467,15 @@ async function onConfirm() {
     draftFontSize.value,
     draftLineHeightMultiple.value,
   );
+  fb.readerLineSpacingPx.value = clampLineSpacingPx(draftLineSpacingPx.value);
+  fb.readerLetterSpacingPx.value = clampLetterSpacingPx(
+    draftLetterSpacingPx.value,
+  );
+  fb.readerHorizontalInsetPx.value = clampReaderHorizontalInsetPx(
+    draftReaderHorizontalInsetPx.value,
+  );
   fb.monacoSmoothScrolling.value = draftMonacoSmoothScrolling.value;
+  fb.monacoCjkWrapOptimize.value = draftMonacoCjkWrapOptimize.value;
   fb.mouseWheelScrollSensitivity.value = clampMouseWheelScrollSensitivity(
     draftMouseWheelScrollSensitivity.value,
   );
@@ -447,6 +486,8 @@ async function onConfirm() {
   fb.chapterNavToolbarEnabled.value = draftChapterNavToolbarEnabled.value;
   fb.readerEditShowLineNumbers.value = draftReaderEditShowLineNumbers.value;
   fb.readerEditMinimap.value = draftReaderEditMinimap.value;
+  fb.chapterTitleBlankMode.value =
+    draftChapterTitleBlankMode.value;
   fb.compressBlankKeepOneBlank.value = draftCompressBlankKeepOneBlank.value;
   fb.txtrDelimitedMatchCrossLine.value = draftTxtrDelimitedMatchCrossLine.value;
   fb.fullscreenReaderWidthPercent.value = draftFullscreenReaderWidthPercent.value;
@@ -561,13 +602,20 @@ watch(draftFontSize, (size) => {
               v-show="activeTab === 'reading'"
               v-model:draft-font-size="draftFontSize"
               v-model:draft-line-height-multiple="draftLineHeightMultiple"
+              v-model:draft-line-spacing-px="draftLineSpacingPx"
+              v-model:draft-letter-spacing-px="draftLetterSpacingPx"
+              v-model:draft-reader-horizontal-inset-px="
+                draftReaderHorizontalInsetPx
+              "
               v-model:draft-monaco-smooth-scrolling="draftMonacoSmoothScrolling"
+              v-model:draft-monaco-cjk-wrap-optimize="draftMonacoCjkWrapOptimize"
               v-model:draft-mouse-wheel-scroll-sensitivity="
                 draftMouseWheelScrollSensitivity
               "
               v-model:draft-fast-scroll-sensitivity="draftFastScrollSensitivity"
               v-model:draft-sticky-chapter-title-enabled="draftStickyChapterTitleEnabled"
               v-model:draft-chapter-nav-toolbar-enabled="draftChapterNavToolbarEnabled"
+              v-model:draft-chapter-title-blank-mode="draftChapterTitleBlankMode"
               v-model:draft-compress-blank-keep-one-blank="draftCompressBlankKeepOneBlank"
               v-model:draft-txtr-delimited-match-cross-line="draftTxtrDelimitedMatchCrossLine"
               v-model:draft-fullscreen-reader-width-percent="draftFullscreenReaderWidthPercent"

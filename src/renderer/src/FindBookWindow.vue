@@ -3,6 +3,7 @@ import { onBeforeUnmount, onMounted } from "vue";
 import FindBookPanel from "./bookSource/components/FindBookPanel.vue";
 import AppCaptchaHost from "./components/AppCaptchaHost.vue";
 import AppDialogHost from "./components/AppDialogHost.vue";
+import AppLoadingHost from "./components/AppLoadingHost.vue";
 import AppToastHost from "./components/AppToastHost.vue";
 import {
   applyAppShellTheme,
@@ -46,6 +47,7 @@ onBeforeUnmount(() => {
     <FindBookPanel standalone @go-main="onGoMain" />
     <AppCaptchaHost />
     <AppDialogHost />
+    <AppLoadingHost />
     <AppToastHost />
   </div>
 </template>
