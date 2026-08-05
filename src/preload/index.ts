@@ -434,6 +434,14 @@ const api = {
       ipcRenderer.invoke("webDisplay:stop") as Promise<{ ok: boolean }>,
     isRunning: () =>
       ipcRenderer.invoke("webDisplay:isRunning") as Promise<boolean>,
+    cacheContent: (filePath: string, result: unknown) =>
+      ipcRenderer.invoke("webDisplay:cacheContent", filePath, result) as Promise<{
+        ok: boolean;
+      }>,
+    setCurrentFile: (filePath: string) =>
+      ipcRenderer.invoke("webDisplay:setCurrentFile", filePath) as Promise<{
+        ok: boolean;
+      }>,
   },
   emptyDir: (dirPath: string) =>
     ipcRenderer.invoke("fs:emptyDir", dirPath) as Promise<{ ok: true }>,

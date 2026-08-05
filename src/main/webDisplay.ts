@@ -1,15 +1,81 @@
 import { createServer, type Server } from "node:http";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { app } from "electron";
+import { createHash } from "node:crypto";
 
 const PORT = 8888;
 
 let server: Server | null = null;
+let currentFilePath: string | null = null;
+
+export function setCurrentFilePath(path: string): void {
+  currentFilePath = path;
+}
+
+export function getCurrentFilePath(): string | null {
+  return currentFilePath;
+}
 
 export type ContentResult =
   | { ok: false; reason: string }
-  | { ok: true; html: string; theme: string; file: string };
+  | {
+      ok: true;
+      html: string;
+      theme: string;
+      file: string;
+      chapters: { title: string; line: number }[];
+    };
+
+export type FileListItem = {
+  name: string;
+  path: string;
+  active: boolean;
+};
+
+// ---- Cache ----
+
+let cacheDir: string | null = null;
+
+function getCacheDir(): string {
+  if (!cacheDir) {
+    cacheDir = join(app.getPath("temp"), "colortxt-webdisplay");
+  }
+  return cacheDir;
+}
+
+function cacheKey(filePath: string): string {
+  return createHash("md5").update(filePath).digest("hex");
+}
+
+export async function cacheContent(
+  filePath: string,
+  result: ContentResult,
+): Promise<void> {
+  const dir = getCacheDir();
+  await mkdir(dir, { recursive: true });
+  const file = join(dir, cacheKey(filePath) + ".json");
+  await writeFile(file, JSON.stringify(result), "utf-8");
+}
+
+export async function getCachedContent(
+  filePath: string,
+): Promise<ContentResult | null> {
+  const dir = getCacheDir();
+  try {
+    const file = join(dir, cacheKey(filePath) + ".json");
+    const raw = await readFile(file, "utf-8");
+    return JSON.parse(raw) as ContentResult;
+  } catch {
+    return null;
+  }
+}
+
+export function clearCache(): void {
+  cacheDir = null;
+}
+
+// ---- Server ----
 
 function serveFile(
   res: import("node:http").ServerResponse,
@@ -28,25 +94,55 @@ function serveFile(
 }
 
 export function startWebDisplay(
-  getColoredHtml: () => Promise<ContentResult>,
+  getCurrentContent: () => Promise<ContentResult>,
+  getContentForFile: (filePath: string, refresh?: boolean) => Promise<ContentResult>,
+  getFileList: () => Promise<FileListItem[]>,
 ): boolean {
   if (server) return true;
+
+  // 确保缓存目录存在
+  const dir = getCacheDir();
+  mkdir(dir, { recursive: true }).catch(() => {});
 
   const frontDir = join(app.getAppPath(), "front");
 
   server = createServer(async (req, res) => {
     res.setHeader("Access-Control-Allow-Origin", "*");
 
-    const url = req.url ?? "/";
+    const rawUrl = req.url ?? "/";
+    const url = new URL(rawUrl, "http://localhost");
 
-    if (url === "/" || url === "/index.html") {
+    if (url.pathname === "/" || url.pathname === "/index.html") {
       serveFile(res, join(frontDir, "index.html"), "text/html; charset=utf-8");
       return;
     }
 
-    if (url === "/api/content") {
+    if (url.pathname === "/api/files") {
       try {
-        const result = await getColoredHtml();
+        const files = await getFileList();
+        res.writeHead(200, {
+          "Content-Type": "application/json; charset=utf-8",
+        });
+        res.end(JSON.stringify({ ok: true, files }));
+      } catch {
+        res.writeHead(200, {
+          "Content-Type": "application/json; charset=utf-8",
+        });
+        res.end(JSON.stringify({ ok: true, files: [] }));
+      }
+      return;
+    }
+
+    if (url.pathname === "/api/content") {
+      const fileParam = url.searchParams.get("file");
+      const refresh = url.searchParams.has("refresh");
+      try {
+        let result: ContentResult;
+        if (fileParam) {
+          result = await getContentForFile(fileParam, refresh);
+        } else {
+          result = await getCurrentContent();
+        }
         res.writeHead(200, {
           "Content-Type": "application/json; charset=utf-8",
         });
@@ -55,16 +151,14 @@ export function startWebDisplay(
         res.writeHead(500, {
           "Content-Type": "application/json; charset=utf-8",
         });
-        res.end(
-          JSON.stringify({ ok: false, reason: "服务内部错误" }),
-        );
+        res.end(JSON.stringify({ ok: false, reason: "服务内部错误" }));
       }
       return;
     }
 
-    if (url === "/api/status") {
+    if (url.pathname === "/api/status") {
       try {
-        const result = await getColoredHtml();
+        const result = await getCurrentContent();
         res.writeHead(200, {
           "Content-Type": "application/json; charset=utf-8",
         });

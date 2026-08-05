@@ -21,7 +21,7 @@ import {
 } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { startWebDisplay, stopWebDisplay, isWebDisplayRunning, type ContentResult } from "./webDisplay";
+import { startWebDisplay, stopWebDisplay, isWebDisplayRunning, cacheContent, getCachedContent, clearCache, setCurrentFilePath, getCurrentFilePath, type ContentResult, type FileListItem } from "./webDisplay";
 import { getFonts } from "font-list";
 import iconv from "iconv-lite";
 import { detectTextFileEncoding } from "./detectTextEncoding";
@@ -1062,53 +1062,97 @@ function unknownQuoteAttributions(
     },
   );
 
-  let webDisplayGetHtml: (() => Promise<ContentResult>) | null = null;
-
   ipcMain.handle("webDisplay:start", async () => {
-    // 优先使用最近获得焦点的主窗口；回退到全体窗口搜索
-    let win: BrowserWindow | null = null;
-    if (mainWindowFocusState.lastId != null) {
-      const w = BrowserWindow.fromId(mainWindowFocusState.lastId);
-      if (w && !w.isDestroyed()) win = w;
-    }
-    if (!win) {
-      win =
+    const findWindow = (): BrowserWindow | null => {
+      if (mainWindowFocusState.lastId != null) {
+        const w = BrowserWindow.fromId(mainWindowFocusState.lastId);
+        if (w && !w.isDestroyed()) return w;
+      }
+      return (
         BrowserWindow.getAllWindows().find(
           (w) => !w.isDestroyed() && !w.webContents.isLoading(),
-        ) ?? null;
-    }
-    if (!win) return { ok: false as const, reason: "无可用窗口" as const };
+        ) ?? null
+      );
+    };
 
-    webDisplayGetHtml = () =>
-      win!.webContents.executeJavaScript(
-        "window.__colorTxtGenerateColoredHtml?.() || ({ ok: false, reason: '阅读器未就绪' })",
-      ) as Promise<ContentResult>;
+    const getCurrentContent = async () => {
+      const fp = getCurrentFilePath();
+      if (!fp) return { ok: false as const, reason: "未打开文件" as const };
+      const cached = await getCachedContent(fp);
+      return cached ?? { ok: false as const, reason: "缓存未就绪，请稍后刷新" as const };
+    };
 
-    const started = startWebDisplay(async () => {
-      if (!webDisplayGetHtml)
-        return { ok: false as const, reason: "服务未启动" as const };
+    const getContentForFileFn = async (filePath: string, refresh?: boolean): Promise<ContentResult> => {
+      if (!refresh) {
+        const cached = await getCachedContent(filePath);
+        if (cached) return cached;
+      }
+
+      const w = findWindow();
+      if (!w) return { ok: false as const, reason: "无可用窗口" as const };
       try {
-        const result = await webDisplayGetHtml();
-        if (!result || !result.ok) {
-          return {
-            ok: false as const,
-            reason: result?.reason ?? "获取内容失败",
-          };
+        const result = await w.webContents.executeJavaScript(
+          `(async () => {
+            const text = await window.colorTxt.readWholeTextFile?.(${JSON.stringify(filePath)});
+            if (!text?.ok) return { ok: false, reason: text?.message || '读取失败' };
+            return window.__colorTxtGenerateColoredHtmlForText?.(text.text, ${JSON.stringify(filePath)}) || { ok: false, reason: '阅读器未就绪' };
+          })()`,
+        );
+        const r = result ?? { ok: false as const, reason: "获取内容失败" as const };
+        // 缓存成功结果
+        if (r.ok) {
+          cacheContent(filePath, r).catch(() => {});
         }
-        return result;
+        return r;
       } catch {
         return { ok: false as const, reason: "获取内容失败" as const };
       }
-    });
+    };
+
+    const getFileList = () => {
+      const w = findWindow();
+      if (!w) return Promise.resolve([] as FileListItem[]);
+      return w.webContents.executeJavaScript(
+        "window.__colorTxtGetFileList?.() || []",
+      ) as Promise<FileListItem[]>;
+    };
+
+    const started = startWebDisplay(
+      getCurrentContent,
+      getContentForFileFn,
+      async () => {
+        try {
+          return await getFileList();
+        } catch {
+          return [];
+        }
+      },
+    );
 
     return { ok: started, reason: started ? undefined : "端口被占用" };
   });
 
   ipcMain.handle("webDisplay:stop", async () => {
     stopWebDisplay();
-    webDisplayGetHtml = null;
+    clearCache();
     return { ok: true as const };
   });
+
+  ipcMain.handle(
+    "webDisplay:cacheContent",
+    async (_evt, filePath: string, result: ContentResult) => {
+      await cacheContent(filePath, result);
+      return { ok: true as const };
+    },
+  );
+
+  ipcMain.handle(
+    "webDisplay:setCurrentFile",
+    async (_evt, filePath: string) => {
+      setCurrentFilePath(filePath);
+      return { ok: true as const };
+    },
+  );
 
   ipcMain.handle("webDisplay:isRunning", async () => {
     return isWebDisplayRunning();
