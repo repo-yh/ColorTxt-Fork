@@ -145,6 +145,7 @@ const draftLetterSpacingPx = ref(defaultLetterSpacingPx);
 const draftReaderHorizontalInsetPx = ref(defaultReaderHorizontalInsetPx);
 const draftMonacoSmoothScrolling = ref(defaultMonacoSmoothScrolling);
 const draftMonacoCjkWrapOptimize = ref(defaultMonacoCjkWrapOptimize);
+const draftWebDisplayEnabled = ref(false);
 const draftMouseWheelScrollSensitivity = ref(
   defaultMouseWheelScrollSensitivity,
 );
@@ -609,6 +610,7 @@ watch(draftFontSize, (size) => {
               "
               v-model:draft-monaco-smooth-scrolling="draftMonacoSmoothScrolling"
               v-model:draft-monaco-cjk-wrap-optimize="draftMonacoCjkWrapOptimize"
+              v-model:draft-web-display-enabled="draftWebDisplayEnabled"
               v-model:draft-mouse-wheel-scroll-sensitivity="
                 draftMouseWheelScrollSensitivity
               "

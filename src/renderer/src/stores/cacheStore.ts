@@ -175,6 +175,8 @@ export type PersistedSettingsData = {
   bookPackPassword?: string;
   /** 是否启用 WebDAV 同步入口（默认 false） */
   webDavEnabled?: boolean;
+  /** 是否启用 Web 展示服务（默认 false） */
+  webDisplayEnabled?: boolean;
   /** WebDAV 服务地址 */
   webDavUrl?: string;
   /** WebDAV 用户名 */
@@ -528,6 +530,9 @@ export function loadPersistedSettingsData(
   }
   if (typeof obj.webDavEnabled === "boolean") {
     data.webDavEnabled = obj.webDavEnabled;
+  }
+  if (typeof obj.webDisplayEnabled === "boolean") {
+    data.webDisplayEnabled = obj.webDisplayEnabled;
   }
   if (typeof obj.webDavUrl === "string") {
     data.webDavUrl = obj.webDavUrl;

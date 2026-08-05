@@ -424,6 +424,17 @@ const api = {
     ipcRenderer.invoke("file:writeBinaryFile", filePath, base64) as Promise<{
       ok: true;
     }>,
+  webDisplay: {
+    start: () =>
+      ipcRenderer.invoke("webDisplay:start") as Promise<{
+        ok: boolean;
+        reason?: string;
+      }>,
+    stop: () =>
+      ipcRenderer.invoke("webDisplay:stop") as Promise<{ ok: boolean }>,
+    isRunning: () =>
+      ipcRenderer.invoke("webDisplay:isRunning") as Promise<boolean>,
+  },
   emptyDir: (dirPath: string) =>
     ipcRenderer.invoke("fs:emptyDir", dirPath) as Promise<{ ok: true }>,
   removePath: (targetPath: string) =>

@@ -151,6 +151,7 @@ import {
   defaultRecentFilesHistoryLimit,
   defaultDragDropAction,
   type DragDropAction,
+  defaultWebDisplayEnabled,
   mergeReaderPaletteColorEnabled,
   mergeReaderSurfacePalette,
   overridesFromColorEnabled,
@@ -502,6 +503,14 @@ onMounted(() => {
   void refreshAiSidebarFlags();
   refreshReplaceRulesCache();
   window.addEventListener(appReplaceRulesChangedEvent, onReplaceRulesChanged);
+  window.__colorTxtGenerateColoredHtml = async () => {
+    const result = readerRef.value?.generateColoredHtml?.();
+    if (result) return result;
+    return {
+      ok: false as const,
+      reason: "阅读器未就绪" as const,
+    };
+  };
 });
 
 onBeforeUnmount(() => {
@@ -611,6 +620,25 @@ const syncCurrentFile = ref(defaultSyncCurrentFile);
 /** 最近打开文件条数上限，0 表示不记录 */
 const recentFilesHistoryLimit = ref(defaultRecentFilesHistoryLimit);
 const dragDropAction = ref<DragDropAction>(defaultDragDropAction);
+const webDisplayEnabled = ref(defaultWebDisplayEnabled);
+
+watch(webDisplayEnabled, async (enabled) => {
+  if (enabled) {
+    const r = await window.colorTxt.webDisplay.start();
+    if (!r.ok) {
+      webDisplayEnabled.value = false;
+      appToast(
+        `Web 展示服务启动失败: ${r.reason || "未知错误"}`,
+        { kind: "danger" },
+      );
+    } else {
+      appToast("Web 展示服务已启动: http://localhost:8888", { kind: "success" });
+    }
+  } else {
+    await window.colorTxt.webDisplay.stop();
+  }
+});
+
 /** 小于该字数的章节不纳入章节列表与导航 */
 const chapterMinCharCount = ref(defaultChapterMinCharCount);
 /** Monaco wrappingStrategy：advanced 换行更优、更重 */
@@ -1093,6 +1121,7 @@ const persistence = useAppPersistence({
   restoreSessionOnStartup,
   recentFilesHistoryLimit,
   dragDropAction,
+  webDisplayEnabled,
   chapterMinCharCount,
   monacoAdvancedWrapping,
   monacoCjkWrapOptimize,
@@ -3200,6 +3229,7 @@ async function applySettings(payload: SettingsApplyPayload) {
   const prevChapterMinCharCount = chapterMinCharCount.value;
   monacoSmoothScrolling.value = payload.monacoSmoothScrolling;
   monacoCjkWrapOptimize.value = payload.monacoCjkWrapOptimize;
+  webDisplayEnabled.value = payload.webDisplayEnabled;
   mouseWheelScrollSensitivity.value = clampMouseWheelScrollSensitivity(
     payload.mouseWheelScrollSensitivity,
   );
@@ -4054,6 +4084,7 @@ useAppShellThemeWatch({
       :compress-blank-keep-one-blank="compressBlankKeepOneBlank"
       :monaco-smooth-scrolling="monacoSmoothScrolling"
       :monaco-cjk-wrap-optimize="monacoCjkWrapOptimize"
+      :web-display-enabled="webDisplayEnabled"
       :mouse-wheel-scroll-sensitivity="mouseWheelScrollSensitivity"
       :fast-scroll-sensitivity="fastScrollSensitivity"
       :sticky-chapter-title-enabled="stickyChapterTitleEnabled"

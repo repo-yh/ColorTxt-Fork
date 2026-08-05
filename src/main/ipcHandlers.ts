@@ -21,6 +21,7 @@ import {
 } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { startWebDisplay, stopWebDisplay, isWebDisplayRunning, type ContentResult } from "./webDisplay";
 import { getFonts } from "font-list";
 import iconv from "iconv-lite";
 import { detectTextFileEncoding } from "./detectTextEncoding";
@@ -1060,6 +1061,58 @@ function unknownQuoteAttributions(
       }
     },
   );
+
+  let webDisplayGetHtml: (() => Promise<ContentResult>) | null = null;
+
+  ipcMain.handle("webDisplay:start", async () => {
+    // 优先使用最近获得焦点的主窗口；回退到全体窗口搜索
+    let win: BrowserWindow | null = null;
+    if (mainWindowFocusState.lastId != null) {
+      const w = BrowserWindow.fromId(mainWindowFocusState.lastId);
+      if (w && !w.isDestroyed()) win = w;
+    }
+    if (!win) {
+      win =
+        BrowserWindow.getAllWindows().find(
+          (w) => !w.isDestroyed() && !w.webContents.isLoading(),
+        ) ?? null;
+    }
+    if (!win) return { ok: false as const, reason: "无可用窗口" as const };
+
+    webDisplayGetHtml = () =>
+      win!.webContents.executeJavaScript(
+        "window.__colorTxtGenerateColoredHtml?.() || ({ ok: false, reason: '阅读器未就绪' })",
+      ) as Promise<ContentResult>;
+
+    const started = startWebDisplay(async () => {
+      if (!webDisplayGetHtml)
+        return { ok: false as const, reason: "服务未启动" as const };
+      try {
+        const result = await webDisplayGetHtml();
+        if (!result || !result.ok) {
+          return {
+            ok: false as const,
+            reason: result?.reason ?? "获取内容失败",
+          };
+        }
+        return result;
+      } catch {
+        return { ok: false as const, reason: "获取内容失败" as const };
+      }
+    });
+
+    return { ok: started, reason: started ? undefined : "端口被占用" };
+  });
+
+  ipcMain.handle("webDisplay:stop", async () => {
+    stopWebDisplay();
+    webDisplayGetHtml = null;
+    return { ok: true as const };
+  });
+
+  ipcMain.handle("webDisplay:isRunning", async () => {
+    return isWebDisplayRunning();
+  });
 
   registerAiIpcHandlers();
   registerVoiceReadIpcHandlers();

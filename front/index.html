@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ColorTxt 阅读</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #f4ead7;
+    font-family: "京華老宋体", "KingHwa_OldSong", "Noto Serif CJK SC", "Source Han Serif SC", serif;
+    padding: 24px 32px;
+    color: #000;
+    transition: background 0.3s, color 0.3s;
+    min-height: 100vh;
+  }
+  body.dark {
+    background: #1e1e1e;
+    color: #d4d4d4;
+  }
+  .toolbar {
+    position: sticky; top: 0; z-index: 10;
+    display: flex; align-items: center; gap: 12px;
+    padding: 8px 0; margin-bottom: 20px;
+    background: inherit;
+    border-bottom: 1px solid rgba(128,128,128,0.15);
+  }
+  .toolbar .title { flex: 1; font-size: 14px; opacity: 0.6; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .toolbar button {
+    padding: 4px 16px;
+    border: 1px solid rgba(128,128,128,0.25);
+    border-radius: 4px;
+    background: transparent;
+    cursor: pointer;
+    color: inherit;
+    font-size: 13px;
+    font-family: inherit;
+    transition: background 0.15s;
+  }
+  .toolbar button:hover { background: rgba(128,128,128,0.08); }
+  .toolbar button:disabled { opacity: 0.4; cursor: not-allowed; }
+  #content { line-height: 1.8; font-size: 16px; word-break: break-all; }
+  #content div { min-height: 1em; }
+  #status { text-align: center; padding: 60px 20px; opacity: 0.4; font-size: 14px; }
+  .error { color: #e74c3c; opacity: 1 !important; }
+</style>
+</head>
+<body>
+<div class="toolbar">
+  <span class="title" id="title">ColorTxt 阅读</span>
+  <button id="btnRefresh" onclick="load()">刷新</button>
+</div>
+<div id="content"><div id="status">正在加载...</div></div>
+<script>
+var $title = document.getElementById('title')
+var $content = document.getElementById('content')
+var $btn = document.getElementById('btnRefresh')
+
+function showStatus(text, isError) {
+  $content.innerHTML = '<div id="status"' + (isError ? ' class="error"' : '') + '>' + text + '</div>'
+}
+
+async function load() {
+  $btn.disabled = true
+  showStatus('正在加载...', false)
+  try {
+    var r = await fetch('/api/content')
+    var data = await r.json()
+    if (!data.ok) {
+      showStatus(data.reason || '未打开文件', false)
+      $title.textContent = 'ColorTxt 阅读'
+      return
+    }
+    if (data.theme === 'vs-dark') {
+      document.body.classList.add('dark')
+    } else {
+      document.body.classList.remove('dark')
+    }
+    $title.textContent = data.file || 'ColorTxt 阅读'
+    $content.innerHTML = data.html
+  } catch (e) {
+    showStatus('连接失败：请确认 ColorTxt 已开启 Web 展示服务', true)
+    $title.textContent = 'ColorTxt 阅读'
+  } finally {
+    $btn.disabled = false
+  }
+}
+
+load()
+</script>
+</body>
+</html>

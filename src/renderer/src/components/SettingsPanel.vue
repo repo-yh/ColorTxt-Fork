@@ -38,6 +38,7 @@ import {
   defaultFullscreenReaderWidthPercent,
   defaultFullscreenShowSystemTime,
   defaultMonacoCjkWrapOptimize,
+  defaultWebDisplayEnabled,
   defaultMonacoSmoothScrolling,
   defaultMouseWheelScrollSensitivity,
   defaultFastScrollSensitivity,
@@ -134,6 +135,7 @@ export type SettingsApplyPayload = {
   fullscreenShowSystemTime: boolean;
   monacoSmoothScrolling: boolean;
   monacoCjkWrapOptimize: boolean;
+  webDisplayEnabled: boolean;
   mouseWheelScrollSensitivity: number;
   fastScrollSensitivity: number;
   stickyChapterTitleEnabled: boolean;
@@ -186,6 +188,7 @@ const props = defineProps<{
   readerHorizontalInsetPx: number;
   monacoSmoothScrolling: boolean;
   monacoCjkWrapOptimize: boolean;
+  webDisplayEnabled: boolean;
   mouseWheelScrollSensitivity: number;
   fastScrollSensitivity: number;
   stickyChapterTitleEnabled: boolean;
@@ -255,6 +258,7 @@ const draftLetterSpacingPx = ref(defaultLetterSpacingPx);
 const draftReaderHorizontalInsetPx = ref(defaultReaderHorizontalInsetPx);
 const draftMonacoSmoothScrolling = ref(true);
 const draftMonacoCjkWrapOptimize = ref(defaultMonacoCjkWrapOptimize);
+const draftWebDisplayEnabled = ref(false);
 const draftMouseWheelScrollSensitivity = ref(
   defaultMouseWheelScrollSensitivity,
 );
@@ -335,6 +339,7 @@ function syncDraftFromProps() {
   );
   draftMonacoSmoothScrolling.value = props.monacoSmoothScrolling;
   draftMonacoCjkWrapOptimize.value = props.monacoCjkWrapOptimize;
+  draftWebDisplayEnabled.value = props.webDisplayEnabled;
   draftMouseWheelScrollSensitivity.value = clampMouseWheelScrollSensitivity(
     props.mouseWheelScrollSensitivity,
   );
@@ -487,6 +492,7 @@ function resetReadingDraft() {
   draftReaderHorizontalInsetPx.value = defaultReaderHorizontalInsetPx;
   draftMonacoSmoothScrolling.value = defaultMonacoSmoothScrolling;
   draftMonacoCjkWrapOptimize.value = defaultMonacoCjkWrapOptimize;
+  draftWebDisplayEnabled.value = defaultWebDisplayEnabled;
   draftMouseWheelScrollSensitivity.value = defaultMouseWheelScrollSensitivity;
   draftFastScrollSensitivity.value = defaultFastScrollSensitivity;
   draftStickyChapterTitleEnabled.value = defaultStickyChapterTitleEnabled;
@@ -702,6 +708,7 @@ async function onConfirm() {
     fullscreenShowSystemTime: draftFullscreenShowSystemTime.value,
     monacoSmoothScrolling: draftMonacoSmoothScrolling.value,
     monacoCjkWrapOptimize: draftMonacoCjkWrapOptimize.value,
+    webDisplayEnabled: draftWebDisplayEnabled.value,
     mouseWheelScrollSensitivity: clampMouseWheelScrollSensitivity(
       draftMouseWheelScrollSensitivity.value,
     ),
@@ -974,6 +981,7 @@ async function onImportConfig(): Promise<void> {
               "
               v-model:draft-monaco-smooth-scrolling="draftMonacoSmoothScrolling"
               v-model:draft-monaco-cjk-wrap-optimize="draftMonacoCjkWrapOptimize"
+              v-model:draft-web-display-enabled="draftWebDisplayEnabled"
               v-model:draft-mouse-wheel-scroll-sensitivity="
                 draftMouseWheelScrollSensitivity
               "

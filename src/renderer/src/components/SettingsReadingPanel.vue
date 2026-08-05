@@ -51,6 +51,7 @@ const props = defineProps<{
   draftReaderHorizontalInsetPx: number;
   draftMonacoSmoothScrolling: boolean;
   draftMonacoCjkWrapOptimize: boolean;
+  draftWebDisplayEnabled: boolean;
   draftMouseWheelScrollSensitivity: number;
   draftFastScrollSensitivity: number;
   draftStickyChapterTitleEnabled: boolean;
@@ -77,6 +78,7 @@ defineEmits<{
   "update:draftReaderHorizontalInsetPx": [v: number];
   "update:draftMonacoSmoothScrolling": [v: boolean];
   "update:draftMonacoCjkWrapOptimize": [v: boolean];
+  "update:draftWebDisplayEnabled": [v: boolean];
   "update:draftMouseWheelScrollSensitivity": [v: number];
   "update:draftFastScrollSensitivity": [v: number];
   "update:draftStickyChapterTitleEnabled": [v: boolean];
@@ -279,6 +281,22 @@ const selectListsEmpty: CustomSelectItem[] = [];
           />
         </div>
         <p class="settingsHint">关闭后，阅读区滚动不再使用平滑动画。</p>
+      </div>
+
+      <div class="settingsRow">
+        <div class="settingsRowMain">
+          <span class="settingsLabel">启用 Web 展示服务（端口 8888）</span>
+          <SwitchToggle
+            :model-value="draftWebDisplayEnabled"
+            aria-label="启用 Web 展示服务"
+            @update:model-value="
+              $emit('update:draftWebDisplayEnabled', $event)
+            "
+          />
+        </div>
+        <p class="settingsHint">
+          开启后可通过浏览器访问 http://localhost:8888 查看当前正文的染色效果。
+        </p>
       </div>
 
       <div class="settingsRow">
