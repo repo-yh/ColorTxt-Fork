@@ -1133,7 +1133,26 @@ function unknownQuoteAttributions(
   });
 
   ipcMain.handle("webDisplay:stop", async () => {
-    stopWebDisplay();
+    const w = (() => {
+      if (mainWindowFocusState.lastId != null) {
+        const bw = BrowserWindow.fromId(mainWindowFocusState.lastId);
+        if (bw && !bw.isDestroyed()) return bw;
+      }
+      return (
+        BrowserWindow.getAllWindows().find(
+          (bw) => !bw.isDestroyed() && !bw.webContents.isLoading(),
+        ) ?? null
+      );
+    })();
+
+    const getFileList = (): Promise<FileListItem[]> => {
+      if (!w) return Promise.resolve([]);
+      return w.webContents.executeJavaScript(
+        "window.__colorTxtGetFileList?.() || []",
+      ) as Promise<FileListItem[]>;
+    };
+
+    stopWebDisplay(getFileList);
     clearCache();
     return { ok: true as const };
   });

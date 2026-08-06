@@ -6,6 +6,7 @@ import { registerGlobalShortcuts, unregisterGlobalShortcuts } from "./globalShor
 import { registerUpdaterIpc, setupAutoUpdater } from "./updater";
 import { markAppQuittingForClose } from "./windowCloseGuard";
 import { createMainWindowFactory } from "./windowFactory";
+import { stopWebDisplay, type FileListItem } from "./webDisplay";
 import {
   argvHasFindBookFlag,
   openFindBookLaunchWindow,
@@ -99,6 +100,27 @@ app.whenReady().then(async () => {
 });
 
 app.on("before-quit", () => {
+  // 优雅关闭 Web 展示服务，清理失效缓存
+  const w = (() => {
+    if (mainWindowFocusState.lastId != null) {
+      const bw = BrowserWindow.fromId(mainWindowFocusState.lastId);
+      if (bw && !bw.isDestroyed()) return bw;
+    }
+    return (
+      BrowserWindow.getAllWindows().find(
+        (bw) => !bw.isDestroyed() && !bw.webContents.isLoading(),
+      ) ?? null
+    );
+  })();
+
+  const getFileList = (): Promise<FileListItem[]> => {
+    if (!w) return Promise.resolve([]);
+    return w.webContents.executeJavaScript(
+      "window.__colorTxtGetFileList?.() || []",
+    ) as Promise<FileListItem[]>;
+  };
+
+  stopWebDisplay(getFileList);
   destroyAllBackstageWebViews();
 });
 

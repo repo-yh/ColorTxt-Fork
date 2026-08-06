@@ -1,5 +1,5 @@
 import { createServer, type Server } from "node:http";
-import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { readFile, writeFile, mkdir, readdir, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { app } from "electron";
 import { createHash } from "node:crypto";
@@ -75,6 +75,31 @@ export function clearCache(): void {
   cacheDir = null;
 }
 
+/**
+ * 清理 tmp 目录下的失效缓存：删除不在文件列表中的文件对应的缓存
+ */
+export async function cleanStaleCache(validFilePaths: string[]): Promise<void> {
+  const dir = getCacheDir();
+  const validHashes = new Set(validFilePaths.map((fp) => cacheKey(fp)));
+
+  let entries;
+  try {
+    entries = await readdir(dir, { withFileTypes: true });
+  } catch {
+    return;
+  }
+
+  for (const entry of entries) {
+    if (!entry.isFile()) continue;
+    const name = entry.name;
+    if (!name.endsWith(".json")) continue;
+    const hash = name.slice(0, -5);
+    if (!validHashes.has(hash)) {
+      await unlink(join(dir, name)).catch(() => {});
+    }
+  }
+}
+
 // ---- Server ----
 
 function serveFile(
@@ -103,6 +128,11 @@ export function startWebDisplay(
   // 确保缓存目录存在
   const dir = getCacheDir();
   mkdir(dir, { recursive: true }).catch(() => {});
+
+  // 清理失效缓存（不在文件列表中的文件对应的缓存）
+  getFileList()
+    .then((files) => cleanStaleCache(files.map((f) => f.path)))
+    .catch(() => {});
 
   const frontDir = join(app.getAppPath(), "front");
 
@@ -195,10 +225,18 @@ export function startWebDisplay(
   return true;
 }
 
-export function stopWebDisplay(): void {
+export function stopWebDisplay(getFileList?: () => Promise<FileListItem[]>): void {
   if (!server) return;
   server.close();
   server = null;
+
+  // 关闭时清理失效缓存
+  if (getFileList) {
+    getFileList()
+      .then((files) => cleanStaleCache(files.map((f) => f.path)))
+      .catch(() => {});
+  }
+
   console.log("[webDisplay] Server stopped");
 }
 
