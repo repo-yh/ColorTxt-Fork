@@ -1117,9 +1117,67 @@ function unknownQuoteAttributions(
       ) as Promise<FileListItem[]>;
     };
 
+    // 文本缓存：避免重复从渲染进程读取全文
+    const textCache = new Map<string, string>();
+
+    const getContentForSegmentFn = async (
+      filePath: string,
+      start: number,
+      end: number,
+      refresh?: boolean,
+    ): Promise<ContentResult> => {
+      if (refresh) textCache.delete(filePath);
+
+      const w = findWindow();
+      if (!w) return { ok: false as const, reason: "无可用窗口" as const };
+
+      // 从缓存或渲染进程获取全文
+      let fullText = textCache.get(filePath) ?? null;
+      if (fullText == null) {
+        try {
+          const readResult = await w.webContents.executeJavaScript(
+            `(async () => {
+              const r = await window.colorTxt.readWholeTextFile?.(${JSON.stringify(filePath)});
+              return r?.ok ? r.text : null;
+            })()`,
+          );
+          if (typeof readResult !== "string") {
+            return { ok: false as const, reason: "读取文件失败" as const };
+          }
+          fullText = readResult;
+          textCache.set(filePath, fullText);
+        } catch {
+          return { ok: false as const, reason: "读取文件失败" as const };
+        }
+      }
+
+      // 全文传给渲染进程分词，只生成片段 HTML
+      try {
+        const result = await w.webContents.executeJavaScript(
+          `(async () => {
+            const r = await window.__colorTxtGenerateColoredHtmlForSegment?.(
+              ${JSON.stringify(fullText)},
+              ${JSON.stringify(filePath)},
+              ${start},
+              ${end}
+            );
+            return r || { ok: false, reason: '阅读器未就绪' };
+          })()`,
+        );
+        const r = (result as ContentResult) ?? {
+          ok: false as const,
+          reason: "获取内容失败" as const,
+        };
+        return r;
+      } catch {
+        return { ok: false as const, reason: "获取内容失败" as const };
+      }
+    };
+
     const started = startWebDisplay(
       getCurrentContent,
       getContentForFileFn,
+      getContentForSegmentFn,
       async () => {
         try {
           return await getFileList();

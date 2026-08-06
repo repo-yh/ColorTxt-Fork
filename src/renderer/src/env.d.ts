@@ -19,6 +19,24 @@ declare global {
           chapters: { title: string; line: number }[];
         }
     >;
+    __colorTxtGenerateColoredHtmlForSegment?: (
+      text: string,
+      filePath: string,
+      startLine: number,
+      endLine: number,
+    ) => Promise<
+      | { ok: false; reason: string }
+      | {
+          ok: true;
+          html: string;
+          theme: string;
+          file: string;
+          chapters: { title: string; line: number }[];
+          total: number;
+          start: number;
+          end: number;
+        }
+    >;
     __colorTxtGetFileList?: () => Array<{
       name: string;
       path: string;

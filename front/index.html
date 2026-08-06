@@ -71,11 +71,13 @@
   <select id="fileSelect" onchange="onFileChange()">
     <option value="">-- 选择文件 --</option>
   </select>
-  <button id="btnRefresh" onclick="load(currentFile, true)">刷新</button>
+  <button id="btnRefresh" onclick="loadFile(currentFile, true)">刷新</button>
 </div>
 <div id="content"><div id="status">请选择文件</div></div>
 </div>
 <script>
+var SEGMENT_SIZE = 500
+
 var $content = document.getElementById('content')
 var $btn = document.getElementById('btnRefresh')
 var $select = document.getElementById('fileSelect')
@@ -85,6 +87,7 @@ var $sidebarTab = document.getElementById('sidebarTab')
 var $chapterList = document.getElementById('chapterList')
 var $main = document.getElementById('main')
 var $stickyChapter = document.getElementById('stickyChapter')
+var $sentinel = null
 
 // 动态对齐工具栏底边（移动端工具栏fixed，桌面sticky）
 function alignStickyChapter() {
@@ -101,7 +104,10 @@ window.addEventListener('scroll', alignStickyChapter, { passive: true })
 alignStickyChapter()
 var currentFile = ''
 var chapters = []
+var totalLines = 0
 var sidebarOpen = false
+var loadedRanges = []
+var loadingSegment = false
 
 function updateStickyChapter() {
   if (!chapters.length) { $stickyChapter.style.display = 'none'; return }
@@ -134,19 +140,214 @@ function showStatus(text, isError) {
   $content.innerHTML = '<div id="status"' + (isError ? ' class="error"' : '') + '>' + text + '</div>'
   $chapterList.innerHTML = ''
   $stickyChapter.style.display = 'none'
+  $sentinel = null
 }
 
 function renderChapters(list) {
   chapters = list || []
   $chapterList.innerHTML = chapters.map(function(c) {
-    return '<span class="chapterItem" onclick="scrollToLine(' + c.line + ')">' + c.title + '</span>'
+    return '<span class="chapterItem" onclick="jumpToChapter(' + c.line + ')">' + c.title + '</span>'
   }).join('')
   updateStickyChapter()
 }
 
+// ---- 分段加载 ----
+
+function isLineLoaded(line) {
+  for (var i = 0; i < loadedRanges.length; i++) {
+    if (line >= loadedRanges[i].start && line <= loadedRanges[i].end) return true
+  }
+  return false
+}
+
+function isRangeLoaded(start, end) {
+  for (var i = 0; i < loadedRanges.length; i++) {
+    if (loadedRanges[i].start <= start && loadedRanges[i].end >= end) return true
+  }
+  return false
+}
+
+function addLoadedRange(start, end) {
+  var newRanges = []
+  var inserted = false
+  for (var i = 0; i < loadedRanges.length; i++) {
+    var r = loadedRanges[i]
+    if (r.end < start - 1) {
+      newRanges.push(r)
+    } else if (r.start > end + 1) {
+      if (!inserted) { newRanges.push({ start: start, end: end }); inserted = true }
+      newRanges.push(r)
+    } else {
+      start = Math.min(start, r.start)
+      end = Math.max(end, r.end)
+    }
+  }
+  if (!inserted) newRanges.push({ start: start, end: end })
+  loadedRanges = newRanges
+}
+
+function getRangeForLine(line) {
+  var start = Math.floor(line / SEGMENT_SIZE) * SEGMENT_SIZE
+  var end = Math.min(start + SEGMENT_SIZE - 1, Math.max(totalLines - 1, 0))
+  return { start: start, end: end }
+}
+
+function findNextUnloaded() {
+  var next = 0
+  for (var i = 0; i < loadedRanges.length; i++) {
+    if (loadedRanges[i].start <= next) {
+      next = Math.max(next, loadedRanges[i].end + 1)
+    } else break
+  }
+  if (next >= totalLines) return null
+  return { start: next, end: Math.min(next + SEGMENT_SIZE - 1, totalLines - 1) }
+}
+
+function removeSentinel() {
+  if ($sentinel && $sentinel.parentNode) $sentinel.parentNode.removeChild($sentinel)
+  $sentinel = null
+  if (window._sentinelObserver) { window._sentinelObserver.disconnect(); window._sentinelObserver = null }
+}
+
+function setupSentinel() {
+  removeSentinel()
+  var next = findNextUnloaded()
+  if (!next) return
+
+  $sentinel = document.createElement('div')
+  $sentinel.id = 'sentinel'
+  $sentinel.style.height = '1px'
+  document.getElementById('content').appendChild($sentinel)
+
+  window._sentinelObserver = new IntersectionObserver(function(entries) {
+    if (entries[0].isIntersecting) loadNextSegment()
+  }, { rootMargin: '3000px' })
+  window._sentinelObserver.observe($sentinel)
+}
+
+async function loadSegment(start, end) {
+  if (isRangeLoaded(start, end)) return
+  if (loadingSegment) return
+  loadingSegment = true
+
+  try {
+    var url = '/api/content?file=' + encodeURIComponent(currentFile) + '&start=' + start + '&end=' + end
+    var r = await fetch(url)
+    var data = await r.json()
+    if (!data.ok) { loadingSegment = false; return }
+
+    totalLines = data.total
+    if (data.theme === 'vs-dark') {
+      document.body.classList.add('dark')
+    } else {
+      document.body.classList.remove('dark')
+    }
+
+    // 章节数据：有则更新
+    if (Array.isArray(data.chapters) && data.chapters.length) {
+      renderChapters(data.chapters)
+    }
+    if (start === 0) {
+      alignStickyChapter()
+    }
+
+    // 移除占位状态
+    var statusEl = document.getElementById('status')
+    if (statusEl) statusEl.remove()
+
+    // 解析新行，插入到正确位置
+    var temp = document.createElement('div')
+    temp.innerHTML = data.html
+
+    var $c = document.getElementById('content')
+    // 找到插入点：第一个行号 > start 的元素之前
+    var insertBefore = null
+    var children = $c.children
+    for (var i = 0; i < children.length; i++) {
+      var cid = children[i].id
+      if (cid && /^L\d+$/.test(cid)) {
+        if (parseInt(cid.slice(1)) > start) { insertBefore = children[i]; break }
+      }
+    }
+
+    // 从后往前插入，保持顺序
+    var frag = document.createDocumentFragment()
+    while (temp.firstChild) frag.appendChild(temp.firstChild)
+    if (insertBefore) {
+      $c.insertBefore(frag, insertBefore)
+    } else {
+      $c.appendChild(frag)
+    }
+
+    addLoadedRange(data.start, data.end)
+    setupSentinel()
+  } catch (e) {
+    // ignore
+  } finally {
+    loadingSegment = false
+  }
+}
+
+function loadNextSegment() {
+  var next = findNextUnloaded()
+  if (next) {
+    loadSegment(next.start, next.end)
+  }
+}
+
+async function loadFile(filePath, forceRefresh) {
+  $btn.disabled = true
+  if (forceRefresh) {
+    // 强制刷新：先请求一次完整生成（带 refresh），使服务端重新生成并缓存
+    try {
+      var refreshUrl = '/api/content?file=' + encodeURIComponent(filePath) + '&refresh=1&start=0&end=' + (SEGMENT_SIZE - 1)
+      await fetch(refreshUrl)
+    } catch (e) { /* ignore */ }
+  }
+
+  showStatus('正在加载...', false)
+  currentFile = filePath
+  loadedRanges = []
+  totalLines = 0
+  chapters = []
+  removeSentinel()
+
+  try {
+    try { localStorage.setItem('colortxt_web_file', currentFile) } catch(e) {}
+    if (currentFile) $select.value = currentFile
+    await loadSegment(0, SEGMENT_SIZE - 1)
+  } catch (e) {
+    showStatus('连接失败：请确认 ColorTxt 已开启 Web 展示服务', true)
+  } finally {
+    $btn.disabled = false
+  }
+}
+
 function scrollToLine(line) {
   var el = document.getElementById('L' + line)
-  if (el) el.scrollIntoView({ behavior: 'instant', block: 'start' })
+  if (!el) return
+  el.style.position = 'static'
+  el.scrollIntoView({ behavior: 'instant', block: 'start' })
+  requestAnimationFrame(function() { el.style.position = '' })
+}
+
+async function jumpToChapter(line) {
+  if (!isLineLoaded(line)) {
+    // 找到目标行之前的最后一个已加载区间末尾
+    var gapStart = 0
+    for (var i = loadedRanges.length - 1; i >= 0; i--) {
+      if (loadedRanges[i].end < line) {
+        gapStart = loadedRanges[i].end + 1
+        break
+      }
+    }
+    var range = getRangeForLine(line)
+    removeSentinel()
+    // 补齐缺口 + 章节所在段 + 再多取一段，避免读完立即卡顿
+    var batchEnd = Math.min(range.end + SEGMENT_SIZE, Math.max(totalLines - 1, 0))
+    await loadSegment(gapStart, batchEnd)
+  }
+  scrollToLine(line)
 }
 
 async function loadFiles() {
@@ -166,48 +367,16 @@ async function loadFiles() {
   } catch (e) { return '' }
 }
 
-async function load(filePath, forceRefresh) {
-  $btn.disabled = true
-  showStatus('正在加载...', false)
-  try {
-    var url = '/api/content'
-    if (filePath) url += '?file=' + encodeURIComponent(filePath)
-    if (forceRefresh) url += (filePath ? '&' : '?') + 'refresh=1'
-    var r = await fetch(url)
-    var data = await r.json()
-    if (!data.ok) {
-      showStatus(data.reason || '未打开文件', false)
-      return
-    }
-    if (data.theme === 'vs-dark') {
-      document.body.classList.add('dark')
-    } else {
-      document.body.classList.remove('dark')
-    }
-    currentFile = data.file || ''
-    try { localStorage.setItem('colortxt_web_file', currentFile) } catch(e) {}
-    // sync dropdown
-    if (currentFile) $select.value = currentFile
-    $content.innerHTML = data.html
-    renderChapters(data.chapters)
-    alignStickyChapter()
-  } catch (e) {
-    showStatus('连接失败：请确认 ColorTxt 已开启 Web 展示服务', true)
-  } finally {
-    $btn.disabled = false
-  }
-}
-
 function onFileChange() {
   var v = $select.value
-  if (v) load(v)
+  if (v) loadFile(v)
 }
 
 loadFiles().then(function() {
   var saved = ''
   try { saved = localStorage.getItem('colortxt_web_file') || '' } catch(e) {}
   if (saved) {
-    load(saved)
+    loadFile(saved)
     $select.value = saved
   }
 })

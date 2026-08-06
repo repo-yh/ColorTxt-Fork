@@ -25,6 +25,9 @@ export type ContentResult =
       theme: string;
       file: string;
       chapters: { title: string; line: number }[];
+      total?: number;
+      start?: number;
+      end?: number;
     };
 
 export type FileListItem = {
@@ -121,6 +124,7 @@ function serveFile(
 export function startWebDisplay(
   getCurrentContent: () => Promise<ContentResult>,
   getContentForFile: (filePath: string, refresh?: boolean) => Promise<ContentResult>,
+  getContentForSegment: (filePath: string, start: number, end: number, refresh?: boolean) => Promise<ContentResult>,
   getFileList: () => Promise<FileListItem[]>,
 ): boolean {
   if (server) return true;
@@ -166,7 +170,23 @@ export function startWebDisplay(
     if (url.pathname === "/api/content") {
       const fileParam = url.searchParams.get("file");
       const refresh = url.searchParams.has("refresh");
+      const startStr = url.searchParams.get("start");
+      const endStr = url.searchParams.get("end");
+      const wantSegment = startStr != null && endStr != null && fileParam != null;
+
       try {
+        // 分段请求：由上层提供分段专用处理器（全文分词，只生成片段 HTML）
+        if (wantSegment) {
+          const segStart = parseInt(startStr!, 10);
+          const segEnd = parseInt(endStr!, 10);
+          const result = await getContentForSegment(fileParam!, segStart, segEnd, refresh);
+          res.writeHead(200, {
+            "Content-Type": "application/json; charset=utf-8",
+          });
+          res.end(JSON.stringify(result));
+          return;
+        }
+
         let result: ContentResult;
         if (fileParam) {
           result = await getContentForFile(fileParam, refresh);

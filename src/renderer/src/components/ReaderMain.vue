@@ -3156,6 +3156,148 @@ async function buildColoredHtml(
   };
 }
 
+/**
+ * 与 buildColoredHtml 相同的染色逻辑，但只生成行号范围 [startLine, endLine] 的 HTML。
+ * 全文分词以保证 Monarch 状态正确，但只输出指定行的 HTML。
+ */
+async function buildColoredHtmlSegment(
+  fullText: string,
+  filePath: string,
+  highlightWords: HighlightWordsByIndex | undefined,
+  startLine: number,
+  endLine: number,
+) {
+  const escapeHtml = (s: string) =>
+    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+  const palette =
+    lastAppThemeName === "vs"
+      ? props.readerSurfaceLight ?? defaultReaderPaletteLight
+      : props.readerSurfaceDark ?? defaultReaderPaletteDark;
+
+  const colorEnabled =
+    props.readerPaletteColorEnabled ?? defaultReaderPaletteColorEnabled;
+
+  const tokenColorMap: Record<string, string> = {
+    "": palette.bodyText,
+    "txtr.quoteInner": colorEnabled.txtrQuoteInner
+      ? palette.txtrQuoteInner
+      : palette.bodyText,
+    "txtr.bracketInner": colorEnabled.txtrBracketInner
+      ? palette.txtrBracketInner
+      : palette.bodyText,
+    "txtr.punctuation": colorEnabled.txtrPunctuation
+      ? palette.txtrPunctuation
+      : palette.bodyText,
+    "txtr.specialMarker": colorEnabled.txtrSpecialMarker
+      ? palette.txtrSpecialMarker
+      : palette.bodyText,
+    "txtr.number": colorEnabled.txtrNumber
+      ? palette.txtrNumber
+      : palette.bodyText,
+    "txtr.english": colorEnabled.txtrEnglish
+      ? palette.txtrEnglish
+      : palette.bodyText,
+  };
+
+  for (const [idx, c] of (props.highlightColors ?? []).entries()) {
+    tokenColorMap[`txtr.customHighlight.${idx}`] = c;
+  }
+
+  let restoreMonarch = false;
+  if (highlightWords) {
+    monaco.languages.setMonarchTokensProvider(
+      languageId,
+      createTxtrTextMonarchLanguage(
+        {
+          enabled: props.monacoCustomHighlight,
+          highlightColorsLength: props.highlightColors.length,
+          highlightWordsByIndex: highlightWords,
+        },
+        props.txtrDelimitedMatchCrossLine,
+        props.readerPaletteColorEnabled,
+      ),
+    );
+    restoreMonarch = true;
+  }
+
+  // 全文分词以保证跨行状态正确
+  const tokenLines = await monaco.editor.tokenize(fullText, "txtr-text");
+
+  if (restoreMonarch) {
+    applyTxtrMonarchTokenizer();
+  }
+
+  const lines = fullText.split("\n");
+  const total = lines.length;
+  const clampedEnd = Math.min(endLine, total - 1);
+  const clampedStart = Math.min(startLine, clampedEnd);
+
+  // 章节检测（全量）
+  const chapters = buildChaptersFromPlainText(
+    fullText,
+    props.chapterMinCharCount ?? 0,
+  );
+  const chapterLineSet = new Set<number>();
+  const chapterList = chapters.map((c) => {
+    const titleText = chapterTitleForDisplay(c.title);
+    const detectedLine = c.lineNumber;
+    const targetLine =
+      detectedLine > 0 &&
+      !lines[detectedLine]?.includes(titleText)
+        ? detectedLine - 1
+        : detectedLine;
+    chapterLineSet.add(targetLine);
+    return { title: titleText, line: targetLine };
+  });
+
+  let html = "";
+  for (let i = clampedStart; i <= clampedEnd; i++) {
+    const cls = chapterLineSet.has(i) ? ' class="chapter-title"' : "";
+    const line = lines[i];
+    if (line.length === 0) {
+      html += `<div id="L${i}"${cls}>&nbsp;</div>\n`;
+      continue;
+    }
+    const tokens = tokenLines[i];
+    if (!tokens || tokens.length === 0) {
+      html += `<div id="L${i}"${cls}><span style="color:${palette.bodyText}">${escapeHtml(line)}</span></div>\n`;
+      continue;
+    }
+    let spans = "";
+    let pos = 0;
+    for (let j = 0; j < tokens.length; j++) {
+      const t = tokens[j];
+      const nextOffset =
+        j + 1 < tokens.length ? tokens[j + 1].offset : line.length;
+      if (t.offset > pos) {
+        spans += escapeHtml(line.slice(pos, t.offset));
+      }
+      const color =
+        tokenColorMap[t.type] ??
+        tokenColorMap[t.type.replace(/\.txtr-text$/, "")] ??
+        palette.bodyText;
+      spans += `<span style="color:${color}">${escapeHtml(line.slice(t.offset, nextOffset))}</span>`;
+      pos = nextOffset;
+    }
+    if (pos < line.length) {
+      spans += escapeHtml(line.slice(pos));
+    }
+    html += `<div id="L${i}"${cls}>${spans}</div>\n`;
+  }
+
+  return {
+    ok: true as const,
+    html,
+    theme: lastAppThemeName,
+    file: filePath,
+    chapters: chapterList,
+    total,
+    start: clampedStart,
+    end: clampedEnd,
+  };
+}
+
 defineExpose({
   appendText,
   setFullText,
@@ -3267,6 +3409,22 @@ defineExpose({
     highlightWords: HighlightWordsByIndex | undefined,
   ) => {
     return buildColoredHtml(fullText, filePath, highlightWords);
+  },
+
+  generateColoredHtmlForSegment: async (
+    fullText: string,
+    filePath: string,
+    highlightWords: HighlightWordsByIndex | undefined,
+    startLine: number,
+    endLine: number,
+  ) => {
+    return buildColoredHtmlSegment(
+      fullText,
+      filePath,
+      highlightWords,
+      startLine,
+      endLine,
+    );
   },
 
   generateColoredHtml: async () => {

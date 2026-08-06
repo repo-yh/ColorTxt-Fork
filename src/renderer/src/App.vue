@@ -526,6 +526,36 @@ onMounted(() => {
       }
     );
   };
+  window.__colorTxtGenerateColoredHtmlForSegment = async (
+    text: string,
+    filePath: string,
+    startLine: number,
+    endLine: number,
+  ) => {
+    let hl = highlightWordsByIndexGlobal.value;
+    const meta = findFileMetaRecord(fileMetaRecords.value, filePath);
+    if (meta?.highlightWordsByIndex) {
+      const merged: Record<string, any[]> = { ...hl };
+      for (const [idx, words] of Object.entries(
+        meta.highlightWordsByIndex,
+      )) {
+        merged[idx] = [...(merged[idx] ?? []), ...words];
+      }
+      hl = merged;
+    }
+    return (
+      readerRef.value?.generateColoredHtmlForSegment?.(
+        text,
+        filePath,
+        hl,
+        startLine,
+        endLine,
+      ) ?? {
+        ok: false as const,
+        reason: "阅读器未就绪" as const,
+      }
+    );
+  };
   window.__colorTxtGetFileList = () => {
     return txtFiles.value.map((f) => {
       const meta = findFileMetaRecord(fileMetaRecords.value, f.path);
