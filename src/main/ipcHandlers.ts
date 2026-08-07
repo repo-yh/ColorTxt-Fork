@@ -1146,6 +1146,11 @@ function unknownQuoteAttributions(
           }
           fullText = readResult;
           textCache.set(filePath, fullText);
+          // 限制缓存大小，避免长期运行内存泄漏
+          if (textCache.size > 5) {
+            const firstKey = textCache.keys().next().value;
+            if (firstKey) textCache.delete(firstKey);
+          }
         } catch {
           return { ok: false as const, reason: "读取文件失败" as const };
         }

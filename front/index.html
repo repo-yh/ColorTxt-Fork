@@ -128,12 +128,34 @@ function updateStickyChapter() {
 }
 window.addEventListener('scroll', updateStickyChapter, { passive: true })
 
+function findTopVisibleLine() {
+  var children = document.getElementById('content').children
+  for (var i = 0; i < children.length; i++) {
+    var cid = children[i].id
+    if (cid && /^L\d+$/.test(cid)) {
+      if (children[i].getBoundingClientRect().top >= 60) {
+        return parseInt(cid.slice(1))
+      }
+    }
+  }
+  return null
+}
+
 function toggleSidebar() {
+  var topLine = findTopVisibleLine()
+
   sidebarOpen = !sidebarOpen
   $sidebar.classList.toggle('open', sidebarOpen)
   $main.classList.toggle('shifted', sidebarOpen)
   document.body.classList.toggle('sidebar-open', sidebarOpen)
   $sidebarTab.innerHTML = sidebarOpen ? '&#9664;' : '&#9654;'
+
+  // CSS transition 完成后恢复阅读位置
+  if (topLine !== null) {
+    setTimeout(function() {
+      scrollToLine(topLine)
+    }, 250)
+  }
 }
 
 function showStatus(text, isError) {
@@ -225,16 +247,17 @@ function setupSentinel() {
   window._sentinelObserver.observe($sentinel)
 }
 
-async function loadSegment(start, end) {
+async function loadSegment(start, end, refresh) {
   if (isRangeLoaded(start, end)) return
   if (loadingSegment) return
   loadingSegment = true
 
   try {
     var url = '/api/content?file=' + encodeURIComponent(currentFile) + '&start=' + start + '&end=' + end
+    if (refresh) url += '&refresh=1'
     var r = await fetch(url)
     var data = await r.json()
-    if (!data.ok) { loadingSegment = false; return }
+    if (!data.ok) { loadingSegment = false; setupSentinel(); return }
 
     totalLines = data.total
     if (data.theme === 'vs-dark') {
@@ -270,7 +293,6 @@ async function loadSegment(start, end) {
       }
     }
 
-    // 从后往前插入，保持顺序
     var frag = document.createDocumentFragment()
     while (temp.firstChild) frag.appendChild(temp.firstChild)
     if (insertBefore) {
@@ -282,7 +304,8 @@ async function loadSegment(start, end) {
     addLoadedRange(data.start, data.end)
     setupSentinel()
   } catch (e) {
-    // ignore
+    // 失败时重建 sentinel，滚动触发重试
+    setupSentinel()
   } finally {
     loadingSegment = false
   }
@@ -297,13 +320,6 @@ function loadNextSegment() {
 
 async function loadFile(filePath, forceRefresh) {
   $btn.disabled = true
-  if (forceRefresh) {
-    // 强制刷新：先请求一次完整生成（带 refresh），使服务端重新生成并缓存
-    try {
-      var refreshUrl = '/api/content?file=' + encodeURIComponent(filePath) + '&refresh=1&start=0&end=' + (SEGMENT_SIZE - 1)
-      await fetch(refreshUrl)
-    } catch (e) { /* ignore */ }
-  }
 
   showStatus('正在加载...', false)
   currentFile = filePath
@@ -315,7 +331,7 @@ async function loadFile(filePath, forceRefresh) {
   try {
     try { localStorage.setItem('colortxt_web_file', currentFile) } catch(e) {}
     if (currentFile) $select.value = currentFile
-    await loadSegment(0, SEGMENT_SIZE - 1)
+    await loadSegment(0, SEGMENT_SIZE - 1, forceRefresh)
   } catch (e) {
     showStatus('连接失败：请确认 ColorTxt 已开启 Web 展示服务', true)
   } finally {
