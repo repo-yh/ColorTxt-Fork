@@ -1,5 +1,5 @@
 import { createServer, type Server } from "node:http";
-import { readFile, writeFile, mkdir, readdir, unlink } from "node:fs/promises";
+import { readFile, mkdir, readdir, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { app } from "electron";
 import { createHash } from "node:crypto";
@@ -49,29 +49,6 @@ function getCacheDir(): string {
 
 function cacheKey(filePath: string): string {
   return createHash("md5").update(filePath).digest("hex");
-}
-
-export async function cacheContent(
-  filePath: string,
-  result: ContentResult,
-): Promise<void> {
-  const dir = getCacheDir();
-  await mkdir(dir, { recursive: true });
-  const file = join(dir, cacheKey(filePath) + ".json");
-  await writeFile(file, JSON.stringify(result), "utf-8");
-}
-
-export async function getCachedContent(
-  filePath: string,
-): Promise<ContentResult | null> {
-  const dir = getCacheDir();
-  try {
-    const file = join(dir, cacheKey(filePath) + ".json");
-    const raw = await readFile(file, "utf-8");
-    return JSON.parse(raw) as ContentResult;
-  } catch {
-    return null;
-  }
 }
 
 export function clearCache(): void {

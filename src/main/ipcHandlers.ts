@@ -21,7 +21,7 @@ import {
 } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { startWebDisplay, stopWebDisplay, isWebDisplayRunning, cacheContent, getCachedContent, clearCache, setCurrentFilePath, getCurrentFilePath, type ContentResult, type FileListItem } from "./webDisplay";
+import { startWebDisplay, stopWebDisplay, isWebDisplayRunning, clearCache, setCurrentFilePath, getCurrentFilePath, type ContentResult, type FileListItem } from "./webDisplay";
 import { getFonts } from "font-list";
 import iconv from "iconv-lite";
 import { detectTextFileEncoding } from "./detectTextEncoding";
@@ -1078,16 +1078,10 @@ function unknownQuoteAttributions(
     const getCurrentContent = async () => {
       const fp = getCurrentFilePath();
       if (!fp) return { ok: false as const, reason: "未打开文件" as const };
-      const cached = await getCachedContent(fp);
-      return cached ?? { ok: false as const, reason: "缓存未就绪，请稍后刷新" as const };
+      return { ok: false as const, reason: "缓存未就绪，请稍后刷新" as const };
     };
 
-    const getContentForFileFn = async (filePath: string, refresh?: boolean): Promise<ContentResult> => {
-      if (!refresh) {
-        const cached = await getCachedContent(filePath);
-        if (cached) return cached;
-      }
-
+    const getContentForFileFn = async (filePath: string, _refresh?: boolean): Promise<ContentResult> => {
       const w = findWindow();
       if (!w) return { ok: false as const, reason: "无可用窗口" as const };
       try {
@@ -1099,10 +1093,6 @@ function unknownQuoteAttributions(
           })()`,
         );
         const r = result ?? { ok: false as const, reason: "获取内容失败" as const };
-        // 缓存成功结果
-        if (r.ok) {
-          cacheContent(filePath, r).catch(() => {});
-        }
         return r;
       } catch {
         return { ok: false as const, reason: "获取内容失败" as const };
@@ -1219,14 +1209,6 @@ function unknownQuoteAttributions(
     clearCache();
     return { ok: true as const };
   });
-
-  ipcMain.handle(
-    "webDisplay:cacheContent",
-    async (_evt, filePath: string, result: ContentResult) => {
-      await cacheContent(filePath, result);
-      return { ok: true as const };
-    },
-  );
 
   ipcMain.handle(
     "webDisplay:setCurrentFile",
