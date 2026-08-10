@@ -426,7 +426,7 @@ export function useAppPersistence(deps: {
         deps.lineationColorsDark.value,
         DEFAULT_LINEATION_COLORS_DARK,
       ),
-      highlightWordsByIndexGlobal: deps.highlightWordsByIndexGlobal.value,
+      highlightWordsByIndexGlobal: deps.highlightWordsByIndexGlobal.value ?? {},
       lineationLastColors:
         deps.lineationLastColors.value.marker ===
           DEFAULT_LINEATION_LAST_COLORS.marker &&
