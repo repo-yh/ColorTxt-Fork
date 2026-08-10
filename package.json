@@ -126,6 +126,7 @@
     ],
     "files": [
       "dist/**",
+      "front/**",
       "package.json",
       "node_modules/sharp/**"
     ],
