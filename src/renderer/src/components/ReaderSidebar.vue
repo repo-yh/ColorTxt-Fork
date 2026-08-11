@@ -19,6 +19,7 @@ import type {
 import AppShellMenuTeleport from "./AppShellMenuTeleport.vue";
 import SwitchToggle from "./SwitchToggle.vue";
 import { useAnchoredAppShellMenu } from "../composables/useAnchoredAppShellMenu";
+import { useHighlightAiSearch } from "../composables/useHighlightAiSearch";
 import ChapterListPanel from "./ChapterListPanel.vue";
 import FileListPanel from "./FileListPanel.vue";
 import BookmarkListPanel from "./BookmarkListPanel.vue";
@@ -95,6 +96,8 @@ const props = withDefaults(
     searchUseRegex?: boolean;
     activeSearchResult?: { displayLine: number; rangeStart: number } | null;
     highlightPreviewBg?: string;
+    /** 当前主题下的高亮色列表（侧栏改色色盘） */
+    highlightColors?: readonly string[];
     monacoFontFamily?: string;
     lineationColors?: readonly string[];
     bookmarks: Array<{ line: number; note?: string; content: string }>;
@@ -175,6 +178,7 @@ const props = withDefaults(
     searchUseRegex: false,
     activeSearchResult: null,
     highlightPreviewBg: "var(--reader-bg, var(--bg))",
+    highlightColors: () => [],
     monacoFontFamily: "",
     lineationColors: () => [],
     readerMainRef: null,
@@ -263,11 +267,44 @@ const emit = defineEmits<{
   openWebDav: [];
   openSettings: [];
   refreshChaptersFromReader: [];
-  findHighlightTerm: [text: string, isRegex: boolean];
-  findHighlightTermPrev: [text: string, isRegex: boolean];
-  removeHighlightTerm: [payload: { text: string; scope: "global" | "book" }];
-  favoriteHighlightTerm: [payload: { text: string; colorIndex: number }];
-  unfavoriteHighlightTerm: [payload: { text: string; colorIndex: number }];
+  findHighlightTerm: [payload: { query: string; useRegex: boolean }];
+  removeHighlightTerm: [
+    payload: { storedTerms: string[]; scope: "global" | "book" },
+  ];
+  favoriteHighlightTerm: [
+    payload: { storedTerms: string[]; colorIndex: number },
+  ];
+  unfavoriteHighlightTerm: [
+    payload: { storedTerms: string[]; colorIndex: number },
+  ];
+  commitHighlightGroup: [
+    payload: {
+      mode: "add" | "edit";
+      scope: "global" | "book";
+      colorIndex: number;
+      terms: string[];
+      replaceStoredTerms?: string[];
+    },
+  ];
+  mergeHighlightGroups: [
+    payload: {
+      source: { storedTerms: string[]; scope: "global" | "book" };
+      target: {
+        storedTerms: string[];
+        scope: "global" | "book";
+        colorIndex: number;
+      };
+    },
+  ];
+  splitHighlightTerm: [
+    payload: {
+      storedTerms: string[];
+      scope: "global" | "book";
+      colorIndex: number;
+      term: string;
+    },
+  ];
+  clearInlineSearchHighlight: [];
   clearHighlights: [];
   addHighlightTerm: [text: string, isRegex: boolean];
   exportBookHighlightsJson: [];
@@ -526,6 +563,57 @@ const characterPanelRef = ref<InstanceType<
   typeof CharacterSidebarPanel
 > | null>(null);
 const highlightsHeaderMoreBtnRef = ref<HTMLButtonElement | null>(null);
+const highlightsAiSearchBtnRef = ref<HTMLButtonElement | null>(null);
+const HIGHLIGHTS_AI_SEARCH_MENU_W = 160;
+const highlightsAiSearchDisabled = computed(
+  () => !props.aiAssistantTabVisible || !props.currentFilePath?.trim(),
+);
+const highlightsAiSearchMenu = useAnchoredAppShellMenu({
+  anchor: highlightsAiSearchBtnRef,
+  placement: "below-center",
+  widthPx: HIGHLIGHTS_AI_SEARCH_MENU_W,
+  gap: 6,
+  disabled: highlightsAiSearchDisabled,
+});
+const {
+  open: highlightsAiSearchOpen,
+  left: highlightsAiSearchLeft,
+  top: highlightsAiSearchTop,
+  panelRef: highlightsAiSearchPanelRef,
+  toggleMenu: toggleHighlightsAiSearchMenu,
+  closeMenu: closeHighlightsAiSearchMenu,
+} = highlightsAiSearchMenu;
+
+function bindHighlightsAiSearchPanel(el: HTMLElement | null) {
+  highlightsAiSearchPanelRef.value = el;
+}
+
+const highlightAiSearchSessionPath = computed(() => props.currentFilePath);
+const highlightAiSearchPhysicalPath = computed(
+  () => props.physicalReaderPath ?? props.currentFilePath,
+);
+const highlightAiSearchChapterCount = computed(() => props.chapters.length);
+
+const { searchPreset: highlightAiSearchPreset, searchCustomSemantic } =
+  useHighlightAiSearch({
+    sessionFilePath: highlightAiSearchSessionPath,
+    physicalReaderPath: highlightAiSearchPhysicalPath,
+    chapterCount: highlightAiSearchChapterCount,
+    onTerms: (terms) => {
+      highlightPanelRef.value?.openAddModal(terms);
+    },
+  });
+
+async function onHighlightsAiSearchSelect(
+  action: "person" | "place" | "custom",
+) {
+  closeHighlightsAiSearchMenu();
+  await nextTick();
+  if (action === "person") await highlightAiSearchPreset("人名");
+  else if (action === "place") await highlightAiSearchPreset("地名");
+  else await searchCustomSemantic();
+}
+
 const bookmarksHeaderMoreBtnRef = ref<HTMLButtonElement | null>(null);
 const notesHeaderMoreBtnRef = ref<HTMLButtonElement | null>(null);
 const aiAssistantHeaderMoreBtnRef = ref<HTMLButtonElement | null>(null);
@@ -967,6 +1055,31 @@ defineExpose({
         </div>
         <div v-else-if="activeTab === 'highlights'" class="sidebarHeaderEnd">
           <button
+            v-if="aiAssistantTabVisible"
+            ref="highlightsAiSearchBtnRef"
+            type="button"
+            class="aiReaderSidebarHeaderIconBtn"
+            :class="{ active: highlightsAiSearchOpen }"
+            title="AI 检索"
+            aria-label="AI 检索"
+            aria-haspopup="menu"
+            :aria-expanded="highlightsAiSearchOpen"
+            :disabled="highlightsAiSearchDisabled"
+            @click="toggleHighlightsAiSearchMenu"
+          >
+            <span class="svg" v-html="icons.aiSearch" />
+          </button>
+          <button
+            type="button"
+            class="aiReaderSidebarHeaderIconBtn"
+            title="添加"
+            aria-label="添加"
+            :disabled="!currentFilePath"
+            @click="highlightPanelRef?.openAddModal()"
+          >
+            <span class="svg" v-html="icons.newChat" />
+          </button>
+          <button
             ref="highlightsHeaderMoreBtnRef"
             type="button"
             class="aiReaderSidebarHeaderIconBtn"
@@ -1139,14 +1252,18 @@ defineExpose({
         :current-file-path="currentFilePath"
         :highlight-terms="highlightTerms"
         :highlight-preview-bg="highlightPreviewBg"
+        :highlight-colors="highlightColors"
         :monaco-font-family="monacoFontFamily"
         :menu-anchor-el="highlightsHeaderMoreBtnRef"
         @add-highlight-term="toggleAddHighlightInput"
-        @find-highlight-term="(text, isRegex) => emit('findHighlightTerm', text, isRegex)"
-        @find-highlight-term-prev="(text, isRegex) => emit('findHighlightTermPrev', text, isRegex)"
+        @find-highlight-term="emit('findHighlightTerm', $event)"
         @remove-highlight-term="emit('removeHighlightTerm', $event)"
         @favorite-highlight-term="emit('favoriteHighlightTerm', $event)"
         @unfavorite-highlight-term="emit('unfavoriteHighlightTerm', $event)"
+        @commit-highlight-group="emit('commitHighlightGroup', $event)"
+        @merge-highlight-groups="emit('mergeHighlightGroups', $event)"
+        @split-highlight-term="emit('splitHighlightTerm', $event)"
+        @clear-inline-search-highlight="emit('clearInlineSearchHighlight')"
         @clear-highlights="emit('clearHighlights')"
         @export-book-highlights-json="emit('exportBookHighlightsJson')"
         @import-book-highlights-json="emit('importBookHighlightsJson')"
@@ -1247,6 +1364,41 @@ defineExpose({
         <p class="sidebarDropOverlayText">添加文件</p>
       </div>
     </Transition>
+    <AppShellMenuTeleport
+      v-model:open="highlightsAiSearchOpen"
+      :left="highlightsAiSearchLeft"
+      :top="highlightsAiSearchTop"
+      :width="HIGHLIGHTS_AI_SEARCH_MENU_W"
+      caret="center"
+      :on-panel-mount="bindHighlightsAiSearchPanel"
+      aria-label="AI 检索"
+    >
+      <button
+        type="button"
+        class="appShellMenuItem"
+        role="menuitem"
+        @click="onHighlightsAiSearchSelect('person')"
+      >
+        <span class="appShellMenuLabel">AI 检索：人名</span>
+      </button>
+      <button
+        type="button"
+        class="appShellMenuItem"
+        role="menuitem"
+        @click="onHighlightsAiSearchSelect('place')"
+      >
+        <span class="appShellMenuLabel">AI 检索：地名</span>
+      </button>
+      <div class="appShellMenuDivider" role="separator" />
+      <button
+        type="button"
+        class="appShellMenuItem"
+        role="menuitem"
+        @click="onHighlightsAiSearchSelect('custom')"
+      >
+        <span class="appShellMenuLabel">AI 检索：自定义语义</span>
+      </button>
+    </AppShellMenuTeleport>
     <AppShellMenuTeleport
       v-model:open="aiAssistantHeaderMoreOpen"
       :left="aiAssistantHeaderMoreLeft"

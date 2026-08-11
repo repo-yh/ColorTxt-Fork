@@ -7,6 +7,7 @@ import {
   type AIChunkRecord,
   type AIChatStreamPayload,
   type AIConfig,
+  type AIWordcloudToolResult,
   type BookStyleInferResult,
   type PortraitExtractResult,
   type CharacterGoldenQuotesResult,
@@ -76,7 +77,9 @@ import {
   deleteBookSegmentCache,
 } from "./ai/rag/segmentCache";
 import { rebuildBookSegmentCache } from "./ai/rag/rebuildBookSegmentCache";
+import { runWordcloudTool } from "./ai/tools/wordcloudTool";
 import { adaptPortraitPromptForBackend } from "./ai/txt2img/promptAdapt";
+import { isFetchAborted } from "./ai/txt2img/shared";
 import { testTxt2ImgConnection } from "./ai/txt2img/testConnection";
 import { isTxt2ImgBackend, txt2ImgRequiresApiKey } from "@shared/txt2ImgBackend";
 import {
@@ -105,6 +108,9 @@ const portraitRetrieveSessionAbortById = new Map<number, AbortController>();
 let portraitTxt2ImgSessionAc: AbortController | null = null;
 
 const smartFormatAbortByRequestId = new Map<number, AbortController>();
+
+/** 高亮词「AI 检索」：按 requestId 中止 wordcloud:run */
+const wordcloudRunAbortByRequestId = new Map<number, AbortController>();
 
 function portraitRetrieveSessionAc(sid: number): AbortController {
   let ac = portraitRetrieveSessionAbortById.get(sid);
@@ -601,6 +607,107 @@ export function registerAiIpcHandlers(): void {
         chapterCount: Math.trunc(chapterCount),
         aiConfig: c,
       });
+    },
+  );
+
+  /**
+   * 侧栏高亮词「AI 检索」：直接跑 semantic 词云管线（不经 Agent）。
+   * unlimitedTerms：加大抽样/分批抽取/抬高候选上限，并返回全部已计数词项。
+   * 可选 requestId + ai:wordcloud:abort 中止。
+   */
+  ipcMain.handle(
+    "ai:wordcloud:run",
+    async (
+      evt,
+      payload: unknown,
+    ): Promise<
+      | { ok: true; result: AIWordcloudToolResult }
+      | { ok: false; error: string; aborted?: boolean }
+    > => {
+      const c = await cfg();
+      if (!c.aiEnabled) {
+        return { ok: false, error: "请先在设置中启用 AI 阅读助手。" };
+      }
+      const chat = readActiveChatEndpoint(c);
+      if (!chat.model?.trim()) {
+        return { ok: false, error: "请先在设置中配置对话模型。" };
+      }
+      if (!isRecord(payload)) return { ok: false, error: "无效参数" };
+      const bookHash =
+        typeof payload.bookHash === "string" ? payload.bookHash.trim() : "";
+      const chapterCount = Number(payload.chapterCount);
+      const semanticQuery =
+        typeof payload.semanticQuery === "string"
+          ? payload.semanticQuery.trim()
+          : "";
+      if (!bookHash) return { ok: false, error: "无效 bookHash" };
+      if (!Number.isFinite(chapterCount) || chapterCount <= 0) {
+        return { ok: false, error: "没有可检索的章节" };
+      }
+      if (!semanticQuery) {
+        return { ok: false, error: "请输入检索语义" };
+      }
+      const title =
+        typeof payload.title === "string" && payload.title.trim()
+          ? payload.title.trim()
+          : `AI 检索：${semanticQuery}`;
+      const unlimitedTerms = payload.unlimitedTerms !== false;
+      const requestId =
+        typeof payload.requestId === "number" &&
+        Number.isFinite(payload.requestId)
+          ? Math.trunc(payload.requestId)
+          : null;
+      let ac: AbortController | null = null;
+      if (requestId != null) {
+        wordcloudRunAbortByRequestId.get(requestId)?.abort();
+        ac = new AbortController();
+        wordcloudRunAbortByRequestId.set(requestId, ac);
+      }
+      try {
+        const result = await runWordcloudTool(
+          {
+            title,
+            mode: "semantic",
+            semanticQuery,
+            scope: "full",
+            unlimitedTerms,
+          },
+          {
+            bookHash,
+            chapterCount: Math.trunc(chapterCount),
+            /** 高亮词 AI 检索始终全书，不受防剧透限制 */
+            spoilerMaxChapterIndex: null,
+            webContents: evt.sender,
+            chat,
+            aiConfig: c,
+            signal: ac?.signal,
+          },
+        );
+        return { ok: true, result };
+      } catch (e) {
+        if (isFetchAborted(e) || ac?.signal.aborted) {
+          return { ok: false, error: "已中止", aborted: true };
+        }
+        const msg = e instanceof Error ? e.message : String(e);
+        return { ok: false, error: msg || "AI 检索失败" };
+      } finally {
+        if (requestId != null) {
+          const cur = wordcloudRunAbortByRequestId.get(requestId);
+          if (cur === ac) wordcloudRunAbortByRequestId.delete(requestId);
+        }
+      }
+    },
+  );
+
+  ipcMain.handle(
+    "ai:wordcloud:abort",
+    (_evt, requestId: unknown): { ok: true } => {
+      if (typeof requestId === "number" && Number.isFinite(requestId)) {
+        const id = Math.trunc(requestId);
+        wordcloudRunAbortByRequestId.get(id)?.abort();
+        wordcloudRunAbortByRequestId.delete(id);
+      }
+      return { ok: true as const };
     },
   );
 

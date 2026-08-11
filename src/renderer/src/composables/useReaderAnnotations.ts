@@ -11,7 +11,6 @@ import {
   type AnnotationCompactHit,
 } from "../reader/readerAnnotationDecor";
 import type {
-  HighlightWord,
   HighlightWordsByIndex,
   ReaderAnnotationRecord,
   ReaderLineationType,
@@ -345,10 +344,9 @@ export function useReaderAnnotations(opts: {
   }
 
   function findStoredHighlightColorIndex(text: string): number | null {
-    const word: HighlightWord = { text };
     const idx = findHighlightColorIndexInMap(
       opts.highlightWordsByIndexBookOnly(),
-      word,
+      text,
     );
     if (idx == null || idx >= opts.highlightColorsLength()) return null;
     return idx;

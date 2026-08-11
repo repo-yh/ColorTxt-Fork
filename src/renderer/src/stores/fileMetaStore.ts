@@ -1,4 +1,10 @@
 import { normalizeReaderAnnotations } from "../utils/readerAnnotations";
+import {
+  removeHighlightGroupFromMap,
+  removeHighlightTermFromMap,
+  setHighlightGroupColorInMap,
+  upsertHighlightGroupInMap,
+} from "../utils/highlightWords";
 import type {
   CharacterBookStylePersisted,
   CharacterGender,
@@ -24,16 +30,23 @@ export type FileBookmarkItem = {
 /** Monaco `saveViewState()` 的 JSON 形态，按路径持久化在 meta 中 */
 export type PersistedEditorViewState = Record<string, unknown>;
 
-/** 单条高亮词：文本 + 是否正则表达式 */
-export type HighlightWord = {
-  /** 高亮词文本；正则模式下为正则表达式源码 */
-  text: string;
-  /** 是否将 `text` 作为正则表达式处理（默认 `false`） */
-  isRegex?: boolean;
-};
+// ============================================================
+// 旧版 HighlightWord 类型（已迁移至 string[][]，保留以供参考）
+// ============================================================
+// /** 单条高亮词：文本 + 是否正则表达式 */
+// export type HighlightWord = {
+//   /** 高亮词文本；正则模式下为正则表达式源码 */
+//   text: string;
+//   /** 是否将 `text` 作为正则表达式处理（默认 `false`） */
+//   isRegex?: boolean;
+// };
 
-/** 自定义高亮词：键为索引字符串 `"0"`,`"1"`…，值为该索引下高亮词数组 */
-export type HighlightWordsByIndex = Record<string, HighlightWord[]>;
+/**
+ * 自定义高亮词：键为色索引字符串 `"0"`,`"1"`…，值为该色下的**词组**列表。
+ * 每组 `string[]` 长度 ≥ 1；侧栏一行一组，多词组内各词同色上色。
+ * 旧版曾为 `Record<string, string[]>`（扁平词列表），由 normalize 迁成每词一组。
+ */
+export type HighlightWordsByIndex = Record<string, string[][]>;
 
 export type ReaderLineationType = "marker" | "wavy" | "straight";
 
@@ -154,48 +167,78 @@ function normalizeEditorViewState(
 
 const MAX_HIGHLIGHT_TERM_LEN = 100;
 
-function trimWord(w: HighlightWord): HighlightWord | undefined {
-  const text = w.text.trim();
-  if (!text) return undefined;
-  if (text.length > MAX_HIGHLIGHT_TERM_LEN) {
-    return { text: text.slice(0, MAX_HIGHLIGHT_TERM_LEN), isRegex: w.isRegex };
+function normalizeHighlightGroupTerms(
+  rawGroup: unknown,
+  seenGlobal: Set<string>,
+): string[] | null {
+  /** 旧版扁平：桶内元素为 string */
+  if (typeof rawGroup === "string") {
+    const t = rawGroup.trim();
+    if (!t || t.length > MAX_HIGHLIGHT_TERM_LEN || seenGlobal.has(t)) {
+      return null;
+    }
+    seenGlobal.add(t);
+    return [t];
   }
-  return { text, isRegex: w.isRegex };
+  if (!Array.isArray(rawGroup)) return null;
+  const terms: string[] = [];
+  const seenLocal = new Set<string>();
+  for (const w of rawGroup) {
+    if (typeof w !== "string") continue;
+    const t = w.trim();
+    if (!t || t.length > MAX_HIGHLIGHT_TERM_LEN) continue;
+    if (seenLocal.has(t) || seenGlobal.has(t)) continue;
+    seenLocal.add(t);
+    seenGlobal.add(t);
+    terms.push(t);
+  }
+  return terms.length > 0 ? terms : null;
 }
 
-/** 将旧格式（纯字符串数组）和格式兼容到 `HighlightWord[]` */
-function normalizeHighlightWordItem(
-  item: unknown,
-  seen: Set<string>,
-  maxLen?: number,
-): HighlightWord | undefined {
-  maxLen ??= MAX_HIGHLIGHT_TERM_LEN;
-  if (typeof item === "string") {
-    // 旧格式：纯字符串，兼容转换为新格式
-    const t = item.trim();
-    if (!t || t.length > maxLen) return undefined;
-    if (seen.has(t)) return undefined;
-    seen.add(t);
-    return { text: t };
-  }
-  if (typeof item === "object" && item !== null) {
-    const obj = item as Record<string, unknown>;
-    if (typeof obj.text === "string") {
-      const t = obj.text.trim();
-      if (!t || t.length > maxLen) return undefined;
-      const key = typeof obj.isRegex === "boolean"
-        ? `${t}\0${obj.isRegex ? "1" : "0"}`
-        : t;
-      if (seen.has(key)) return undefined;
-      seen.add(key);
-      return {
-        text: t,
-        isRegex: typeof obj.isRegex === "boolean" ? obj.isRegex : undefined,
-      };
-    }
-  }
-  return undefined;
-}
+// ============================================================
+// 旧版 trimWord / normalizeHighlightWordItem（保留以供参考）
+// ============================================================
+// function trimWord(w: HighlightWord): HighlightWord | undefined {
+//   const text = w.text.trim();
+//   if (!text) return undefined;
+//   if (text.length > MAX_HIGHLIGHT_TERM_LEN) {
+//     return { text: text.slice(0, MAX_HIGHLIGHT_TERM_LEN), isRegex: w.isRegex };
+//   }
+//   return { text, isRegex: w.isRegex };
+// }
+
+// /** 将旧格式（纯字符串数组）和格式兼容到 `HighlightWord[]` */
+// function normalizeHighlightWordItem(
+//   item: unknown,
+//   seen: Set<string>,
+//   maxLen?: number,
+// ): HighlightWord | undefined {
+//   maxLen ??= MAX_HIGHLIGHT_TERM_LEN;
+//   if (typeof item === "string") {
+//     const t = item.trim();
+//     if (!t || t.length > maxLen) return undefined;
+//     if (seen.has(t)) return undefined;
+//     seen.add(t);
+//     return { text: t };
+//   }
+//   if (typeof item === "object" && item !== null) {
+//     const obj = item as Record<string, unknown>;
+//     if (typeof obj.text === "string") {
+//       const t = obj.text.trim();
+//       if (!t || t.length > maxLen) return undefined;
+//       const key = typeof obj.isRegex === "boolean"
+//         ? `${t}\0${obj.isRegex ? "1" : "0"}`
+//         : t;
+//       if (seen.has(key)) return undefined;
+//       seen.add(key);
+//       return {
+//         text: t,
+//         isRegex: typeof obj.isRegex === "boolean" ? obj.isRegex : undefined,
+//       };
+//     }
+//   }
+//   return undefined;
+// }
 
 export function normalizeHighlightWordsByIndex(
   raw: unknown,
@@ -205,17 +248,17 @@ export function normalizeHighlightWordsByIndex(
   }
   const o = raw as Record<string, unknown>;
   const out: HighlightWordsByIndex = {};
+  const seenGlobal = new Set<string>();
   for (const [k, v] of Object.entries(o)) {
     const idx = Number.parseInt(k, 10);
     if (!Number.isFinite(idx) || idx < 0 || String(idx) !== k) continue;
     if (!Array.isArray(v)) continue;
-    const words: HighlightWord[] = [];
-    const seen = new Set<string>();
+    const groups: string[][] = [];
     for (const item of v) {
-      const word = normalizeHighlightWordItem(item, seen);
-      if (word) words.push(word);
+      const group = normalizeHighlightGroupTerms(item, seenGlobal);
+      if (group) groups.push(group);
     }
-    if (words.length) out[k] = words;
+    if (groups.length) out[k] = groups;
   }
   return Object.keys(out).length ? out : undefined;
 }
@@ -661,60 +704,99 @@ export function clearBookmarksForFile(items: FileMetaRecord[], path: string) {
   return upsertFileMetaRecord(items, path, () => ({ bookmarks: [] }));
 }
 
+/** 将单词汇组归到指定高亮色（选区添词） */
 export function appendHighlightTermForFile(
   items: FileMetaRecord[],
   path: string,
   colorIndex: number,
-  word: HighlightWord,
+  text: string,
 ) {
-  return assignHighlightTermToColorForFile(items, path, colorIndex, word);
+  return assignHighlightTermToColorForFile(items, path, colorIndex, text);
 }
 
-/** 将高亮词归到指定高亮色：先从所有索引桶中移除同一词，再写入目标桶（一词仅属一个索引） */
+/** 将单词汇组归到指定高亮色（选区添词） */
 export function assignHighlightTermToColorForFile(
   items: FileMetaRecord[],
   path: string,
   colorIndex: number,
-  word: HighlightWord,
+  text: string,
 ) {
-  const trimmed = trimWord(word);
-  if (!trimmed || colorIndex < 0 || !Number.isFinite(colorIndex)) return items;
-  const targetKey = String(Math.floor(colorIndex));
-  return upsertFileMetaRecord(items, path, (prev) => {
-    const base = { ...(prev?.highlightWordsByIndex ?? {}) };
-    for (const k of Object.keys(base)) {
-      const next = base[k]!.filter((w) => w.text !== trimmed.text);
-      if (next.length === 0) delete base[k];
-      else base[k] = next;
-    }
-    const list = [...(base[targetKey] ?? [])];
-    if (!list.some((w) => w.text === trimmed.text)) list.push(trimmed);
-    base[targetKey] = list;
-    return { highlightWordsByIndex: base };
+  return upsertHighlightGroupForFile(items, path, colorIndex, [text]);
+}
+
+/** 写入 / 更新词组到本书指定高亮色 */
+export function upsertHighlightGroupForFile(
+  items: FileMetaRecord[],
+  path: string,
+  colorIndex: number,
+  terms: readonly string[],
+  replaceStoredTerms?: readonly string[],
+) {
+  if (colorIndex < 0 || !Number.isFinite(colorIndex)) return items;
+  return upsertFileMetaRecord(items, path, (rec) => {
+    const next = upsertHighlightGroupInMap(
+      rec?.highlightWordsByIndex,
+      colorIndex,
+      terms,
+      replaceStoredTerms ? { replaceStoredTerms } : undefined,
+    );
+    if (next === rec?.highlightWordsByIndex) return {};
+    return { highlightWordsByIndex: next };
   });
 }
 
-/** 从所有高亮色桶中移除该高亮词 */
+/** 将本书已有词组迁到另一高亮色 */
+export function setHighlightGroupColorForFile(
+  items: FileMetaRecord[],
+  path: string,
+  storedTerms: readonly string[],
+  colorIndex: number,
+) {
+  return upsertFileMetaRecord(items, path, (rec) => {
+    const next = setHighlightGroupColorInMap(
+      rec?.highlightWordsByIndex,
+      storedTerms,
+      colorIndex,
+    );
+    if (next === rec?.highlightWordsByIndex) return {};
+    return { highlightWordsByIndex: next };
+  });
+}
+
+/** 按整组删除（storedTerms 全等） */
+export function removeHighlightGroupFromFile(
+  items: FileMetaRecord[],
+  path: string,
+  storedTerms: readonly string[],
+) {
+  return upsertFileMetaRecord(items, path, (prev) => {
+    const next = removeHighlightGroupFromMap(
+      prev?.highlightWordsByIndex,
+      storedTerms,
+    );
+    if (next === prev?.highlightWordsByIndex) return {};
+    return {
+      highlightWordsByIndex: next,
+    };
+  });
+}
+
+/** 从各组中剔除该词（多词组收缩）；兼容旧单调用 */
 export function removeHighlightTermFromFile(
   items: FileMetaRecord[],
   path: string,
-  term: HighlightWord,
+  text: string,
 ) {
-  const text = term.text.trim();
-  if (!text) return items;
+  const t = text.trim();
+  if (!t) return items;
   return upsertFileMetaRecord(items, path, (prev) => {
-    const base = { ...(prev?.highlightWordsByIndex ?? {}) };
-    let changed = false;
-    for (const k of Object.keys(base)) {
-      const prevList = base[k]!;
-      const next = prevList.filter((w) => w.text !== term.text);
-      if (next.length !== prevList.length) changed = true;
-      if (next.length === 0) delete base[k];
-      else base[k] = next;
-    }
-    if (!changed) return {};
+    const next = removeHighlightTermFromMap(
+      prev?.highlightWordsByIndex,
+      t,
+    );
+    if (next === prev?.highlightWordsByIndex) return {};
     return {
-      highlightWordsByIndex: Object.keys(base).length > 0 ? base : undefined,
+      highlightWordsByIndex: next,
     };
   });
 }
@@ -763,3 +845,56 @@ export function clearReaderAnnotationsForFile(
     readerAnnotations: undefined,
   }));
 }
+
+// ============================================================
+// 以下为旧版（HighlightWord 模型）函数体，保留以供参考
+// ============================================================
+
+// /** 旧版 assignHighlightTermToColorForFile —— 直接操作 HighlightWord[] */
+// // export function assignHighlightTermToColorForFile(
+// //   items: FileMetaRecord[],
+// //   path: string,
+// //   colorIndex: number,
+// //   word: HighlightWord,
+// // ) {
+// //   const trimmed = trimWord(word);
+// //   if (!trimmed || colorIndex < 0 || !Number.isFinite(colorIndex)) return items;
+// //   const targetKey = String(Math.floor(colorIndex));
+// //   return upsertFileMetaRecord(items, path, (prev) => {
+// //     const base = { ...(prev?.highlightWordsByIndex ?? {}) };
+// //     for (const k of Object.keys(base)) {
+// //       const next = base[k]!.filter((w) => w.text !== trimmed.text);
+// //       if (next.length === 0) delete base[k];
+// //       else base[k] = next;
+// //     }
+// //     const list = [...(base[targetKey] ?? [])];
+// //     if (!list.some((w) => w.text === trimmed.text)) list.push(trimmed);
+// //     base[targetKey] = list;
+// //     return { highlightWordsByIndex: base };
+// //   });
+// // }
+
+// /** 旧版 removeHighlightTermFromFile —— 直接遍历 HighlightWord[] */
+// // export function removeHighlightTermFromFile(
+// //   items: FileMetaRecord[],
+// //   path: string,
+// //   term: HighlightWord,
+// // ) {
+// //   const text = term.text.trim();
+// //   if (!text) return items;
+// //   return upsertFileMetaRecord(items, path, (prev) => {
+// //     const base = { ...(prev?.highlightWordsByIndex ?? {}) };
+// //     let changed = false;
+// //     for (const k of Object.keys(base)) {
+// //       const prevList = base[k]!;
+// //       const next = prevList.filter((w) => w.text !== term.text);
+// //       if (next.length !== prevList.length) changed = true;
+// //       if (next.length === 0) delete base[k];
+// //       else base[k] = next;
+// //     }
+// //     if (!changed) return {};
+// //     return {
+// //       highlightWordsByIndex: base,
+// //     };
+// //   });
+// // }

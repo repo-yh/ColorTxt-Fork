@@ -8,6 +8,15 @@
 
 :root {
   color-scheme: light;
+  --font-family:
+    system-ui,
+    -apple-system,
+    Segoe UI,
+    Roboto,
+    Helvetica,
+    Arial,
+    "Apple Color Emoji",
+    "Segoe UI Emoji";
   --bg: #f8f8f8;
   --panel: #f3f3f3;
   --border: #d4d4d4;
@@ -189,15 +198,7 @@ body,
   margin: 0;
   background: var(--bg);
   color: var(--fg);
-  font-family:
-    system-ui,
-    -apple-system,
-    Segoe UI,
-    Roboto,
-    Helvetica,
-    Arial,
-    "Apple Color Emoji",
-    "Segoe UI Emoji";
+  font-family: var(--font-family);
   overflow: hidden;
 }
 

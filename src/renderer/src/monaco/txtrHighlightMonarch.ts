@@ -1,5 +1,5 @@
 import type * as monaco from "monaco-editor";
-import type { HighlightWord, HighlightWordsByIndex } from "../stores/fileMetaStore";
+import type { HighlightWordsByIndex } from "../stores/fileMetaStore";
 
 /** 与装饰方案一致：更长词优先，同长则更小的高亮色索引优先 */
 export type TxtrMonarchHighlightOptions = {
@@ -13,24 +13,27 @@ function escapeRegExpLiteral(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function buildHighlightPattern(word: HighlightWord): RegExp {
-  if (word.isRegex) {
-    try {
-      return new RegExp(word.text, "iu");
-    } catch {
-      return /^$/;
-    }
-  }
-  return new RegExp(escapeRegExpLiteral(word.text), "iu");
-}
+// ============================================================
+// 旧版函数（HighlightWord / isRegex 模型），保留以供参考
+// ============================================================
+// function buildHighlightPattern(word: HighlightWord): RegExp {
+//   if (word.isRegex) {
+//     try {
+//       return new RegExp(word.text, "iu");
+//     } catch {
+//       return /^$/;
+//     }
+//   }
+//   return new RegExp(escapeRegExpLiteral(word.text), "iu");
+// }
 
-function highlightPatternLength(word: HighlightWord): number {
-  return word.text.length;
-}
+// function highlightPatternLength(word: HighlightWord): number {
+//   return word.text.length;
+// }
 
 /**
  * 生成自定义高亮词的 Monarch 规则（每条一词一类 token：`txtr.customHighlight.{index}`）。
- * `isRegex: true` 的高亮词采用正则匹配，其余走字面量匹配。
+ * 所有词组内各词均走字面量匹配，大小写不敏感。
  * 与原先 `findMatches` 一致：大小写不敏感。
  */
 export function buildTxtrCustomHighlightMonarchRules(
@@ -44,10 +47,10 @@ export function buildTxtrCustomHighlightMonarchRules(
     return [];
   }
 
-  type Entry = { pattern: RegExp; colorIndex: number; len: number };
+  type Entry = { phrase: string; pattern: RegExp; colorIndex: number; len: number };
   const entries: Entry[] = [];
 
-  for (const [key, words] of Object.entries(opts.highlightWordsByIndex)) {
+  for (const [key, groups] of Object.entries(opts.highlightWordsByIndex)) {
     const idx = Number.parseInt(key, 10);
     if (
       !Number.isFinite(idx) ||
@@ -56,11 +59,16 @@ export function buildTxtrCustomHighlightMonarchRules(
     ) {
       continue;
     }
-    for (const word of words) {
-      if (!word.text) continue;
-      const pattern = buildHighlightPattern(word);
-      const len = highlightPatternLength(word);
-      entries.push({ pattern, colorIndex: idx, len });
+    for (const group of groups) {
+      for (const phrase of group) {
+        if (!phrase) continue;
+        entries.push({
+          phrase,
+          pattern: new RegExp(escapeRegExpLiteral(phrase), "iu"),
+          colorIndex: idx,
+          len: phrase.length,
+        });
+      }
     }
   }
 

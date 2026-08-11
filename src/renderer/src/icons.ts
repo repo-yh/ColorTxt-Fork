@@ -58,6 +58,7 @@ import allExpandIcon from "./assets/all_expand.svg?raw";
 import allCollapseIcon from "./assets/all_collapse.svg?raw";
 import aiChatIcon from "./assets/AI_chat.svg?raw";
 import aiComposeIcon from "./assets/AI_compose.svg?raw";
+import aiSearchIcon from "./assets/AI_search.svg?raw";
 import brainIcon from "./assets/brain.svg?raw";
 import copyIcon from "./assets/copy.svg?raw";
 import downloadIcon from "./assets/download.svg?raw";
@@ -206,6 +207,8 @@ export const icons = {
   allCollapse: allCollapseIcon,
   aiChat: aiChatIcon,
   aiCompose: aiComposeIcon,
+  /** 高亮词 / 角色等「AI 检索」 */
+  aiSearch: aiSearchIcon,
   brain: brainIcon,
   copy: copyIcon,
   download: downloadIcon,

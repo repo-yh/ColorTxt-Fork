@@ -431,7 +431,7 @@ export interface AIWordcloudToolResult {
 export const DEFAULT_AI_QUICK_QUESTIONS: readonly string[] = [
   "这章讲了什么",
   "生成人物关系图",
-  "生成角色词云",
+  "生成人名词云",
   "概括本书内容",
 ];
 

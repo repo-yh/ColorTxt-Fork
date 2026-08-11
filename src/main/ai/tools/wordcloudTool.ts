@@ -27,8 +27,25 @@ import {
   topWordsFromFreq,
 } from "./wordcloudChapterFetch";
 
+/** 词云展示：抽样与候选上限（控制体积与出图质量） */
 const SAMPLE_CHAPTER_COUNT = 12;
 const SAMPLE_CHARS_PER_CHAPTER = 2000;
+const WORDCLOUD_CANDIDATE_MAX = 120;
+const WORDCLOUD_LLM_MAX_TOKENS = 4096;
+
+/**
+ * 高亮词 AI 检索（unlimitedTerms）：加大抽样、分批抽取、抬高候选上限。
+ * 仍受模型输出与抽样覆盖约束，但不再卡在 50～120。
+ */
+const COLLECT_SAMPLE_CHAPTER_COUNT = 48;
+const COLLECT_SAMPLE_CHARS_PER_CHAPTER = 4000;
+/** 每批送给抽取模型的抽样章数 */
+const COLLECT_EXTRACT_BATCH_SIZE = 8;
+const COLLECT_CANDIDATE_MAX = 2000;
+const COLLECT_LLM_MAX_TOKENS = 8192;
+/** 二次筛选单次候选上限（过大时分块 refine 再合并） */
+const COLLECT_REFINE_CHUNK = 250;
+
 const SEMANTIC_EXTRACT_PROGRESS_TITLE = "按语义抽取词项";
 const SEMANTIC_REFINE_PROGRESS_TITLE = "按语义筛选词项";
 
@@ -39,6 +56,12 @@ function semanticExtractProgressDetail(
   const lines = [line1];
   if (progressLine?.trim()) lines.push(progressLine);
   return lines.join("\n");
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) {
+    throw new DOMException("Aborted", "AbortError");
+  }
 }
 
 export type WordcloudToolProgress = (
@@ -56,6 +79,13 @@ export type RunWordcloudToolContext = {
   onProgress?: WordcloudToolProgress;
   onTokenUsage?: (usage: AITokenUsageTotals) => void;
   signal?: AbortSignal;
+};
+
+type SemanticCollectOpts = {
+  collectMax: boolean;
+  sampleCharsPerChapter: number;
+  candidateMax: number;
+  llmMaxTokens: number;
 };
 
 function parseMode(raw: unknown): AIWordcloudMode {
@@ -111,44 +141,55 @@ function parseTermsFromLlmJson(raw: string): string[] {
   return [];
 }
 
-function dedupeSemanticTerms(terms: readonly string[], max = 120): string[] {
+function dedupeSemanticTerms(
+  terms: readonly string[],
+  max = WORDCLOUD_CANDIDATE_MAX,
+): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
+  const limit = Number.isFinite(max) && max > 0 ? max : Number.MAX_SAFE_INTEGER;
   for (const t of terms) {
     const s = t.trim();
     if (!s || s.length > 40 || seen.has(s)) continue;
     seen.add(s);
     out.push(s);
-    if (out.length >= max) break;
+    if (out.length >= limit) break;
   }
   return out;
 }
 
-async function refineSemanticTerms(opts: {
+function chunkArray<T>(arr: readonly T[], size: number): T[][] {
+  const n = Math.max(1, size);
+  const out: T[][] = [];
+  for (let i = 0; i < arr.length; i += n) {
+    out.push(arr.slice(i, i + n) as T[]);
+  }
+  return out;
+}
+
+async function refineSemanticTermsChunk(opts: {
   semanticQuery: string;
   candidates: readonly string[];
   chat: AIChatEndpoint;
+  collect: SemanticCollectOpts;
   onTokenUsage?: (usage: AITokenUsageTotals) => void;
   onProgress?: WordcloudToolProgress;
   signal?: AbortSignal;
 }): Promise<string[]> {
   if (opts.candidates.length === 0) return [];
 
-  opts.onProgress?.(
-    SEMANTIC_REFINE_PROGRESS_TITLE,
-    semanticExtractProgressDetail(
-      "正在按用户语义筛选候选词…",
-      `候选 ${opts.candidates.length} 项`,
-    ),
-  );
-
   const { text, usage } = await chatCompletionOnce({
     chat: opts.chat,
     signal: opts.signal,
-    maxTokens: 4096,
+    maxTokens: opts.collect.llmMaxTokens,
     temperature: Math.min(opts.chat.temperature, 0.15),
     messages: [
-      { role: "system", content: buildSemanticRefineSystemPrompt() },
+      {
+        role: "system",
+        content: buildSemanticRefineSystemPrompt({
+          collectMax: opts.collect.collectMax,
+        }),
+      },
       {
         role: "user",
         content: buildSemanticRefineUserContent(
@@ -161,39 +202,96 @@ async function refineSemanticTerms(opts: {
   if (usage && opts.onTokenUsage) opts.onTokenUsage(usage);
 
   const candidateSet = new Set(opts.candidates);
-  const refined = dedupeSemanticTerms(parseTermsFromLlmJson(text)).filter((t) =>
-    candidateSet.has(t),
-  );
+  const refined = dedupeSemanticTerms(
+    parseTermsFromLlmJson(text),
+    opts.collect.candidateMax,
+  ).filter((t) => candidateSet.has(t));
   if (refined.length > 0) return refined;
-  return dedupeSemanticTerms(opts.candidates);
+  return dedupeSemanticTerms(opts.candidates, opts.collect.candidateMax);
 }
 
-async function extractSemanticTerms(opts: {
+async function refineSemanticTerms(opts: {
   semanticQuery: string;
-  sampleTexts: string[];
+  candidates: readonly string[];
   chat: AIChatEndpoint;
+  collect: SemanticCollectOpts;
   onTokenUsage?: (usage: AITokenUsageTotals) => void;
   onProgress?: WordcloudToolProgress;
   signal?: AbortSignal;
 }): Promise<string[]> {
+  if (opts.candidates.length === 0) return [];
+
+  const chunks =
+    opts.collect.collectMax && opts.candidates.length > COLLECT_REFINE_CHUNK
+      ? chunkArray(opts.candidates, COLLECT_REFINE_CHUNK)
+      : [opts.candidates];
+
+  opts.onProgress?.(
+    SEMANTIC_REFINE_PROGRESS_TITLE,
+    semanticExtractProgressDetail(
+      "正在按用户语义筛选候选词…",
+      chunks.length > 1
+        ? `候选 ${opts.candidates.length} 项，分 ${chunks.length} 批`
+        : `候选 ${opts.candidates.length} 项`,
+    ),
+  );
+
+  const merged: string[] = [];
+  for (let i = 0; i < chunks.length; i++) {
+    throwIfAborted(opts.signal);
+    if (chunks.length > 1) {
+      opts.onProgress?.(
+        SEMANTIC_REFINE_PROGRESS_TITLE,
+        semanticExtractProgressDetail(
+          "正在按用户语义筛选候选词…",
+          `当前进度：${i + 1}/${chunks.length}`,
+        ),
+      );
+    }
+    const part = await refineSemanticTermsChunk({
+      ...opts,
+      candidates: chunks[i]!,
+    });
+    merged.push(...part);
+  }
+  return dedupeSemanticTerms(merged, opts.collect.candidateMax);
+}
+
+async function extractSemanticTermsFromSamples(opts: {
+  semanticQuery: string;
+  sampleTexts: string[];
+  chat: AIChatEndpoint;
+  collect: SemanticCollectOpts;
+  onTokenUsage?: (usage: AITokenUsageTotals) => void;
+  onProgress?: WordcloudToolProgress;
+  signal?: AbortSignal;
+  batchLabel?: string;
+}): Promise<string[]> {
   const joined = opts.sampleTexts
-    .map((t, i) => `--- 抽样 ${i + 1} ---\n${t.slice(0, SAMPLE_CHARS_PER_CHAPTER)}`)
+    .map(
+      (t, i) =>
+        `--- 抽样 ${i + 1} ---\n${t.slice(0, opts.collect.sampleCharsPerChapter)}`,
+    )
     .join("\n\n");
 
   opts.onProgress?.(
     SEMANTIC_EXTRACT_PROGRESS_TITLE,
-    "正在向模型请求词项列表…",
+    opts.batchLabel?.trim()
+      ? `正在向模型请求词项列表…（${opts.batchLabel}）`
+      : "正在向模型请求词项列表…",
   );
 
   const { text, usage } = await chatCompletionOnce({
     chat: opts.chat,
     signal: opts.signal,
-    maxTokens: 4096,
+    maxTokens: opts.collect.llmMaxTokens,
     temperature: Math.min(opts.chat.temperature, 0.3),
     messages: [
       {
         role: "system",
-        content: buildSemanticExtractSystemPrompt(opts.semanticQuery),
+        content: buildSemanticExtractSystemPrompt(opts.semanticQuery, {
+          collectMax: opts.collect.collectMax,
+        }),
       },
       {
         role: "user",
@@ -203,19 +301,58 @@ async function extractSemanticTerms(opts: {
   });
   if (usage && opts.onTokenUsage) opts.onTokenUsage(usage);
 
+  return dedupeSemanticTerms(
+    parseTermsFromLlmJson(text),
+    opts.collect.candidateMax,
+  );
+}
+
+async function extractSemanticTerms(opts: {
+  semanticQuery: string;
+  sampleTexts: string[];
+  chat: AIChatEndpoint;
+  collect: SemanticCollectOpts;
+  onTokenUsage?: (usage: AITokenUsageTotals) => void;
+  onProgress?: WordcloudToolProgress;
+  signal?: AbortSignal;
+}): Promise<string[]> {
+  const batches =
+    opts.collect.collectMax &&
+    opts.sampleTexts.length > COLLECT_EXTRACT_BATCH_SIZE
+      ? chunkArray(opts.sampleTexts, COLLECT_EXTRACT_BATCH_SIZE)
+      : [opts.sampleTexts];
+
+  const extractedAll: string[] = [];
+  for (let i = 0; i < batches.length; i++) {
+    throwIfAborted(opts.signal);
+    const batch = batches[i]!;
+    const part = await extractSemanticTermsFromSamples({
+      ...opts,
+      sampleTexts: batch,
+      batchLabel:
+        batches.length > 1 ? `${i + 1}/${batches.length}` : undefined,
+    });
+    extractedAll.push(...part);
+    if (extractedAll.length >= opts.collect.candidateMax) break;
+  }
+
   opts.onProgress?.(
     SEMANTIC_EXTRACT_PROGRESS_TITLE,
     semanticExtractProgressDetail(
       "正在解析模型返回的词项…",
-      "当前进度：已收到响应",
+      `当前进度：已合并 ${Math.min(extractedAll.length, opts.collect.candidateMax)} 项候选`,
     ),
   );
 
-  const extracted = dedupeSemanticTerms(parseTermsFromLlmJson(text));
+  const extracted = dedupeSemanticTerms(
+    extractedAll,
+    opts.collect.candidateMax,
+  );
   const terms = await refineSemanticTerms({
     semanticQuery: opts.semanticQuery,
     candidates: extracted,
     chat: opts.chat,
+    collect: opts.collect,
     onTokenUsage: opts.onTokenUsage,
     onProgress: opts.onProgress,
     signal: opts.signal,
@@ -252,14 +389,31 @@ export async function runWordcloudTool(
     typeof args.chapterIndex === "number" && Number.isFinite(args.chapterIndex)
       ? Math.trunc(args.chapterIndex)
       : 0;
+  /** 高亮词 AI 检索等：放宽抽取/返回，不受词云词项上限约束 */
+  const unlimitedTerms = args.unlimitedTerms === true;
   const configMax = normalizeWordcloudMaxWords(ctx.aiConfig.wordcloudMaxWords);
-  const maxWords =
-    typeof args.maxWords === "number" && Number.isFinite(args.maxWords)
+  const maxWords = unlimitedTerms
+    ? Number.POSITIVE_INFINITY
+    : typeof args.maxWords === "number" && Number.isFinite(args.maxWords)
       ? Math.min(
           configMax,
           Math.max(WORDCLOUD_MAX_WORDS_MIN, Math.trunc(args.maxWords)),
         )
       : configMax;
+
+  const collect: SemanticCollectOpts = unlimitedTerms
+    ? {
+        collectMax: true,
+        sampleCharsPerChapter: COLLECT_SAMPLE_CHARS_PER_CHAPTER,
+        candidateMax: COLLECT_CANDIDATE_MAX,
+        llmMaxTokens: COLLECT_LLM_MAX_TOKENS,
+      }
+    : {
+        collectMax: false,
+        sampleCharsPerChapter: SAMPLE_CHARS_PER_CHAPTER,
+        candidateMax: WORDCLOUD_CANDIDATE_MAX,
+        llmMaxTokens: WORDCLOUD_LLM_MAX_TOKENS,
+      };
 
   const chapterCount = Math.max(1, ctx.chapterCount);
   const { min, max } = resolveChapterRange(
@@ -270,6 +424,7 @@ export async function runWordcloudTool(
   );
 
   ctx.onProgress?.("构建分词缓存", `章节 ${min + 1}–${max + 1} / ${chapterCount}`);
+  throwIfAborted(ctx.signal);
 
   let cacheHits = 0;
   let totalChars = 0;
@@ -279,6 +434,7 @@ export async function runWordcloudTool(
     minChapterIndex: min,
     maxChapterIndex: max,
     onProgress: (cur, tot) => {
+      throwIfAborted(ctx.signal);
       ctx.onProgress?.("构建分词缓存", `${cur}/${tot} 章`);
     },
   });
@@ -289,6 +445,7 @@ export async function runWordcloudTool(
 
   const freqMaps: Map<string, number>[] = [];
   for (const slice of chapterSlices) {
+    throwIfAborted(ctx.signal);
     const { freq, cacheHit, charCount } = getOrBuildChapterFreq(
       ctx.bookHash,
       slice.chapterIndex,
@@ -316,10 +473,15 @@ export async function runWordcloudTool(
       SEMANTIC_EXTRACT_PROGRESS_TITLE,
       semanticExtractProgressDetail(`语义：${queryHint}`, "正在准备抽样章节…"),
     );
-    const sampleIdx = pickSampleChapterIndices(max, SAMPLE_CHAPTER_COUNT);
+    const sampleCount = unlimitedTerms
+      ? COLLECT_SAMPLE_CHAPTER_COUNT
+      : SAMPLE_CHAPTER_COUNT;
+    const sampleChars = collect.sampleCharsPerChapter;
+    const sampleIdx = pickSampleChapterIndices(max, sampleCount);
     const sampleTexts: string[] = [];
     const sampleTotal = sampleIdx.length;
     for (let i = 0; i < sampleIdx.length; i++) {
+      throwIfAborted(ctx.signal);
       const idx = sampleIdx[i]!;
       ctx.onProgress?.(
         SEMANTIC_EXTRACT_PROGRESS_TITLE,
@@ -335,7 +497,7 @@ export async function runWordcloudTool(
           (await fetchChapterPlainTextFromRenderer(
             ctx.webContents,
             idx,
-            SAMPLE_CHARS_PER_CHAPTER,
+            sampleChars,
           )) ?? "";
         if (t.trim()) sampleTexts.push(t);
       }
@@ -347,6 +509,7 @@ export async function runWordcloudTool(
       semanticQuery,
       sampleTexts,
       chat: ctx.chat,
+      collect,
       onTokenUsage: ctx.onTokenUsage,
       onProgress: ctx.onProgress,
       signal: ctx.signal,

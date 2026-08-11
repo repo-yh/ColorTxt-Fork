@@ -2192,12 +2192,10 @@ const {
   searchResults,
   searchInProgress,
   activeSearchResult,
-  hasInlineSearchHighlight,
   searchMatchCase,
   searchWholeWord,
   searchUseRegex,
   scheduleSidebarSearch,
-  clearReaderInlineSearchHighlight,
   onJumpToSearchResult,
 } = useAppSidebarSearch({
   readerRef,
@@ -2221,10 +2219,12 @@ const {
   currentFileHighlightTerms,
   refreshReaderHighlightDisplayLayer,
   onAddHighlightTerm,
-  onAddHighlightTermFromSidebar,
   onRemoveHighlightTerm,
   onFavoriteHighlightTerm,
   onUnfavoriteHighlightTerm,
+  onCommitHighlightGroup,
+  onMergeHighlightGroups,
+  onSplitHighlightTerm,
   clearCurrentFileHighlightTerms,
   onExportBookHighlightsJson,
   onImportBookHighlightsJson,
@@ -3746,6 +3746,7 @@ useAppShellThemeWatch({
               ? readerSurfaceLight.readerBg
               : readerSurfaceDark.readerBg
           "
+          :highlight-colors="highlightColorsForReader"
           :monaco-font-family="monacoFontFamily"
           :lineation-colors="lineationColorsForReader"
           :active-bookmark-line="activeBookmarkLine"
@@ -3795,8 +3796,8 @@ useAppShellThemeWatch({
           @remove-bookmark="onRemoveBookmark"
           @export-bookmarks-json="onExportBookmarksJson"
           @import-bookmarks-json="onImportBookmarksJson"
-          @find-highlight-term="(text, isRegex) => onFindHighlightTermFromSidebar(text, isRegex)"
-          @find-highlight-term-prev="(text, isRegex) => onFindHighlightTermFromSidebar(text, isRegex, 'prev')"
+          @find-highlight-term="(payload) => onFindHighlightTermFromSidebar(payload)"
+          @add-highlight-term="(text: string, _isRegex: boolean) => onAddHighlightTerm({ text, colorIndex: Math.floor(Math.random() * highlightColorsForReader.length) })"
           @update:search-query="searchQuery = $event"
           @update:search-match-case="searchMatchCase = $event"
           @update:search-whole-word="searchWholeWord = $event"
@@ -3805,6 +3806,9 @@ useAppShellThemeWatch({
           @remove-highlight-term="onRemoveHighlightTerm"
           @favorite-highlight-term="onFavoriteHighlightTerm"
           @unfavorite-highlight-term="onUnfavoriteHighlightTerm"
+          @commit-highlight-group="onCommitHighlightGroup"
+          @merge-highlight-groups="onMergeHighlightGroups"
+          @split-highlight-term="onSplitHighlightTerm"
           @clear-highlights="clearCurrentFileHighlightTerms"
           @export-book-highlights-json="onExportBookHighlightsJson"
           @import-book-highlights-json="onImportBookHighlightsJson"
@@ -3839,7 +3843,6 @@ useAppShellThemeWatch({
           @update:file-list-editing="fileListEditing = $event"
           @request-expand-panel="showSidebar = true"
           @request-collapse-panel="showSidebar = false"
-          @add-highlight-term="(text, isRegex) => onAddHighlightTermFromSidebar(text, isRegex)"
           :web-dav-enabled="webDavEnabled"
           @open-web-dav="showWebDavPanel = true"
           @open-color-scheme="showColorSchemePanel = true"

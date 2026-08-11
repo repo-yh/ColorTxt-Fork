@@ -7,12 +7,23 @@ import {
 } from "./readerAnnotationExport";
 import { sanitizeChatExportTitleForFilename } from "../aiAssistant/aiAssistantExport";
 
-/** 本书 / 收藏共用同一 JSON 形态，可互导入 */
+/** @deprecated 读入时仍接受；写出使用 v2 */
 export type ReaderHighlightsExportV1 = {
   schemaVersion: 1;
   exportedAt: number;
   highlightWordsByIndex: HighlightWordsByIndex;
 };
+
+/** 本书 / 收藏共用；v2 值为色索引 → 词组 string[][] */
+export type ReaderHighlightsExportV2 = {
+  schemaVersion: 2;
+  exportedAt: number;
+  highlightWordsByIndex: HighlightWordsByIndex;
+};
+
+export type ReaderHighlightsExport =
+  | ReaderHighlightsExportV1
+  | ReaderHighlightsExportV2;
 
 /** 本书高亮词默认导出名：`{书名}.highlights.json` */
 export function buildHighlightExportDefaultName(bookName: string): string {
@@ -30,8 +41,8 @@ export function countHighlightWordsInMap(
 ): number {
   if (!map) return 0;
   let n = 0;
-  for (const words of Object.values(map)) {
-    n += words.length;
+  for (const groups of Object.values(map)) {
+    for (const g of groups) n += g.length;
   }
   return n;
 }
@@ -39,8 +50,8 @@ export function countHighlightWordsInMap(
 export function buildReaderHighlightsExportJson(
   highlightWordsByIndex: HighlightWordsByIndex,
 ): string {
-  const payload: ReaderHighlightsExportV1 = {
-    schemaVersion: 1,
+  const payload: ReaderHighlightsExportV2 = {
+    schemaVersion: 2,
     exportedAt: Date.now(),
     highlightWordsByIndex,
   };
@@ -49,24 +60,21 @@ export function buildReaderHighlightsExportJson(
 
 export function parseReaderHighlightsExportJson(
   raw: string,
-): ReaderHighlightsExportV1 | null {
+): ReaderHighlightsExportV2 | null {
   try {
     const parsed = JSON.parse(raw) as unknown;
-    if (
-      !parsed ||
-      typeof parsed !== "object" ||
-      Array.isArray(parsed) ||
-      (parsed as ReaderHighlightsExportV1).schemaVersion !== 1
-    ) {
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
       return null;
     }
     const obj = parsed as Record<string, unknown>;
+    const ver = obj.schemaVersion;
+    if (ver !== 1 && ver !== 2) return null;
     const highlightWordsByIndex = normalizeHighlightWordsByIndex(
       obj.highlightWordsByIndex,
     );
     if (!highlightWordsByIndex) return null;
     return {
-      schemaVersion: 1,
+      schemaVersion: 2,
       exportedAt:
         typeof obj.exportedAt === "number" && Number.isFinite(obj.exportedAt)
           ? obj.exportedAt

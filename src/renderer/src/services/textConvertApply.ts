@@ -2,7 +2,7 @@ import {
   convertDigitsWidth,
   convertLettersWidth,
 } from "@shared/textWidthConvert";
-import type { HighlightWord, HighlightWordsByIndex } from "../stores/fileMetaStore";
+import type { HighlightWordsByIndex } from "../stores/fileMetaStore";
 import {
   resolveOpenCcConfig,
   type TextConvertWidthMode,
@@ -63,16 +63,41 @@ export async function applyTextDisplayConvertsToHighlightWordsByIndex(
 ): Promise<HighlightWordsByIndex | undefined> {
   if (!map) return undefined;
   const out: HighlightWordsByIndex = {};
-  for (const [key, words] of Object.entries(map)) {
-    const converted: HighlightWord[] = [];
-    for (const word of words) {
-      if (!word.text) continue;
-      converted.push({
-        text: await applyTextDisplayConverts(word.text, options),
-        isRegex: word.isRegex,
-      });
+  for (const [key, groups] of Object.entries(map)) {
+    const convertedGroups: string[][] = [];
+    for (const group of groups) {
+      const converted: string[] = [];
+      for (const word of group) {
+        if (!word) continue;
+        converted.push(await applyTextDisplayConverts(word, options));
+      }
+      if (converted.length > 0) convertedGroups.push(converted);
     }
-    if (converted.length > 0) out[key] = converted;
+    if (convertedGroups.length > 0) out[key] = convertedGroups;
   }
   return Object.keys(out).length > 0 ? out : undefined;
 }
+
+// ============================================================
+// 旧版函数体（HighlightWord 模型），保留以供参考
+// ============================================================
+// /** 只读展示层：将高亮词表各词条经与正文相同的转换规则处理（旧版） */
+// export async function applyTextDisplayConvertsToHighlightWordsByIndex(
+//   map: HighlightWordsByIndex | undefined,
+//   options: TextDisplayConvertOptions,
+// ): Promise<HighlightWordsByIndex | undefined> {
+//   if (!map) return undefined;
+//   const out: Record<string, HighlightWord[]> = {};
+//   for (const [key, words] of Object.entries(map)) {
+//     const converted: HighlightWord[] = [];
+//     for (const word of words) {
+//       if (!word.text) continue;
+//       converted.push({
+//         text: await applyTextDisplayConverts(word.text, options),
+//         isRegex: word.isRegex,
+//       });
+//     }
+//     if (converted.length > 0) out[key] = converted;
+//   }
+//   return Object.keys(out).length > 0 ? out : undefined;
+// }

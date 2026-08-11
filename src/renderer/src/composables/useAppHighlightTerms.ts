@@ -8,19 +8,24 @@ import {
   assignHighlightTermToColorForFile,
   fileNameKey,
   findFileMetaRecord,
+  removeHighlightGroupFromFile,
   removeHighlightTermFromFile,
   upsertFileMetaRecord,
+  upsertHighlightGroupForFile,
   type FileMetaRecord,
-  type HighlightWord,
   type HighlightWordsByIndex,
 } from "../stores/fileMetaStore";
 import {
-  assignHighlightTermToColorMap,
   buildHighlightListTerms,
-  findHighlightWordWithDefault,
+  groupExistsInHighlightMap,
+  highlightGroupsEqual,
+  mergeHighlightGroupsInMap,
   mergeHighlightWordsByIndex,
+  normalizeHighlightGroup,
+  removeHighlightGroupFromMap,
   removeHighlightTermFromMap,
-  termExistsInHighlightMap,
+  splitTermFromHighlightGroupInMap,
+  upsertHighlightGroupInMap,
   type HighlightListTerm,
 } from "../utils/highlightWords";
 import {
@@ -28,6 +33,16 @@ import {
   type TextConvertWidthMode,
   type TextConvertZhMode,
 } from "@shared/textConvertTypes";
+
+// ============================================================
+// 旧版 imports（保留以供参考）
+// ============================================================
+// import {
+//   type HighlightWord,
+// } from "../stores/fileMetaStore";
+// import {
+//   findHighlightWordWithDefault,
+// } from "../utils/highlightWords";
 
 type ReaderRef = Ref<InstanceType<typeof ReaderMain> | null>;
 
@@ -55,14 +70,12 @@ export function useAppHighlightTerms(deps: {
   ensurePinBeforeRevealFindWidget: () => void;
   editorContentChangeEpoch: Ref<number>;
 }) {
-  const currentFileHighlightWords = computed(
-    () => {
-      const path = deps.currentFile.value;
-      if (!path) return undefined;
-      return findFileMetaRecord(deps.fileMetaRecords.value, path)
-        ?.highlightWordsByIndex;
-    },
-  );
+  const currentFileHighlightWords = computed(() => {
+    const path = deps.currentFile.value;
+    if (!path) return undefined;
+    return findFileMetaRecord(deps.fileMetaRecords.value, path)
+      ?.highlightWordsByIndex;
+  });
 
   const mergedHighlightWordsForReader = computed(() =>
     mergeHighlightWordsByIndex(
@@ -79,6 +92,9 @@ export function useAppHighlightTerms(deps: {
     HighlightWordsByIndex | undefined
   >(undefined);
   const currentFileHighlightTerms = ref<HighlightListTerm[]>([]);
+
+  /** 标记 inline search 当前是否有高亮结果 */
+  const hasInlineSearchHighlight = ref(false);
 
   let refreshHighlightDisplayGen = 0;
 
@@ -130,18 +146,22 @@ export function useAppHighlightTerms(deps: {
     ): Promise<HighlightWordsByIndex | undefined> {
       if (!map) return undefined;
       const out: HighlightWordsByIndex = {};
-      for (const [key, words] of Object.entries(map)) {
-        const converted: HighlightWord[] = [];
-        for (const stored of words) {
-          if (!stored) continue;
-          let display = displayByStored.get(stored.text);
-          if (display == null) {
-            display = await applyTextDisplayConverts(stored.text, convertOpts);
-            displayByStored.set(stored.text, display);
+      for (const [key, groups] of Object.entries(map)) {
+        const convertedGroups: string[][] = [];
+        for (const group of groups) {
+          const converted: string[] = [];
+          for (const stored of group) {
+            if (!stored) continue;
+            let display = displayByStored.get(stored);
+            if (display == null) {
+              display = await applyTextDisplayConverts(stored, convertOpts);
+              displayByStored.set(stored, display);
+            }
+            converted.push(display);
           }
-          converted.push({ text: display, isRegex: stored.isRegex });
+          if (converted.length > 0) convertedGroups.push(converted);
         }
-        if (converted.length > 0) out[key] = converted;
+        if (convertedGroups.length > 0) out[key] = convertedGroups;
       }
       return Object.keys(out).length > 0 ? out : undefined;
     }
@@ -162,7 +182,7 @@ export function useAppHighlightTerms(deps: {
       book,
       colors,
       bodyText,
-      (stored) => displayByStored.get(stored.text) ?? stored.text,
+      (stored) => displayByStored.get(stored) ?? stored,
     );
     currentFileHighlightTerms.value =
       deps.readerRef.value?.countHighlightTermMatches(raw) ?? raw;
@@ -186,6 +206,7 @@ export function useAppHighlightTerms(deps: {
     { deep: true, immediate: true },
   );
 
+  /** 选区添词（仅本书） */
   function onAddHighlightTerm(payload: { text: string; colorIndex: number }) {
     const path = deps.currentFile.value;
     if (!path) return;
@@ -193,16 +214,42 @@ export function useAppHighlightTerms(deps: {
       deps.fileMetaRecords.value,
       path,
       payload.colorIndex,
-      { text: payload.text },
+      payload.text,
     );
     deps.persistFileMeta();
   }
 
   function onRemoveHighlightTerm(payload: {
-    text: string;
+    /** 侧栏：按整组删除 */
+    storedTerms?: string[];
+    /** 阅读器选区：按单词从各组中剔除 */
+    text?: string;
     scope?: "global" | "book";
   }) {
-    const term = { text: payload.text.trim() };
+    if (payload.storedTerms?.length) {
+      const group = normalizeHighlightGroup(payload.storedTerms);
+      if (!group) return;
+      if (payload.scope === "global") {
+        deps.highlightWordsByIndexGlobal.value = removeHighlightGroupFromMap(
+          deps.highlightWordsByIndexGlobal.value,
+          group,
+        );
+        deps.persistSettings();
+        return;
+      }
+      const path = deps.currentFile.value;
+      if (!path) return;
+      deps.fileMetaRecords.value = removeHighlightGroupFromFile(
+        deps.fileMetaRecords.value,
+        path,
+        group,
+      );
+      deps.persistFileMeta();
+      return;
+    }
+
+    const term = payload.text?.trim();
+    if (!term) return;
     if (payload.scope === "global") {
       deps.highlightWordsByIndexGlobal.value = removeHighlightTermFromMap(
         deps.highlightWordsByIndexGlobal.value,
@@ -222,65 +269,220 @@ export function useAppHighlightTerms(deps: {
   }
 
   function onFavoriteHighlightTerm(payload: {
-    text: string;
+    storedTerms: string[];
     colorIndex: number;
   }) {
     const path = deps.currentFile.value;
-    if (!path) return;
-    const term = { text: payload.text.trim() };
-    // 从全局词或本书词中查找 isRegex 属性，保留正则标记
-    const sourceWord = findHighlightWordWithDefault(
-      deps.highlightWordsByIndexGlobal.value,
-      currentFileHighlightWords.value,
-      term.text,
-      term,
-    );
-    deps.fileMetaRecords.value = removeHighlightTermFromFile(
+    const group = normalizeHighlightGroup(payload.storedTerms);
+    if (!path || !group) return;
+    deps.fileMetaRecords.value = removeHighlightGroupFromFile(
       deps.fileMetaRecords.value,
       path,
-      term,
+      group,
     );
-    deps.highlightWordsByIndexGlobal.value = assignHighlightTermToColorMap(
+    deps.highlightWordsByIndexGlobal.value = upsertHighlightGroupInMap(
       deps.highlightWordsByIndexGlobal.value,
       payload.colorIndex,
-      sourceWord,
+      group,
     );
     deps.persistFileMeta();
     deps.persistSettings();
   }
 
   function onUnfavoriteHighlightTerm(payload: {
-    text: string;
+    storedTerms: string[];
     colorIndex: number;
   }) {
-    const term = { text: payload.text.trim() };
-    // 取消收藏前从全局词或本书词中查找 isRegex 属性（此时全局词中还有该词）
-    const sourceWord = findHighlightWordWithDefault(
+    const group = normalizeHighlightGroup(payload.storedTerms);
+    if (!group) return;
+    deps.highlightWordsByIndexGlobal.value = removeHighlightGroupFromMap(
       deps.highlightWordsByIndexGlobal.value,
-      currentFileHighlightWords.value,
-      term.text,
-      term,
-    );
-    // 现在再删除全局词
-    deps.highlightWordsByIndexGlobal.value = removeHighlightTermFromMap(
-      deps.highlightWordsByIndexGlobal.value,
-      term,
+      group,
     );
     const path = deps.currentFile.value;
-    const bookHas = termExistsInHighlightMap(
+    const bookHas = groupExistsInHighlightMap(
       currentFileHighlightWords.value,
-      term,
+      group,
     );
     if (!bookHas && path) {
-      deps.fileMetaRecords.value = assignHighlightTermToColorForFile(
+      deps.fileMetaRecords.value = upsertHighlightGroupForFile(
         deps.fileMetaRecords.value,
         path,
         payload.colorIndex,
-        sourceWord,
+        group,
       );
       deps.persistFileMeta();
     }
     deps.persistSettings();
+  }
+
+  function persistScopeMap(
+    scope: "global" | "book",
+    next: HighlightWordsByIndex | undefined,
+  ) {
+    if (scope === "global") {
+      deps.highlightWordsByIndexGlobal.value = next;
+      deps.persistSettings();
+      return;
+    }
+    const path = deps.currentFile.value;
+    if (!path) return;
+    deps.fileMetaRecords.value = upsertFileMetaRecord(
+      deps.fileMetaRecords.value,
+      path,
+      () => ({ highlightWordsByIndex: next }),
+    );
+    deps.persistFileMeta();
+  }
+
+  function mapForScope(scope: "global" | "book"): HighlightWordsByIndex | undefined {
+    if (scope === "global") return deps.highlightWordsByIndexGlobal.value;
+    return currentFileHighlightWords.value;
+  }
+
+  /** 从某 scope 剔除若干词（多词组收缩；可整组或单词语） */
+  function stripTermsFromScope(
+    scope: "global" | "book",
+    terms: readonly string[],
+  ) {
+    let map = mapForScope(scope);
+    for (const t of terms) {
+      map = removeHighlightTermFromMap(map, t);
+    }
+    persistScopeMap(scope, map);
+  }
+
+  /**
+   * 拖放合并：颜色与 scope 以 target 为准。
+   * `source.storedTerms` 可为整组或单个词。
+   */
+  function onMergeHighlightGroups(payload: {
+    source: { storedTerms: string[]; scope: "global" | "book" };
+    target: {
+      storedTerms: string[];
+      scope: "global" | "book";
+      colorIndex: number;
+    };
+  }) {
+    const source = normalizeHighlightGroup(payload.source.storedTerms);
+    const target = normalizeHighlightGroup(payload.target.storedTerms);
+    if (!source || !target) return;
+    // 拖到自身整组，或单词语已在目标组内
+    if (highlightGroupsEqual(source, target)) return;
+    if (source.every((t) => target.includes(t))) return;
+
+    const merged = normalizeHighlightGroup([...target, ...source]);
+    if (!merged) return;
+
+    if (payload.source.scope === payload.target.scope) {
+      const next = mergeHighlightGroupsInMap(
+        mapForScope(payload.target.scope),
+        source,
+        target,
+        payload.target.colorIndex,
+      );
+      persistScopeMap(payload.target.scope, next);
+      return;
+    }
+
+    // 跨 scope：从 source 剔除被拖词语，再写入 target
+    stripTermsFromScope(payload.source.scope, source);
+
+    if (payload.target.scope === "global") {
+      deps.highlightWordsByIndexGlobal.value = upsertHighlightGroupInMap(
+        deps.highlightWordsByIndexGlobal.value,
+        payload.target.colorIndex,
+        merged,
+        { replaceStoredTerms: target },
+      );
+      deps.persistSettings();
+    } else {
+      const path = deps.currentFile.value;
+      if (!path) return;
+      deps.fileMetaRecords.value = upsertHighlightGroupForFile(
+        deps.fileMetaRecords.value,
+        path,
+        payload.target.colorIndex,
+        merged,
+        target,
+      );
+      deps.persistFileMeta();
+    }
+  }
+
+  /** 从多词组拆出一词为独立项（同色同 scope） */
+  function onSplitHighlightTerm(payload: {
+    storedTerms: string[];
+    scope: "global" | "book";
+    colorIndex: number;
+    term: string;
+  }) {
+    const next = splitTermFromHighlightGroupInMap(
+      mapForScope(payload.scope),
+      payload.storedTerms,
+      payload.term,
+      payload.colorIndex,
+    );
+    persistScopeMap(payload.scope, next);
+  }
+
+  /** 添加词组（本书）或编辑词组（按 scope） */
+  function onCommitHighlightGroup(payload: {
+    mode: "add" | "edit";
+    scope: "global" | "book";
+    colorIndex: number;
+    terms: string[];
+    /** 编辑时替换的原词组 */
+    replaceStoredTerms?: string[];
+  }) {
+    const group = normalizeHighlightGroup(payload.terms);
+    if (payload.mode === "add") {
+      if (!group) return;
+      const path = deps.currentFile.value;
+      if (!path) return;
+      deps.fileMetaRecords.value = upsertHighlightGroupForFile(
+        deps.fileMetaRecords.value,
+        path,
+        payload.colorIndex,
+        group,
+      );
+      deps.persistFileMeta();
+      return;
+    }
+
+    // edit
+    if (!group) {
+      if (payload.replaceStoredTerms?.length) {
+        onRemoveHighlightTerm({
+          storedTerms: payload.replaceStoredTerms,
+          scope: payload.scope,
+        });
+      }
+      return;
+    }
+
+    if (payload.scope === "global") {
+      deps.highlightWordsByIndexGlobal.value = upsertHighlightGroupInMap(
+        deps.highlightWordsByIndexGlobal.value,
+        payload.colorIndex,
+        group,
+        payload.replaceStoredTerms
+          ? { replaceStoredTerms: payload.replaceStoredTerms }
+          : undefined,
+      );
+      deps.persistSettings();
+      return;
+    }
+    const path = deps.currentFile.value;
+    if (!path) return;
+    deps.fileMetaRecords.value = upsertHighlightGroupForFile(
+      deps.fileMetaRecords.value,
+      path,
+      payload.colorIndex,
+      group,
+      payload.replaceStoredTerms,
+    );
+    deps.persistFileMeta();
   }
 
   async function clearCurrentFileHighlightTerms() {
@@ -403,7 +605,10 @@ export function useAppHighlightTerms(deps: {
     });
   }
 
-  function onFindHighlightTermFromSidebar(text: string, isRegex?: boolean, direction?: 'prev') {
+  function onFindHighlightTermFromSidebar(payload: {
+    query: string;
+    useRegex: boolean;
+  }) {
     if (
       !deps.currentFile.value ||
       deps.loading.value ||
@@ -411,35 +616,16 @@ export function useAppHighlightTerms(deps: {
     )
       return;
     if (deps.isVoiceReadNavigationBlocked.value) return;
+    const q = payload.query.trim();
+    if (!q) return;
     deps.ensurePinBeforeRevealFindWidget();
-    if (direction === 'prev') {
-      // 右键：先清除左键的 inline decoration，再填充搜索面板
-      deps.readerRef.value?.clearInlineSearchState?.();
-      deps.readerRef.value?.openFindWithSearchString?.(text, isRegex, direction);
-    } else {
-      // 左键：隐式查找，跳下一个
-      deps.readerRef.value?.jumpToNextInlineSearchMatch?.(text, {
-        caseSensitive: false,
-        wholeWord: false,
-        useRegex: isRegex === true,
-        smooth: true,
-      });
-    }
-  }
-
-  /** 从侧栏手动录入添加高亮词（随机颜色） */
-  function onAddHighlightTermFromSidebar(text: string, isRegex?: boolean) {
-    const path = deps.currentFile.value;
-    if (!path) return;
-    const colors = deps.highlightColorsForReader.value;
-    const colorIndex = Math.floor(Math.random() * colors.length);
-    deps.fileMetaRecords.value = assignHighlightTermToColorForFile(
-      deps.fileMetaRecords.value,
-      path,
-      colorIndex,
-      { text, isRegex: isRegex === true },
-    );
-    deps.persistFileMeta();
+    const found = deps.readerRef.value?.jumpToNextInlineSearchMatch?.(q, {
+      caseSensitive: false,
+      wholeWord: false,
+      useRegex: payload.useRegex,
+      smooth: true,
+    });
+    hasInlineSearchHighlight.value = found === true;
   }
 
   return {
@@ -448,12 +634,15 @@ export function useAppHighlightTerms(deps: {
     readerDisplayHighlightWordsByIndex,
     readerDisplayHighlightWordsBookOnly,
     currentFileHighlightTerms,
+    hasInlineSearchHighlight,
     refreshReaderHighlightDisplayLayer,
     onAddHighlightTerm,
-    onAddHighlightTermFromSidebar,
     onRemoveHighlightTerm,
     onFavoriteHighlightTerm,
     onUnfavoriteHighlightTerm,
+    onCommitHighlightGroup,
+    onMergeHighlightGroups,
+    onSplitHighlightTerm,
     clearCurrentFileHighlightTerms,
     onExportBookHighlightsJson,
     onImportBookHighlightsJson,

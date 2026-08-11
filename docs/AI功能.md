@@ -235,7 +235,7 @@ cardShellWrap（悬停抬高 z-index）
 | 自动出图 | **设置 → AI 阅读助手 →「生成思维导图」**（`AIConfig.autoMindmapOnSummaryAndCharacters`，默认开启）。关闭后仅在用户提到「思维导图」「导图」等时注入出图提示；**不**写死全部快速提问 |
 | 意图判定 | **`@shared/aiMindmapIntent`**：`explicit`（用户显式要导图）/ `auto`（开放型结构化问题，由用户原话驱动）/ `none`；定位章节、单点事实查询等排除自动导图 |
 | 与词云互斥 | **`@shared/aiVisualToolIntent`**：同轮若同时检测到词云与导图意图，默认**优先词云**；仅当用户原话显式同时要两者（如同时出现「词云」与「思维导图/关系图」）才双工具注入 |
-| 默认快速提问 | `这章讲了什么`、`生成人物关系图`、`生成角色词云`、`概括本书内容`（`DEFAULT_AI_QUICK_QUESTIONS`；设置页 **恢复默认** 或配置缺省/空列表时回退） |
+| 默认快速提问 | `这章讲了什么`、`生成人物关系图`、`生成人名词云`、`概括本书内容`（`DEFAULT_AI_QUICK_QUESTIONS`；设置页 **恢复默认** 或配置缺省/空列表时回退） |
 | 依赖 | **`markmap-lib`** / **`markmap-view`** 为 devDependencies，打进 renderer bundle（与 `marked` 类似，非整包 `node_modules` 外链） |
 
 意图与 rag 后追问：**`@shared/aiMindmapIntent`**；主进程转换与统计：**`aiMindmapTool.ts`**（含 Mermaid `mindmap` 语法兜底转 Markdown 层级）。
@@ -261,7 +261,22 @@ cardShellWrap（悬停抬高 z-index）
 | 意图 | **`@shared/aiWordcloudIntent`**：检测词云意图、`general`/`semantic` 模式、从用户原话提炼 **`semanticQuery`**；与思维导图同轮互斥见 **`aiVisualToolIntent`** |
 | 持久化 | 工具结果 JSON 写入 SQLite **`messages`**（`role=tool`，`tool_name=wordcloud`）；重开会话由 **`aiAssistantDbMessages`** 还原 |
 
-主进程实现：**`aiWordcloudTool.ts`**、**`aiWordcloudChapterFetch.ts`**、**`aiJieba.ts`**、**`aiSegmentCache.ts`**；语义 prompt：**`@shared/aiWordcloudSemanticFocus`**；停用词：**`@shared/aiWordcloudStopwords`**。打包时 **`@node-rs/jieba`** 原生扩展经 **`asarUnpack`** 解出，**`prune-pack-deps`** 仅保留目标平台 **`jieba-*`** 包（交叉编译时用 **`npm pack`** 补装，例如 darwin-x64）。
+主进程实现：**`tools/wordcloudTool.ts`**、**`tools/wordcloudChapterFetch.ts`**、**`aiJieba.ts`**、**`aiSegmentCache.ts`**；语义 prompt：**`@shared/aiWordcloudSemanticFocus`**（含高亮词检索用的 **`collectMax`**）；停用词：**`@shared/aiWordcloudStopwords`**。打包时 **`@node-rs/jieba`** 原生扩展经 **`asarUnpack`** 解出，**`prune-pack-deps`** 仅保留目标平台 **`jieba-*`** 包（交叉编译时用 **`npm pack`** 补装，例如 darwin-x64）。
+
+### 高亮词 AI 检索（需启用 AI 阅读助手）
+
+侧栏 **「高亮词」** 标题行在总开关 **`aiEnabled`** 开启时显示 **「AI 检索」**（图标 **`icons.aiSearch`** / `AI_search.svg`），用于按语义批量收集本书词语并打开 **「添加高亮词」** 面板。与角色「AI 检索」、对话词云不同：**不经 Agent 会话**，**不依赖向量索引**，**始终全书范围**（**不**受「防剧透」限制）。
+
+| 项 | 说明 |
+| ---- | ---- |
+| 菜单 | **AI 检索：人名** / **地名** / 分隔线 / **自定义语义**（`appPrompt` 输入自由文本） |
+| 管线 | 主进程 **`ai:wordcloud:run`** → 直接调 **`runWordcloudTool`**（`mode=semantic`，`unlimitedTerms: true`） |
+| 结果 | 按出现次数降序的词语列表；完成后预填打开 **`HighlightTermEditModal`**（添加模式） |
+| Loading | 全局蒙层 **「AI 检索中」**（`appLoading`）；检索中 **Esc** → **`ai:wordcloud:abort`** 中止（不弹错误） |
+| 收集规模 | 相对词云展示放宽：更大章节抽样、分批抽取、候选上限约 **2000**、`maxTokens` 抬高；提示词要求尽可能多列（见 **`aiWordcloudSemanticFocus`** 的 `collectMax`）；仍受抽样覆盖与模型输出约束 |
+| 渲染侧 | **`useHighlightAiSearch.ts`**（`ReaderSidebar` 接线）；bookHash 与助手同源（会话路径 + 正文 size/mtime） |
+
+词云对话工具默认仍受设置 **`wordcloudMaxWords`（≤200）** 与「50～120」抽取提示约束；仅高亮词 IPC 走 `unlimitedTerms` / `collectMax` 路径。
 
 ### AI 智能排版（需启用 AI 阅读助手）
 
@@ -375,6 +390,6 @@ cardShellWrap（悬停抬高 z-index）
 
 ### 源码与 IPC 速查
 
-主进程 **`registerAiIpc.ts`** 集中注册 `ai:*` IPC（含 **`ai:embedding:builtin:*`**、**`ai:text-format:*`** 智能排版、**`ai:migrateDataCacheRoot`** / **`ai:migrateBuiltinModelCacheRoot`**、**`ai:messageUpdateToolContent`** 等）；实现见 **`src/main/ai/`**（**`infra/`**、**`chat/`**、**`rag/embedding/`**、**`txt2img/`**、**`tools/`**）。渲染侧智能排版：**`useAiSmartFormat.ts`**、**`aiSmartFormat/*`**、**`AiSmartFormatProgressModal.vue`**；向量索引：**`ai/buildBookVectorIndex.ts`**、**`ai/embeddingReady.ts`**。预加载 **`window.colorTxt.ai.*`** 见 **「`src/preload/index.ts`（预加载）」**。
+主进程 **`registerAiIpc.ts`** 集中注册 `ai:*` IPC（含 **`ai:embedding:builtin:*`**、**`ai:text-format:*`** 智能排版、**`ai:wordcloud:run` / `ai:wordcloud:abort`** 高亮词 AI 检索、**`ai:migrateDataCacheRoot`** / **`ai:migrateBuiltinModelCacheRoot`**、**`ai:messageUpdateToolContent`** 等）；实现见 **`src/main/ai/`**（**`infra/`**、**`chat/`**、**`rag/embedding/`**、**`txt2img/`**、**`tools/`**）。渲染侧智能排版：**`useAiSmartFormat.ts`**、**`aiSmartFormat/*`**、**`AiSmartFormatProgressModal.vue`**；高亮词 AI 检索：**`useHighlightAiSearch.ts`**；向量索引：**`ai/buildBookVectorIndex.ts`**、**`ai/embeddingReady.ts`**。预加载 **`window.colorTxt.ai.*`** 见 **「`src/preload/index.ts`（预加载）」**。
 
 角色卡倾斜/放大/纹理/排序（无独立 IPC）：**`@shared/characterCardTextureEffects`**、**`composables/useCharacterCardTilt.ts`**、**`composables/useCharacterCardPopoverZoom.ts`**、**`composables/useCharacterRosterReorder.ts`**、**`composables/useCharacterPortraitFs.ts`**、**`composables/useCharacterPortraitRetrieve.ts`**、**`composables/useSortableReorder.ts`**、**`utils/characterCardSpring.ts`**、**`utils/characterCardTiltDom.ts`**、**`styles/characterCardHolo*.css`**、**`components/CharacterRosterCard.vue`** / **`CharacterEditDrawer.vue`** / **`CharacterPortraitGenerateModal.vue`**；见 **「角色卡 3D 倾斜与闪卡纹理」** 与 **「列表拖动排序（SortableJS）」**。

@@ -697,6 +697,25 @@ const api = {
       ipcRenderer.invoke("ai:segment:rebuildBook", payload) as Promise<
         { ok: true; chaptersBuilt: number } | { ok: false; error: string }
       >,
+    /** 高亮词侧栏 AI 检索（semantic 词云管线；全书、默认不截断词项上限） */
+    wordcloudRun: (payload: {
+      bookHash: string;
+      chapterCount: number;
+      semanticQuery: string;
+      title?: string;
+      /** 默认 true：返回全部已计数词项 */
+      unlimitedTerms?: boolean;
+      /** 与 wordcloudAbort 配对，供 Esc 中止 */
+      requestId?: number;
+    }) =>
+      ipcRenderer.invoke("ai:wordcloud:run", payload) as Promise<
+        | { ok: true; result: import("@shared/aiTypes").AIWordcloudToolResult }
+        | { ok: false; error: string; aborted?: boolean }
+      >,
+    wordcloudAbort: (requestId: number) =>
+      ipcRenderer.invoke("ai:wordcloud:abort", requestId) as Promise<{
+        ok: true;
+      }>,
     indexReplaceChunks: (bookHash: string, chunks: AIChunkRecord[]) =>
       ipcRenderer.invoke(
         "ai:index:replaceChunks",
