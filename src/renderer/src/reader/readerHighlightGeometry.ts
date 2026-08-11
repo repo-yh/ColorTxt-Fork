@@ -197,7 +197,7 @@ export type FloatPlacementResult = {
   openDownward: boolean;
 };
 
-/** 工具条/色盘浮层：钳制在阅读器视口内；上方放不下时改为向下展开 */
+/** 工具条/色盘浮层：钳制在传入 clip 内；上方放不下时改为向下展开 */
 export function computeFloatPlacement(
   input: FloatPlacementInput,
 ): FloatPlacementResult {

@@ -219,6 +219,7 @@ const {
   fastScrollSensitivity,
   stickyChapterTitleEnabled,
   chapterNavToolbarEnabled,
+  selectionToolbarButtons,
   readerEditShowLineNumbers,
   readerEditMinimap,
   fullscreenReaderWidthPercent,
@@ -2035,6 +2036,7 @@ const modalRef = ref<InstanceType<typeof AppModal> | null>(null);
             :mouse-wheel-scroll-sensitivity="mouseWheelScrollSensitivity"
             :fast-scroll-sensitivity="fastScrollSensitivity"
             :sticky-chapter-title-enabled="stickyChapterTitleEnabled"
+            :selection-toolbar-buttons="selectionToolbarButtons"
             :reader-surface-light="effectiveReaderSurfaceLight"
             :reader-surface-dark="effectiveReaderSurfaceDark"
             :reader-palette-color-enabled="readerPaletteColorEnabledForReader"
@@ -2055,6 +2057,9 @@ const modalRef = ref<InstanceType<typeof AppModal> | null>(null);
             @reader-edit-dirty-change="onReaderEditDirtyChange"
             @reader-edit-save-request="onSaveReaderChapter"
             @apply-partial-physical-edit="onApplyPartialPhysicalEdit"
+            @search-with-quote="
+              (text) => readerRef?.openFindWithSearchString?.(text)
+            "
           />
           <VoiceReadToolbar
             :visible="isVoiceReadActive"

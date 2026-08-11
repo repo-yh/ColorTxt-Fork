@@ -365,6 +365,7 @@ function createFindBookReaderSettingsStore() {
     fastScrollSensitivity: fb.fastScrollSensitivity,
     stickyChapterTitleEnabled: fb.stickyChapterTitleEnabled,
     chapterNavToolbarEnabled: fb.chapterNavToolbarEnabled,
+    selectionToolbarButtons: fb.selectionToolbarButtons,
     readerEditShowLineNumbers: fb.readerEditShowLineNumbers,
     readerEditMinimap: fb.readerEditMinimap,
     fullscreenReaderWidthPercent: fb.fullscreenReaderWidthPercent,

@@ -68,6 +68,7 @@ const props = defineProps<{
   txtrDelimitedMatchCrossLine: boolean;
   timedScrollSettings: TimedScrollSettings;
   pomodoroSettings: PomodoroSettings;
+  selectionToolbarButtons: import("../constants/selectionToolbar").SelectionToolbarButtons;
   chapterRules: ChapterMatchRule[];
   chapterRuleErrorText: string;
   /** 编辑态打开文本替换时面板主按钮为「应用」 */
@@ -303,6 +304,7 @@ onBeforeUnmount(() => {
     :txtr-delimited-match-cross-line="txtrDelimitedMatchCrossLine"
     :timed-scroll-settings="timedScrollSettings"
     :pomodoro-settings="pomodoroSettings"
+    :selection-toolbar-buttons="selectionToolbarButtons"
     :ebook-convert-output-dir="ebookConvertOutputDir"
     :book-pack-unpack-dir="bookPackUnpackDir"
     :book-pack-password="bookPackPassword"

@@ -105,8 +105,9 @@
 
 | 服务商    | API 密钥                | 说明                                            |
 | --------- | ----------------------- | ----------------------------------------------- |
-| Edge TTS  | -                       |                                                 |
-| 系统语音  | -                       |                                                 |
+| Edge TTS  |                         |                                                 |
+| 系统语音  |                         |                                                 |
+| 讲述人自然语音  |                    | 仅 Windows，通过 Windows SAPI5 调用本机音色，<br />需安装适配器与语音包，如 [NaturalVoiceSAPIAdapter](https://github.com/gexgd0419/NaturalVoiceSAPIAdapter) |
 | Qwen3-TTS | 阿里云通义（DashScope） |                                                 |
 | MiniMax   | MiniMax                 |                                                 |
 | 小米 MiMo | MiMo                    | 支持 **音色定制** 和 **音色克隆**，**目前限免** |

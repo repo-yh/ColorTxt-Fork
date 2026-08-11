@@ -143,6 +143,10 @@ import type {
   ReaderAnnotationRecord,
 } from "../stores/fileMetaStore";
 import { useReaderAnnotations } from "../composables/useReaderAnnotations";
+import {
+  defaultSelectionToolbarButtons,
+  type SelectionToolbarButtons,
+} from "../constants/selectionToolbar";
 import { annotationMarkerCssRules } from "../reader/readerAnnotationDecor";
 import { floorReadingPercentFromScrollRatio } from "../utils/format";
 import { bookTitleForExport } from "../utils/readerAnnotationExport";
@@ -442,6 +446,8 @@ const props = withDefaults(
     readerFullscreen?: boolean;
     /** AI 阅读助手已启用（编辑右键智能排版项） */
     aiFeaturesEnabled?: boolean;
+    /** 选区工具条可选按钮显示（设置 → 阅读 → 工具条） */
+    selectionToolbarButtons?: SelectionToolbarButtons;
     /** 至少一项智能排版任务已开启（设置 → 编辑） */
     canUseAiSmartFormat?: boolean;
     /** 智能排版 Diff 预览（非 null 时在编辑器区域展示左右对比） */
@@ -468,6 +474,7 @@ const props = withDefaults(
     mouseWheelScrollSensitivity: defaultMouseWheelScrollSensitivity,
     fastScrollSensitivity: defaultFastScrollSensitivity,
     stickyChapterTitleEnabled: defaultStickyChapterTitleEnabled,
+    selectionToolbarButtons: () => ({ ...defaultSelectionToolbarButtons }),
     readerEditShowLineNumbers: defaultReaderEditShowLineNumbers,
     readerEditMinimap: defaultReaderEditMinimap,
     streamLoading: false,
@@ -517,6 +524,8 @@ const emit = defineEmits<{
     payload: { type: import("../stores/fileMetaStore").ReaderLineationType; colorIndex: number },
   ];
   askAiWithQuote: [text: string];
+  /** 选区工具条「查找」→ 侧栏全文搜索 */
+  searchWithQuote: [text: string];
   readerEditDirtyChange: [dirty: boolean];
   readerEditContentChange: [];
   readerEditLoaded: [payload: { encoding: string }];
@@ -645,6 +654,9 @@ const readerAnn = useReaderAnnotations({
   readerFilePath: () => props.readerFilePath,
   readerEditMode: () => props.readerEditMode === true,
   monacoCustomHighlight: () => props.monacoCustomHighlight === true,
+  aiFeaturesEnabled: () => props.aiFeaturesEnabled === true,
+  selectionToolbarButtons: () =>
+    props.selectionToolbarButtons ?? defaultSelectionToolbarButtons,
   highlightWordsByIndexBookOnly: () => props.highlightWordsByIndexBookOnly,
   highlightColorsLength: () => props.highlightColors.length,
   lineationColorsLength: () => props.lineationColors.length,
@@ -654,6 +666,16 @@ const readerAnn = useReaderAnnotations({
   emitAddHighlightTerm: (payload) => emit("addHighlightTerm", payload),
   emitRemoveHighlightTerm: (payload) => emit("removeHighlightTerm", payload),
   emitAskAiWithQuote: (text) => emit("askAiWithQuote", text),
+  emitFindWithQuote: (text) => {
+    const target =
+      (props.selectionToolbarButtons ?? defaultSelectionToolbarButtons)
+        .findTarget;
+    if (target === "sidebarSearch") {
+      emit("searchWithQuote", text);
+      return;
+    }
+    openFindWithSearchString(text);
+  },
   ebookDisplayLineToPhysical: () => props.ebookDisplayLineToPhysical,
   ebookAnchorPhysicalToDisplay: () => props.ebookAnchorPhysicalToDisplay,
   getPhysicalLineContent: (line) => props.getPhysicalLineContent?.(line) ?? "",
@@ -670,6 +692,7 @@ const {
   floatCenterX,
   floatRootTop,
   floatOpenDownward,
+  floatRootRef,
   activeLineation,
   toolbarHasLineation,
   toolbarHasNote,
@@ -685,6 +708,7 @@ const {
   onHighlightPickConfirm,
   onHighlightPickRemove,
   onLineationPickConfirm,
+  onLineationPickRemove,
   onNotePanelConfirm,
   onNotePanelDelete,
   jumpToAnnotationRange,
@@ -3891,12 +3915,14 @@ watch(smartFormatReviewActive, (active) => {
         :lineation-picker-selected-index="lineationPickerSelectedIndex"
         :monaco-custom-highlight="monacoCustomHighlight"
         :ai-features-enabled="aiFeaturesEnabled"
+        :selection-toolbar-buttons="selectionToolbarButtons"
         :has-lineation="toolbarHasLineation"
         :has-note="toolbarHasNote"
         @action="onToolbarAction"
         @highlight-pick-confirm="onHighlightPickConfirm"
         @highlight-pick-remove="onHighlightPickRemove"
         @lineation-pick-confirm="onLineationPickConfirm"
+        @lineation-pick-remove="onLineationPickRemove"
       />
     </div>
     <AppContextMenu

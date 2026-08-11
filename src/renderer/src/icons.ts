@@ -105,7 +105,6 @@ import convertIcon from "./assets/conver.svg?raw";
 import replaceIcon from "./assets/replace.svg?raw";
 import noteIcon from "./assets/note.svg?raw";
 import quoteIcon from "./assets/quote.svg?raw";
-import deleteLineationIcon from "./assets/delete_lineation.svg?raw";
 import speakIcon from "./assets/speak.svg?raw";
 import speak0Icon from "./assets/speak_0.svg?raw";
 import speak1Icon from "./assets/speak_1.svg?raw";
@@ -262,7 +261,6 @@ export const icons = {
   favoriteFill: favoriteFillIcon,
   note: noteIcon,
   quote: quoteIcon,
-  deleteLineation: deleteLineationIcon,
   /** 定时滚动 / 自动阅读 */
   reading: readingIcon,
   /** 语音朗读：播放 */

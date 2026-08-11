@@ -45,6 +45,7 @@ import { appToast } from "../services/appToast";
 import {
   findHighlightColorIndexInMap,
 } from "../utils/highlightWords";
+import type { SelectionToolbarButtons } from "../constants/selectionToolbar";
 
 export function useReaderAnnotations(opts: {
   editor: { value: monaco.editor.IStandaloneCodeEditor | null };
@@ -54,6 +55,8 @@ export function useReaderAnnotations(opts: {
   readerFilePath: () => string | null | undefined;
   readerEditMode: () => boolean;
   monacoCustomHighlight: () => boolean;
+  aiFeaturesEnabled: () => boolean;
+  selectionToolbarButtons: () => SelectionToolbarButtons;
   highlightWordsByIndexBookOnly: () => HighlightWordsByIndex | undefined;
   highlightColorsLength: () => number;
   lineationColorsLength: () => number;
@@ -66,6 +69,7 @@ export function useReaderAnnotations(opts: {
   emitAddHighlightTerm: (payload: { text: string; colorIndex: number }) => void;
   emitRemoveHighlightTerm: (payload: { text: string }) => void;
   emitAskAiWithQuote: (text: string) => void;
+  emitFindWithQuote: (text: string) => void;
   ebookDisplayLineToPhysical: () =>
     | ((displayLine: number) => number)
     | undefined;
@@ -535,6 +539,14 @@ export function useReaderAnnotations(opts: {
     }
   }
 
+  const FLOAT_TOOLBAR_H = 72;
+  const FLOAT_GAP = 6;
+  const FLOAT_PICKER_H = 52;
+  const FLOAT_MARGIN = 8;
+  /** 单按钮约宽（含 gap）；与 `.selAction` min-width + padding 对齐 */
+  const FLOAT_ACTION_W = 46;
+  const FLOAT_TOOLBAR_PAD_X = 24;
+
   function getEditorClipRect() {
     const dom = opts.editor.value?.getDomNode();
     if (dom) {
@@ -549,14 +561,20 @@ export function useReaderAnnotations(opts: {
     };
   }
 
-  const FLOAT_TOOLBAR_H = 72;
-  const FLOAT_GAP = 6;
-  const FLOAT_PICKER_H = 52;
-
   function estimateFloatWidth(): number {
-    let actions = 6 + (opts.monacoCustomHighlight() ? 1 : 0);
-    if (toolbarHasLineation.value) actions += 1;
-    return actions * 46 + 24;
+    const float = floatRootRef.value?.querySelector(".selFloatRoot");
+    if (float instanceof HTMLElement) {
+      const w = float.getBoundingClientRect().width;
+      if (w > 0) return w;
+    }
+    /** 马克笔 / 波浪线 / 直线 + 记笔记 */
+    let actions = 4;
+    const buttons = opts.selectionToolbarButtons();
+    if (buttons.copy) actions += 1;
+    if (opts.monacoCustomHighlight()) actions += 1;
+    if (buttons.find) actions += 1;
+    if (opts.aiFeaturesEnabled() && buttons.askAi) actions += 1;
+    return actions * FLOAT_ACTION_W + FLOAT_TOOLBAR_PAD_X;
   }
 
   function estimateFloatHeight(): number {
@@ -564,21 +582,43 @@ export function useReaderAnnotations(opts: {
     return FLOAT_TOOLBAR_H + FLOAT_GAP + FLOAT_PICKER_H;
   }
 
-  /** 相对选区首行水平居中；钳制于阅读器视口；色盘展开时重新判定上下方向 */
+  /**
+   * 相对选区首行水平居中。优先钳在阅读区；
+   * 仅当阅读区钳制后右侧仍会被窗口裁切时，水平改按窗口钳制（可伸入侧栏）。
+   */
   function applyFloatPlacement(anchor: {
     selectionCenterX: number;
     anchorTop: number;
     lineBottom: number;
   }) {
-    const placed = computeFloatPlacement({
+    const floatWidth = estimateFloatWidth();
+    const floatHeight = estimateFloatHeight();
+    const editorClip = getEditorClipRect();
+    const base = {
       selectionCenterX: anchor.selectionCenterX,
       anchorTop: anchor.anchorTop,
       lineBottom: anchor.lineBottom,
-      floatHeight: estimateFloatHeight(),
-      floatWidth: estimateFloatWidth(),
+      floatHeight,
+      floatWidth,
       gap: FLOAT_GAP,
-      clip: getEditorClipRect(),
-    });
+      margin: FLOAT_MARGIN,
+    };
+
+    let placed = computeFloatPlacement({ ...base, clip: editorClip });
+    const rightEdge = placed.centerX + floatWidth / 2;
+    const windowRightLimit = window.innerWidth - FLOAT_MARGIN;
+    if (rightEdge > windowRightLimit + 0.5) {
+      placed = computeFloatPlacement({
+        ...base,
+        clip: {
+          top: editorClip.top,
+          bottom: editorClip.bottom,
+          left: 0,
+          right: window.innerWidth,
+        },
+      });
+    }
+
     floatOpenDownward.value = placed.openDownward;
     floatRootTop.value = placed.rootTop;
     floatCenterX.value = placed.centerX;
@@ -978,6 +1018,19 @@ export function useReaderAnnotations(opts: {
     lineationPickerType.value = type;
   }
 
+  function removeActiveLineation() {
+    const ann = activeAnnotation();
+    if (!ann?.lineation) return;
+    if (ann.note?.content?.trim()) {
+      opts.emitUpsert({ ...ann, lineation: undefined, updatedAt: Date.now() });
+      colorPickerMode.value = null;
+      lineationPickerType.value = null;
+    } else {
+      opts.emitRemove(ann.id);
+      closeToolbarUi();
+    }
+  }
+
   function onToolbarAction(
     action:
       | "copy"
@@ -985,8 +1038,8 @@ export function useReaderAnnotations(opts: {
       | "marker"
       | "wavy"
       | "straight"
-      | "deleteLineation"
       | "note"
+      | "find"
       | "askAi",
   ) {
     if (action === "note") {
@@ -1006,6 +1059,11 @@ export function useReaderAnnotations(opts: {
       );
       return;
     }
+    if (action === "find") {
+      closeToolbarUi();
+      opts.emitFindWithQuote(text);
+      return;
+    }
     if (action === "askAi") {
       opts.emitAskAiWithQuote(text);
       /** 切换侧栏 / 聚焦 AI 输入框时避免误关工具条 */
@@ -1015,17 +1073,6 @@ export function useReaderAnnotations(opts: {
     if (action === "highlight") {
       colorPickerMode.value = "highlight";
       lineationPickerType.value = null;
-      return;
-    }
-    if (action === "deleteLineation") {
-      const ann = activeAnnotation();
-      if (!ann?.lineation) return;
-      if (ann.note?.content?.trim()) {
-        opts.emitUpsert({ ...ann, lineation: undefined, updatedAt: Date.now() });
-      } else {
-        opts.emitRemove(ann.id);
-        closeToolbarUi();
-      }
       return;
     }
     const typeMap = {
@@ -1120,6 +1167,8 @@ export function useReaderAnnotations(opts: {
       removeGlobalListeners = null;
       return;
     }
+    /** 首帧按估算宽度放置，挂载后按实测宽度再钳一次（含伸入侧栏） */
+    void nextTick(() => reflowToolbarPlacement());
     const onDocPointerDown = (ev: PointerEvent) => {
       if (floatRootRef.value?.contains(ev.target as Node)) return;
       if (notePanelRootRef.value?.contains(ev.target as Node)) return;
@@ -1175,6 +1224,9 @@ export function useReaderAnnotations(opts: {
         return;
       }
       applyLineation(type, colorIndex);
+    },
+    onLineationPickRemove: () => {
+      removeActiveLineation();
     },
     onNotePanelConfirm: (content: string) => {
       let ann = ensureNotePanelAnnotationRecord();

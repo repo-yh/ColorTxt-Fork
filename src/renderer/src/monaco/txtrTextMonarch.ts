@@ -163,6 +163,8 @@ export function createTxtrTextMonarchLanguage(
       root: [
         ...bracketOpenerRules(),
         [/"/, { token: "txtr.punctuation", next: "stringDouble" }],
+        /** 全角双引号 ＂（U+FF02），开闭同形 */
+        [/\uFF02/, { token: "txtr.punctuation", next: "stringDoubleFull" }],
         [/「/, { token: "txtr.punctuation", next: "stringCorner" }],
         [/『/, { token: "txtr.punctuation", next: "stringWhite" }],
         [/\u201C/, { token: "txtr.punctuation", next: "stringLdquo" }],
@@ -178,6 +180,15 @@ export function createTxtrTextMonarchLanguage(
       stringDouble: rulesInsideDelimited(
         /"/,
         '"',
+        "txtr.quoteInner",
+        hlRules,
+        insideColor,
+        true,
+      ),
+
+      stringDoubleFull: rulesInsideDelimited(
+        /\uFF02/,
+        "\uFF02",
         "txtr.quoteInner",
         hlRules,
         insideColor,

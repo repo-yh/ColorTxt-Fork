@@ -4,6 +4,7 @@ import type { BookSourceRecord } from "@shared/bookSource/types";
 import type { JsExtensionHost } from "./jsExtensions";
 import {
   fixRhinoBareArrayArrowParams,
+  fixRhinoLetExpressions,
   fixRhinoParamLetRedeclarations,
   LEGADO_FOREACH_SERIAL_NAME,
   prepareJsLibAsyncBody,
@@ -31,7 +32,7 @@ type SharedScopeEntry = {
 const scopeCache = new Map<string, SharedScopeEntry>();
 
 /** java.lang.String 等 shim / jsLib 异步预处理变更时递增，避免沿用过期 sandbox */
-const JS_LIB_SHIM_VERSION = "16";
+const JS_LIB_SHIM_VERSION = "17";
 
 /**
  * 串行 forEach：对齐 Rhino 同步阻塞；供 rewriteAsyncForEachSerial 注入调用。
@@ -172,8 +173,10 @@ function prepareJsLib(script: string): {
   asyncFunctionNames: string[];
 } {
   const normalized = fixRhinoParamLetRedeclarations(
-    fixRhinoDoubleDotPropertyAccess(
-      fixRhinoBareArrayArrowParams(script.trim()),
+    fixRhinoLetExpressions(
+      fixRhinoDoubleDotPropertyAccess(
+        fixRhinoBareArrayArrowParams(script.trim()),
+      ),
     ),
   );
   return prepareJsLibAsyncBody(normalized);

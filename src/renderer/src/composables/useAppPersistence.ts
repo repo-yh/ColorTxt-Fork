@@ -150,6 +150,10 @@ import {
 } from "../constants/timedScroll";
 import { mergePomodoroSettings } from "../constants/pomodoro";
 import {
+  mergeSelectionToolbarButtons,
+  type SelectionToolbarButtons,
+} from "../constants/selectionToolbar";
+import {
   collectVoiceReadProfileApiKeys,
   hydrateVoiceReadProfilesApiKeys,
   mergeVoiceReadProfileSecretsForSave,
@@ -261,6 +265,7 @@ export function useAppPersistence(deps: {
   fullscreenShowSystemTime: Ref<boolean>;
   timedScrollSettings: Ref<TimedScrollSettings>;
   pomodoroSettings: Ref<import("../constants/pomodoro").PomodoroSettings>;
+  selectionToolbarButtons: Ref<SelectionToolbarButtons>;
   fileMetaRecords: Ref<FileMetaRecord[]>;
   shortcutBindings: Ref<ShortcutBindingMap>;
   defaultShortcutBindings: ShortcutBindingMap;
@@ -400,6 +405,7 @@ export function useAppPersistence(deps: {
       fullscreenShowSystemTime: deps.fullscreenShowSystemTime.value,
       timedScroll: deps.timedScrollSettings.value,
       pomodoro: deps.pomodoroSettings.value,
+      selectionToolbarButtons: deps.selectionToolbarButtons.value,
       shortcutBindings: deps.shortcutBindings.value,
       // 空对象也要写入：合并落盘时若用 undefined 会跳过，磁盘上旧覆盖无法清除（恢复默认失效）
       readerPaletteOverridesLight: {
@@ -1324,6 +1330,9 @@ export function useAppPersistence(deps: {
         data.timedScroll,
       );
       deps.pomodoroSettings.value = mergePomodoroSettings(data.pomodoro);
+      deps.selectionToolbarButtons.value = mergeSelectionToolbarButtons(
+        data.selectionToolbarButtons,
+      );
     }
     deps.shortcutBindings.value = mergeShortcutBindings(
       deps.defaultShortcutBindings,

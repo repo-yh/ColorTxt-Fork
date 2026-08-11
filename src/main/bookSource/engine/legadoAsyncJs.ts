@@ -8,6 +8,7 @@
  * 3. 正则 `\ ({1,4}`（空格后误写 `({n,m}`）→ `( {1,4}`，否则 V8 `Nothing to repeat`
  * 4. `function f(key){ let key = … }` — Rhino 允许形参与 let 同名，V8 会 SyntaxError
  * 5. 零宽/格式字符（如 `getSource\u200b()`）— Rhino 可跑，V8 `missing ) after argument list`
+ * 6. `let (x = expr) body` — Mozilla JS 1.7 let 表达式；V8 `Unexpected identifier`
  */
 
 /**
@@ -33,6 +34,77 @@ export function fixRhinoBareArrayArrowParams(script: string): string {
  */
 export function fixRhinoIncompatibleRegexLiterals(script: string): string {
   return script.replace(/\\ \(\{(\d+(?:,\d*)?)\}/g, "( {$1}");
+}
+
+/**
+ * Rhino/Mozilla JS 1.7 let 表达式：`let (x = expr) body` / `let (a=1, b=2) body`。
+ * V8 抛 `SyntaxError: Unexpected identifier '…'`，整段 jsLib 加载失败后，
+ * 源内自定义 `function Map` 进不了作用域，发现分类再写 `Map('…')` 会撞原生构造器。
+ * 改写为 `((x = expr), (body))`（绑定侧已有 `let x` 声明时即为赋值）。
+ */
+export function fixRhinoLetExpressions(script: string): string {
+  if (!/\blet\s*\(/.test(script)) return script;
+  const held: string[] = [];
+  const masked = script.replace(
+    /`(?:\\[\s\S]|\$\{(?:[^{}]|\{[^}]*\})*\}|[^`\\$]|\$(?!\{))*`|'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"/g,
+    (m) => {
+      held.push(m);
+      return `\0STR${held.length - 1}\0`;
+    },
+  );
+  let out = "";
+  let i = 0;
+  while (i < masked.length) {
+    const rest = masked.slice(i);
+    const m = /\blet\s*\(/.exec(rest);
+    if (!m || m.index == null) {
+      out += masked.slice(i);
+      break;
+    }
+    const start = i + m.index;
+    out += masked.slice(i, start);
+    const bindOpen = start + m[0].length - 1;
+    const bindClose = findMatchingParen(masked, bindOpen);
+    if (bindClose < 0) {
+      out += masked.slice(start);
+      break;
+    }
+    const bindings = masked.slice(bindOpen + 1, bindClose).trim();
+    // 须像 `id = expr`（可多组逗号分隔）；否则原样保留
+    if (!/^[\w$]+\s*=/.test(bindings)) {
+      out += masked.slice(start, bindClose + 1);
+      i = bindClose + 1;
+      continue;
+    }
+    let bodyStart = bindClose + 1;
+    while (bodyStart < masked.length && /\s/.test(masked[bodyStart]!)) {
+      bodyStart++;
+    }
+    let depth = 0;
+    let bodyEnd = bodyStart;
+    for (; bodyEnd < masked.length; bodyEnd++) {
+      const ch = masked[bodyEnd]!;
+      if (ch === "(" || ch === "[" || ch === "{") {
+        depth++;
+        continue;
+      }
+      if (ch === ")" || ch === "]" || ch === "}") {
+        if (depth === 0) break;
+        depth--;
+        continue;
+      }
+      if (ch === ";" && depth === 0) break;
+    }
+    const body = masked.slice(bodyStart, bodyEnd).trim();
+    if (!body) {
+      out += masked.slice(start, bodyEnd);
+      i = bodyEnd;
+      continue;
+    }
+    out += `((${bindings}), (${body}))`;
+    i = bodyEnd;
+  }
+  return out.replace(/\0STR(\d+)\0/g, (_, n) => held[Number(n)]!);
 }
 
 /**
@@ -1510,6 +1582,7 @@ export function prepareLegadoJs(script: string): string {
   }
   s = fixRhinoBareArrayArrowParams(s);
   s = fixRhinoIncompatibleRegexLiterals(s);
+  s = fixRhinoLetExpressions(s);
   s = fixRhinoParamLetRedeclarations(s);
   s = ensureLegadoWithBlockReturn(s);
   s = ensureLegadoIfElseBranchReturn(s);

@@ -64,6 +64,7 @@ function createFindBookSettingsStore() {
   const showChapterTag = ref(initial.showChapterTag);
   const timedScrollSettings = ref(initial.timedScrollSettings);
   const pomodoroSettings = ref(initial.pomodoroSettings);
+  const selectionToolbarButtons = ref(initial.selectionToolbarButtons);
 
   /** 阅读/编辑共用字段落盘基线（不把磁盘合并进本窗内存） */
   const readerUiPersistBaseline: Record<string, unknown> = {};
@@ -114,6 +115,7 @@ function createFindBookSettingsStore() {
       fullscreenShowSystemTime: fullscreenShowSystemTime.value,
       timedScrollSettings: timedScrollSettings.value,
       pomodoroSettings: pomodoroSettings.value,
+      selectionToolbarButtons: selectionToolbarButtons.value,
     };
   }
 
@@ -183,6 +185,7 @@ function createFindBookSettingsStore() {
     fullscreenShowSystemTime.value = shared.fullscreenShowSystemTime;
     timedScrollSettings.value = shared.timedScrollSettings;
     pomodoroSettings.value = shared.pomodoroSettings;
+    selectionToolbarButtons.value = shared.selectionToolbarButtons;
     captureReaderUiPersistBaseline();
   }
 
@@ -233,6 +236,7 @@ function createFindBookSettingsStore() {
     showChapterTag,
     timedScrollSettings,
     pomodoroSettings,
+    selectionToolbarButtons,
     persistAll,
     persistReaderUiPrefs,
     hydrateSharedReaderFromMain,

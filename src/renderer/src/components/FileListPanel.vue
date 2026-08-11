@@ -6,6 +6,7 @@ import {
   onMounted,
   reactive,
   ref,
+  shallowRef,
   useTemplateRef,
   watch,
   type ComponentPublicInstance,
@@ -245,10 +246,34 @@ const fileByPath = computed(() => {
   return m;
 });
 
-const fileTreeRoots = computed(() => {
-  if (!isTreeMode.value) return [];
-  return buildFilePathTree(props.filesFiltered, props.fileSort);
+/**
+ * 树结构指纹：仅 path/size/name/排序，不含 category。
+ * 改分类时 filesFiltered 会换新数组，但指纹不变 → 不重建树、不重置展开。
+ */
+const fileTreeStructureKey = computed(() => {
+  if (!isTreeMode.value) return "";
+  const parts = props.filesFiltered.map(
+    (f) => `${f.path}\0${f.size}\0${f.name}`,
+  );
+  return `${props.fileSort}\n${parts.join("\n")}`;
 });
+
+const fileTreeRoots = shallowRef<FileListTreeNode[]>([]);
+
+watch(
+  fileTreeStructureKey,
+  (key) => {
+    if (!key) {
+      fileTreeRoots.value = [];
+      return;
+    }
+    fileTreeRoots.value = buildFilePathTree(
+      props.filesFiltered,
+      props.fileSort,
+    );
+  },
+  { immediate: true },
+);
 
 /** 展开的目录 fullDirPath（初始化/切换分类：仅当前文件路径上的目录，或全收起） */
 const expandedFolderPaths = ref<Set<string>>(new Set());
@@ -400,6 +425,21 @@ async function scrollTreeToCurrentFile(mode: "edge" | "center" = "center") {
   await scrollTreeToCurrentFileRow(mode);
 }
 
+async function scrollListToCurrentFile(mode: "edge" | "center" = "center") {
+  await nextTick();
+  if (isTreeMode.value || !props.panelVisible) return;
+  const path = props.currentFilePath;
+  if (!path) return;
+  const idx = props.filesFiltered.findIndex((f) => f.path === path);
+  if (idx < 0) return;
+  const vl = listRef.value;
+  if (!vl) return;
+  vl.scrollToIndex(idx, {
+    align: mode === "center" ? "center" : "auto",
+    behavior: "auto",
+  });
+}
+
 watch(
   () => props.shouldCenterFileList,
   (v) => {
@@ -409,9 +449,17 @@ watch(
 );
 
 watch(isTreeMode, (tree) => {
-  if (tree && props.currentFilePath && props.panelVisible) {
+  if (!props.currentFilePath || !props.panelVisible) return;
+  if (tree) {
     void scrollTreeToCurrentFile("center");
+    return;
   }
+  // 树 → 列表：VirtualList 换键后需等一帧再定位
+  void nextTick(() => {
+    requestAnimationFrame(() => {
+      void scrollListToCurrentFile("center");
+    });
+  });
 });
 
 const filterVisible = ref(false);

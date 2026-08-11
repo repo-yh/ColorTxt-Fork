@@ -44,6 +44,10 @@ import {
   mergePomodoroSettings,
   type PomodoroSettings,
 } from "../../constants/pomodoro";
+import {
+  mergeSelectionToolbarButtons,
+  type SelectionToolbarButtons,
+} from "../../constants/selectionToolbar";
 import { READER_EDITOR_DEFAULT_FONT_FAMILY } from "../../monaco/readerEditorOptions";
 import {
   resolveDefaultBookSourceDownloadDirSync,
@@ -162,6 +166,7 @@ export type SharedReaderSettingsSnapshot = {
   fullscreenShowSystemTime: boolean;
   timedScrollSettings: TimedScrollSettings;
   pomodoroSettings: PomodoroSettings;
+  selectionToolbarButtons: SelectionToolbarButtons;
 };
 
 export function sharedReaderSettingsFromMainData(
@@ -271,6 +276,9 @@ export function sharedReaderSettingsFromMainData(
         : defaultFullscreenShowSystemTime,
     timedScrollSettings: mergeTimedScrollSettings(data.timedScroll),
     pomodoroSettings: mergePomodoroSettings(data.pomodoro),
+    selectionToolbarButtons: mergeSelectionToolbarButtons(
+      data.selectionToolbarButtons,
+    ),
   };
 }
 
@@ -307,6 +315,7 @@ export function snapshotSharedReaderSettingsForMain(
     fullscreenShowSystemTime: state.fullscreenShowSystemTime,
     timedScroll: state.timedScrollSettings,
     pomodoro: state.pomodoroSettings,
+    selectionToolbarButtons: state.selectionToolbarButtons,
   };
 }
 

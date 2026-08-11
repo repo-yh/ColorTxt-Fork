@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { lineationColorAt } from "../constants/annotationColors";
+import type { SelectionToolbarButtons } from "../constants/selectionToolbar";
 import { icons } from "../icons";
 import type {
   ReaderLineationType,
@@ -13,8 +14,8 @@ type ToolbarAction =
   | "marker"
   | "wavy"
   | "straight"
-  | "deleteLineation"
   | "note"
+  | "find"
   | "askAi";
 
 const props = defineProps<{
@@ -32,6 +33,7 @@ const props = defineProps<{
   lineationPickerSelectedIndex: number;
   monacoCustomHighlight: boolean;
   aiFeaturesEnabled: boolean;
+  selectionToolbarButtons: SelectionToolbarButtons;
   hasLineation: boolean;
   hasNote: boolean;
 }>();
@@ -41,7 +43,14 @@ const emit = defineEmits<{
   highlightPickConfirm: [colorIndex: number];
   highlightPickRemove: [];
   lineationPickConfirm: [colorIndex: number];
+  lineationPickRemove: [];
 }>();
+
+const showPickerRemove = computed(
+  () =>
+    (props.colorPickerMode === "highlight" && props.showHighlightRemoveRow) ||
+    (props.colorPickerMode === "lineation" && props.hasLineation),
+);
 
 const lineationActions: Array<{
   id: "marker" | "wavy" | "straight";
@@ -120,20 +129,20 @@ function isPickerSwatchSelected(index: number): boolean {
     <div v-show="pickerVisible" class="selPicker">
       <div
         class="selPickerBody"
-        :class="{
-          'selPickerBody--withRemove':
-            colorPickerMode === 'highlight' && showHighlightRemoveRow,
-        }"
+        :class="{ 'selPickerBody--withRemove': showPickerRemove }"
       >
-        <div
-          v-if="colorPickerMode === 'highlight' && showHighlightRemoveRow"
-          class="selPickerRemoveCol"
-        >
+        <div v-if="showPickerRemove" class="selPickerRemoveCol">
           <button
             type="button"
             class="selSwatch selRemoveKeyword"
-            aria-label="移除该高亮词"
-            @click="emit('highlightPickRemove')"
+            :aria-label="
+              colorPickerMode === 'highlight' ? '移除该高亮词' : '移除划线'
+            "
+            @click="
+              colorPickerMode === 'highlight'
+                ? emit('highlightPickRemove')
+                : emit('lineationPickRemove')
+            "
           >
             <span
               class="selRemoveKeywordInner"
@@ -181,6 +190,7 @@ function isPickerSwatchSelected(index: number): boolean {
 
     <div v-show="toolbarVisible" class="selToolbar">
       <button
+        v-if="selectionToolbarButtons.copy"
         type="button"
         class="selAction"
         aria-label="复制"
@@ -285,20 +295,6 @@ function isPickerSwatchSelected(index: number): boolean {
         <span class="selActionLabel">{{ item.label }}</span>
       </button>
       <button
-        v-if="hasLineation"
-        type="button"
-        class="selAction"
-        aria-label="移除划线"
-        @pointerdown.prevent="emit('action', 'deleteLineation')"
-      >
-        <span
-          class="selActionIcon"
-          aria-hidden="true"
-          v-html="icons.deleteLineation"
-        ></span>
-        <span class="selActionLabel">移除划线</span>
-      </button>
-      <button
         type="button"
         class="selAction"
         :class="{ 'selAction--noteActive': hasNote }"
@@ -314,7 +310,21 @@ function isPickerSwatchSelected(index: number): boolean {
         <span class="selActionLabel">记笔记</span>
       </button>
       <button
-        v-if="aiFeaturesEnabled"
+        v-if="selectionToolbarButtons.find"
+        type="button"
+        class="selAction"
+        aria-label="查找"
+        @pointerdown.prevent="emit('action', 'find')"
+      >
+        <span
+          class="selActionIcon"
+          aria-hidden="true"
+          v-html="icons.find"
+        ></span>
+        <span class="selActionLabel">查找</span>
+      </button>
+      <button
+        v-if="aiFeaturesEnabled && selectionToolbarButtons.askAi"
         type="button"
         class="selAction"
         aria-label="问 AI"
