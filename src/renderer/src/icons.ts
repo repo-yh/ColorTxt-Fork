@@ -15,6 +15,8 @@ import exploreIcon from "./assets/explore.svg?raw";
 import bookshelfIcon from "./assets/bookshelf.svg?raw";
 import filterIcon from "./assets/filter.svg?raw";
 import regExpIcon from "./assets/RegExp.svg?raw";
+import reIcon from "./assets/re.svg?raw";
+import reFillIcon from "./assets/reFill.svg?raw";
 import githubIcon from "./assets/GitHub.svg?raw";
 import shortcutIcon from "./assets/shortcut.svg?raw";
 import newWindowIcon from "./assets/new_window.svg?raw";
@@ -159,6 +161,8 @@ export const icons = {
   bookshelf: bookshelfIcon,
   filter: filterIcon,
   regExp: regExpIcon,
+  re: reIcon,
+  reFill: reFillIcon,
   github: githubIcon,
   shortcut: shortcutIcon,
   newWindow: newWindowIcon,

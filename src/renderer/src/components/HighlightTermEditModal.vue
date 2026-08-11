@@ -54,6 +54,7 @@ const emit = defineEmits<{
 const draftTerms = ref<string[]>([]);
 const draftColorIndex = ref(0);
 const draftInput = ref("");
+const isRegexMode = ref(false);
 const inputEl = ref<HTMLInputElement | null>(null);
 const tagInputRef = ref<HTMLElement | null>(null);
 const colorBtnRef = ref<HTMLButtonElement | null>(null);
@@ -253,6 +254,21 @@ function focusInput() {
           @blur="onInputBlur"
         />
       </div>
+      <button
+        type="button"
+        class="hlEditRegexBtn"
+        :class="{ 'hlEditRegexBtn--active': isRegexMode }"
+        :title="isRegexMode ? '正则模式已开启' : '正则模式'"
+        :aria-label="isRegexMode ? '关闭正则模式' : '开启正则模式'"
+        :aria-pressed="isRegexMode ? 'true' : 'false'"
+        @click="isRegexMode = !isRegexMode"
+      >
+        <span
+          class="hlEditRegexIcon"
+          aria-hidden="true"
+          v-html="isRegexMode ? icons.reFill : icons.re"
+        />
+      </button>
       <button
         ref="colorBtnRef"
         type="button"
@@ -475,6 +491,43 @@ function focusInput() {
 }
 
 .hlEditColorIcon :deep(svg) {
+  width: 18px;
+  height: 18px;
+  display: block;
+}
+
+.hlEditRegexBtn {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0.65;
+  transition: opacity 0.15s, border-color 0.15s;
+}
+
+.hlEditRegexBtn:hover,
+.hlEditRegexBtn--active {
+  opacity: 1;
+}
+
+.hlEditRegexBtn--active {
+  border-color: var(--accent, var(--primary));
+  background: color-mix(in srgb, var(--accent, var(--primary)) 10%, var(--bg));
+}
+
+.hlEditRegexIcon {
+  display: inline-flex;
+  width: 18px;
+  height: 18px;
+}
+
+.hlEditRegexIcon :deep(svg) {
   width: 18px;
   height: 18px;
   display: block;

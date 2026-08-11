@@ -146,6 +146,7 @@ import { useReaderAnnotations } from "../composables/useReaderAnnotations";
 import { annotationMarkerCssRules } from "../reader/readerAnnotationDecor";
 import { floorReadingPercentFromScrollRatio } from "../utils/format";
 import { bookTitleForExport } from "../utils/readerAnnotationExport";
+import { buildHighlightFindQuery } from "../utils/highlightWords";
 import {
   hasEscBeforeModalLayers,
   hasModalOnStack,
@@ -3016,12 +3017,27 @@ function countHighlightTermMatches(
   const modelToUse = m ?? model.value;
   if (!modelToUse) return terms.map((t) => ({ ...t, matchCount: 0 }));
   return terms.map((t) => {
-    const q = t.terms[0]?.trim();
-    if (!q) return { ...t, matchCount: 0 };
+    const { query, useRegex } = buildHighlightFindQuery(t.terms);
+    if (!query) return { ...t, matchCount: 0 };
     const matches = modelToUse.findMatches(
-      q, false, false, false, null, false,
+      query, false, useRegex, false, null, false,
     );
-    return { ...t, matchCount: matches?.length ?? 0 };
+    const termMatchCounts: number[] = [];
+    if (t.terms.length > 1) {
+      for (const term of t.terms) {
+        const q = term.trim();
+        if (!q) { termMatchCounts.push(0); continue; }
+        const m = modelToUse.findMatches(
+          q, false, false, false, null, false,
+        );
+        termMatchCounts.push(m?.length ?? 0);
+      }
+    }
+    return {
+      ...t,
+      matchCount: matches?.length ?? 0,
+      ...(termMatchCounts.length ? { termMatchCounts } : {}),
+    };
   });
 }
 

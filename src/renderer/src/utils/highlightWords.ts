@@ -12,6 +12,8 @@ export type HighlightListTerm = {
   isFavorited: boolean;
   /** 当前文件中该词的出现次数 */
   matchCount: number;
+  /** 展开时每个词的独立匹配数（与 terms 一一对应） */
+  termMatchCounts?: number[];
 };
 
 const MAX_HIGHLIGHT_TERM_LEN = 100;

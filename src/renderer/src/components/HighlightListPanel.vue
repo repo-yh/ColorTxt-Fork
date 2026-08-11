@@ -296,8 +296,7 @@ function onEditCommit(payload: HighlightTermEditCommit) {
 
 function onMoreSelect(action: string) {
   closeMoreMenu();
-  if (action === "add") openAddModal();
-  else if (action === "exportBook") emit("exportBookHighlightsJson");
+  if (action === "exportBook") emit("exportBookHighlightsJson");
   else if (action === "importBook") emit("importBookHighlightsJson");
   else if (action === "exportFavorite") emit("exportFavoriteHighlightsJson");
   else if (action === "importFavorite") emit("importFavoriteHighlightsJson");
@@ -549,8 +548,8 @@ function termDropPlaceClass(
     return undefined;
   }
   return d.place === "before"
-    ? "highlightTermPart--dropBefore"
-    : "highlightTermPart--dropAfter";
+    ? "highlightTermRow--dropBefore"
+    : "highlightTermRow--dropAfter";
 }
 
 function onDragEnd() {
@@ -741,34 +740,37 @@ function onItemDrop(item: HighlightListRow, ev: DragEvent) {
               @dragover="onExpandTermsDragOver(item, $event)"
               @drop="onExpandTermsDrop(item, $event)"
             >
-              <template v-for="(term, ti) in item.terms" :key="ti">
+              <div
+                v-for="(term, ti) in item.terms"
+                :key="ti"
+                class="highlightTermRow"
+                :class="[
+                  {
+                    'highlightTermRow--dragging':
+                      dragSourceTermKey === termDragKey(item.listKey, ti),
+                  },
+                  termDropPlaceClass(item, ti),
+                ]"
+                :title="termTitle(term)"
+                draggable="true"
+                @click="onTermClick(item, ti, $event)"
+                @dragstart="onTermDragStart(item, ti, $event)"
+                @dragend="onDragEnd"
+                @dragover="onTermDragOver(item, ti, $event)"
+                @dragleave="onTermDragLeave(item, ti, $event)"
+                @drop="onTermDrop(item, ti, $event)"
+              >
+                <span class="highlightTermPart" :style="{ color: item.color }">
+                  {{ term }}
+                </span>
                 <span
-                  v-if="ti > 0"
-                  class="highlightTermSep"
-                  aria-hidden="true"
-                  >|</span
+                  v-if="(item.termMatchCounts?.[ti] ?? 0) > 0"
+                  class="highlightMatchCount"
+                  :title="`${item.termMatchCounts![ti]} 处匹配`"
                 >
-                <span
-                  class="highlightTermPart"
-                  :class="[
-                    {
-                      'highlightTermPart--dragging':
-                        dragSourceTermKey === termDragKey(item.listKey, ti),
-                    },
-                    termDropPlaceClass(item, ti),
-                  ]"
-                  :title="termTitle(term)"
-                  :style="{ color: item.color }"
-                  draggable="true"
-                  @click="onTermClick(item, ti, $event)"
-                  @dragstart="onTermDragStart(item, ti, $event)"
-                  @dragend="onDragEnd"
-                  @dragover="onTermDragOver(item, ti, $event)"
-                  @dragleave="onTermDragLeave(item, ti, $event)"
-                  @drop="onTermDrop(item, ti, $event)"
-                  >{{ term }}</span
-                >
-              </template>
+                  {{ item.termMatchCounts![ti] }}
+                </span>
+              </div>
             </div>
           </template>
           <template v-else>
@@ -835,6 +837,13 @@ function onItemDrop(item: HighlightListRow, ev: DragEvent) {
                   >
                 </template>
               </template>
+            </span>
+            <span
+              v-if="item.matchCount > 0"
+              class="highlightMatchCount"
+              :title="`${item.matchCount} 处匹配`"
+            >
+              {{ item.matchCount }}
             </span>
             <div class="highlightItemActions" @mousedown.stop>
               <button
@@ -912,16 +921,6 @@ function onItemDrop(item: HighlightListRow, ev: DragEvent) {
       :on-panel-mount="bindMorePanel"
       aria-label="高亮词更多"
     >
-      <button
-        type="button"
-        class="appShellMenuItem"
-        role="menuitem"
-        :disabled="!currentFilePath"
-        @click="onMoreSelect('add')"
-      >
-        添加高亮词
-      </button>
-      <div class="appShellMenuDivider" role="separator" />
       <button
         type="button"
         class="appShellMenuItem"
@@ -1130,17 +1129,28 @@ function onItemDrop(item: HighlightListRow, ev: DragEvent) {
   opacity: 0.45;
 }
 
-.highlightTermPart--dropBefore {
+.highlightTermRow--dropBefore {
   box-shadow: inset 2px 0 0 var(--accent, var(--primary));
 }
 
-.highlightTermPart--dropAfter {
+.highlightTermRow--dropAfter {
   box-shadow: inset -2px 0 0 var(--accent, var(--primary));
 }
 
 .highlightItemExpandTerms .highlightTermPart {
   cursor: pointer;
   white-space: nowrap;
+}
+
+.highlightTermRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1px 0;
+}
+
+.highlightTermRow--dragging {
+  opacity: 0.4;
 }
 
 .highlightTermSep {
