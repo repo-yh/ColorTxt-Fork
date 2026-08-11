@@ -628,6 +628,27 @@ export function useAppHighlightTerms(deps: {
     hasInlineSearchHighlight.value = found === true;
   }
 
+  function onFindHighlightTermPrevFromSidebar(payload: {
+    query: string;
+    useRegex: boolean;
+  }) {
+    if (
+      !deps.currentFile.value ||
+      deps.loading.value ||
+      deps.totalLineCount.value <= 0
+    )
+      return;
+    if (deps.isVoiceReadNavigationBlocked.value) return;
+    const q = payload.query.trim();
+    if (!q) return;
+    deps.ensurePinBeforeRevealFindWidget();
+    deps.readerRef.value?.openFindWithSearchString?.(
+      q,
+      payload.useRegex,
+      "prev",
+    );
+  }
+
   return {
     currentFileHighlightWords,
     mergedHighlightWordsForReader,
@@ -649,5 +670,6 @@ export function useAppHighlightTerms(deps: {
     onExportFavoriteHighlightsJson,
     onImportFavoriteHighlightsJson,
     onFindHighlightTermFromSidebar,
+    onFindHighlightTermPrevFromSidebar,
   };
 }

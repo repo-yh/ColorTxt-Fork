@@ -212,6 +212,7 @@ export function useReaderInlineSearch(deps: {
       wholeWord?: boolean;
       useRegex?: boolean;
       smooth?: boolean;
+      direction?: "prev" | "next";
     },
   ): boolean {
     const e = deps.editor.value;
@@ -233,13 +234,25 @@ export function useReaderInlineSearch(deps: {
       return false;
     }
     const pos = e.getPosition() ?? { lineNumber: 1, column: 1 };
-    let idx = matches.findIndex((it) => {
-      const r = it.range;
-      if (r.startLineNumber > pos.lineNumber) return true;
-      if (r.startLineNumber < pos.lineNumber) return false;
-      return r.startColumn > pos.column;
-    });
-    if (idx < 0) idx = 0;
+    const prev = options?.direction === "prev";
+    let idx: number;
+    if (prev) {
+      idx = -1;
+      for (let i = matches.length - 1; i >= 0; i--) {
+        const r = matches[i]!.range;
+        if (r.startLineNumber < pos.lineNumber) { idx = i; break; }
+        if (r.startLineNumber === pos.lineNumber && r.startColumn < pos.column) { idx = i; break; }
+      }
+      if (idx < 0) idx = matches.length - 1;
+    } else {
+      idx = matches.findIndex((it) => {
+        const r = it.range;
+        if (r.startLineNumber > pos.lineNumber) return true;
+        if (r.startLineNumber < pos.lineNumber) return false;
+        return r.startColumn > pos.column;
+      });
+      if (idx < 0) idx = 0;
+    }
     const target = matches[idx]!.range;
     inlineSearchCurrentMatch = {
       lineNumber: target.startLineNumber,

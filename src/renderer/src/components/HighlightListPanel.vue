@@ -54,6 +54,7 @@ const props = withDefaults(
 
 const emit = defineEmits<{
   findHighlightTerm: [payload: { query: string; useRegex: boolean }];
+  findHighlightTermPrev: [payload: { query: string; useRegex: boolean }];
   removeHighlightTerm: [
     payload: { storedTerms: string[]; scope: "global" | "book" },
   ];
@@ -269,10 +270,18 @@ function onItemClick(item: HighlightListTerm) {
 /** 展开态：整组跳转只由 header 触发，行内空白不跳转 */
 function onHighlightItemClick(
   item: HighlightListRow,
-  _ev: MouseEvent,
+  ev: MouseEvent,
 ) {
   if (isItemExpanded(item)) return;
+  if (ev.button !== 0) return;
   onItemClick(item);
+}
+
+function onHighlightItemContextMenu(item: HighlightListRow) {
+  if (isItemExpanded(item)) return;
+  const { query, useRegex } = buildHighlightFindQuery(item.terms);
+  if (!query) return;
+  emit("findHighlightTermPrev", { query, useRegex });
 }
 
 function onTermClick(
@@ -288,6 +297,17 @@ function onTermClick(
   const term = item.terms[termIndex]?.trim();
   if (!term) return;
   emit("findHighlightTerm", { query: term, useRegex: false });
+}
+
+function onTermContextMenu(
+  item: HighlightListTerm,
+  termIndex: number,
+  ev: MouseEvent,
+) {
+  ev.stopPropagation();
+  const term = item.terms[termIndex]?.trim();
+  if (!term) return;
+  emit("findHighlightTermPrev", { query: term, useRegex: false });
 }
 
 function onEditCommit(payload: HighlightTermEditCommit) {
@@ -668,6 +688,7 @@ function onItemDrop(item: HighlightListRow, ev: DragEvent) {
           }"
           draggable="true"
           @click="onHighlightItemClick(item, $event)"
+          @contextmenu.prevent="onHighlightItemContextMenu(item)"
           @dragstart="onItemDragStart(item, $event)"
           @dragend="onDragEnd"
           @dragover="onItemDragOver(item, $event)"
@@ -754,6 +775,7 @@ function onItemDrop(item: HighlightListRow, ev: DragEvent) {
                 :title="termTitle(term)"
                 draggable="true"
                 @click="onTermClick(item, ti, $event)"
+                @contextmenu.prevent="onTermContextMenu(item, ti, $event)"
                 @dragstart="onTermDragStart(item, ti, $event)"
                 @dragend="onDragEnd"
                 @dragover="onTermDragOver(item, ti, $event)"
