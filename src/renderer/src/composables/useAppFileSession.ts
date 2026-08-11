@@ -120,10 +120,10 @@ export function useAppFileSession(deps: {
   bookPackPassword: Ref<string>;
   characterPortraitCacheDir: Ref<string>;
   /**
-   * 在合并进 `txtFiles` **之后**调用：传入本次新加入的路径；
-   * 若当前筛选为具体分类则写入列表项 `category`；为「全部 / 未分类」时不改。
+   * 在合并进 `txtFiles` **之后**调用：传入本次添加涉及的路径（新加入 + 已存在再次添加）；
+   * 若当前筛选非「全部」，则写入/清除列表项 `category`（具体分类名或「未分类」）。
    */
-  applyCurrentFileCategoryIfConcrete?: (newPaths: string[]) => void;
+  applyCurrentFileCategoryIfConcrete?: (paths: string[]) => void;
   /** 切书/关文件前：返回 false 表示用户取消（保留未保存编辑） */
   confirmIfReaderEditDiscard?: () => Promise<boolean>;
 }) {
@@ -731,7 +731,7 @@ export function useAppFileSession(deps: {
     let skipCount = 0;
     let failCount = 0;
     const knownBefore = new Set(deps.txtFiles.value.map((f) => f.path));
-    const newlyAddedPaths: string[] = [];
+    const categorizePaths = new Set<string>();
     const imported: Array<{ packPath: string; openPath: string }> = [];
 
     const setUnpacking = (v: boolean) => {
@@ -828,6 +828,7 @@ export function useAppFileSession(deps: {
 
         okCount += 1;
         imported.push({ packPath, openPath: result.openPath });
+        categorizePaths.add(result.openPath);
         if (result.usedPassword) {
           passwordBook = prependPasswordBook(passwordBook, result.usedPassword);
         }
@@ -836,7 +837,7 @@ export function useAppFileSession(deps: {
         for (const f of result.txtFiles) {
           if (!knownBefore.has(f.path)) {
             knownBefore.add(f.path);
-            newlyAddedPaths.push(f.path);
+            categorizePaths.add(f.path);
           }
         }
 
@@ -863,8 +864,8 @@ export function useAppFileSession(deps: {
       deps.bookPackUnpacking.value = false;
     }
 
-    if (newlyAddedPaths.length > 0) {
-      deps.applyCurrentFileCategoryIfConcrete?.(newlyAddedPaths);
+    if (categorizePaths.size > 0) {
+      deps.applyCurrentFileCategoryIfConcrete?.([...categorizePaths]);
     }
     persistFileListCache();
     persistFileMeta();
@@ -927,15 +928,12 @@ export function useAppFileSession(deps: {
           })
         );
       });
-      const knownPaths = new Set(deps.txtFiles.value.map((f) => f.path));
-      const newPaths = bookItems
-        .map((f) => f.path)
-        .filter((path) => !knownPaths.has(path));
+      const incomingPaths = bookItems.map((f) => f.path);
       deps.txtFiles.value = mergeTxtFileLists(
         deps.txtFiles.value,
         bookItems,
       );
-      deps.applyCurrentFileCategoryIfConcrete?.(newPaths);
+      deps.applyCurrentFileCategoryIfConcrete?.(incomingPaths);
       persistFileListCache();
       deps.sidebarTab.value = "files";
       centerFileListIfCurrentInList();
@@ -986,9 +984,8 @@ export function useAppFileSession(deps: {
     const unsub = subscribeDirListTxtScan();
     const packPaths: string[] = [];
     try {
-      const knownPaths = new Set(deps.txtFiles.value.map((f) => f.path));
       let merged = deps.txtFiles.value;
-      const newPaths: string[] = [];
+      const touchedPaths: string[] = [];
       for (const p of paths) {
         try {
           const st = await window.colorTxt.stat(p);
@@ -1001,10 +998,7 @@ export function useAppFileSession(deps: {
               .filter((x): x is NonNullable<typeof x> => Boolean(x))
               .map(normalizeTxtFileItem);
             for (const it of items) {
-              if (!knownPaths.has(it.path)) {
-                knownPaths.add(it.path);
-                newPaths.push(it.path);
-              }
+              touchedPaths.push(it.path);
             }
             merged = mergeTxtFileLists(merged, items);
           } else if (st.isFile && looksLikeZipBookPackCandidate(p)) {
@@ -1015,10 +1009,7 @@ export function useAppFileSession(deps: {
               path: p,
               size: st.size,
             });
-            if (!knownPaths.has(item.path)) {
-              knownPaths.add(item.path);
-              newPaths.push(item.path);
-            }
+            touchedPaths.push(item.path);
             merged = mergeTxtFileLists(merged, [item]);
           }
         } catch {
@@ -1026,7 +1017,7 @@ export function useAppFileSession(deps: {
         }
       }
       deps.txtFiles.value = merged;
-      deps.applyCurrentFileCategoryIfConcrete?.(newPaths);
+      deps.applyCurrentFileCategoryIfConcrete?.(touchedPaths);
       persistFileListCache();
       deps.sidebarTab.value = "files";
       centerFileListIfCurrentInList();

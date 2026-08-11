@@ -27,7 +27,7 @@ export type SidebarFileItem = {
   /**
    * 阅读进度（%）；`undefined` 表示尚未在 meta 中有记录（从未打开过），
    * 与 `0`（已打开且进度为 0%）不同；排序时会将无记录项固定排在最后。
-   * 列表行展示用 `metaProgressMap` + 实时进度；`fileRowsEnriched` 故意不写本字段，避免滚动时整表重算。
+   * 列表行展示用 `metaProgressMap` + 实时进度；「阅读进度」排序用切入时快照，避免滚动重排。
    */
   progress?: number;
   /**
@@ -70,7 +70,9 @@ export type ReaderSidebarListProps = Readonly<{
   fileCategory?: string;
   /** 文件列表排序 */
   fileSort?: FileSortMode;
-  /** 当前打开文件的实时进度（%）；仅「按阅读进度」排序时参与 `filesSorted`（勿用于打开时间排序，以免滚动时整表重算） */
+  /** 文件列表：列表 / 树状（树模式下当前文件居中由 FileListPanel 处理） */
+  fileListViewMode?: import("../constants/fileCategories").FileListViewMode;
+  /** 当前打开文件的实时进度（%）；切入「阅读进度」排序时写入快照，之后不参与重排 */
   liveReadingProgressPercent?: number;
   /** 与设置「章节最少字数」一致；0 表示保留无正文字数的目录项（如书名页） */
   chapterMinCharCount?: number;
@@ -234,11 +236,34 @@ export function useReaderSidebarLists(
     openedAtSortSnapshot.value = m;
   }
 
+  /**
+   * 「阅读进度」排序快照：与打开时间同理，滚动时实时进度只更新行展示，不重排；
+   * 仅在用户切入 progressAsc/Desc（含升降互切）时重拍。
+   */
+  const progressSortSnapshot = shallowRef(new Map<string, number>());
+
+  function refreshProgressSortSnapshot() {
+    const m = new Map<string, number>();
+    const map = props.metaProgressByPathKey ?? EMPTY_META_PROGRESS;
+    for (const [k, v] of map) {
+      if (typeof v === "number" && Number.isFinite(v)) m.set(k, v);
+    }
+    const cur = props.currentFilePath?.trim();
+    const live = props.liveReadingProgressPercent;
+    if (cur && typeof live === "number" && Number.isFinite(live)) {
+      m.set(fileHistoryKey(cur), live);
+    }
+    progressSortSnapshot.value = m;
+  }
+
   watch(
     () => props.fileSort ?? "nameAsc",
     (mode) => {
       if (mode === "lastReadAtAsc" || mode === "lastReadAtDesc") {
         refreshOpenedAtSortSnapshotFromMeta();
+      }
+      if (mode === "progressAsc" || mode === "progressDesc") {
+        refreshProgressSortSnapshot();
       }
     },
     { immediate: true },
@@ -294,9 +319,7 @@ export function useReaderSidebarLists(
   const filesSorted = computed(() => {
     const mode = props.fileSort ?? "nameAsc";
     const base = filesByCategory.value;
-    const needsArchivedProgressOnly =
-      mode === "lastReadAtAsc" || mode === "lastReadAtDesc";
-    if (needsArchivedProgressOnly) {
+    if (mode === "lastReadAtAsc" || mode === "lastReadAtDesc") {
       const map = props.metaProgressByPathKey ?? EMPTY_META_PROGRESS;
       const merged = base.map((f) => ({
         ...f,
@@ -304,19 +327,15 @@ export function useReaderSidebarLists(
       }));
       return sortFileList(merged, mode);
     }
-    if (mode !== "progressAsc" && mode !== "progressDesc") {
-      return sortFileList(base, mode);
+    if (mode === "progressAsc" || mode === "progressDesc") {
+      const snap = progressSortSnapshot.value;
+      const merged = base.map((f) => ({
+        ...f,
+        progress: snap.get(fileHistoryKey(f.path)),
+      }));
+      return sortFileList(merged, mode);
     }
-    const map = props.metaProgressByPathKey ?? EMPTY_META_PROGRESS;
-    const cur = props.currentFilePath;
-    const live = props.liveReadingProgressPercent;
-    const merged = base.map((f) => {
-      const key = fileHistoryKey(f.path);
-      const p =
-        cur === f.path && typeof live === "number" ? live : map.get(key);
-      return { ...f, progress: p };
-    });
-    return sortFileList(merged, mode);
+    return sortFileList(base, mode);
   });
 
   const filesFiltered = computed<SidebarFileItem[]>(() => {
@@ -539,6 +558,10 @@ export function useReaderSidebarLists(
     mode: "edge" | "center" = "edge",
     layoutRetry = 0,
   ): Promise<void> {
+    if ((props.fileListViewMode ?? "list") === "tree") {
+      // 树状扁平行索引与 filesFiltered 不一致，由 FileListPanel 滚入视口
+      return;
+    }
     await nextTick();
     const path = props.currentFilePath;
     if (!path) return;

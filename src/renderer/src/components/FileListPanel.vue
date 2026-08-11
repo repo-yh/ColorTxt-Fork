@@ -23,6 +23,7 @@ import { useFileListCategorySort } from "../composables/useFileListCategorySort"
 import { useFileListMenus } from "../composables/useFileListMenus";
 import { useFileListSelection } from "../composables/useFileListSelection";
 import type { FileCategoryDefinition } from "../constants/fileCategories";
+import type { FileListViewMode } from "../constants/fileCategories";
 import type { FileSortMode } from "../constants/fileCategories";
 import {
   FILE_CATEGORY_FILTER_ALL,
@@ -37,6 +38,17 @@ import {
   formatFileSize,
   isProgressComplete,
 } from "../utils/fileListPanelDisplay";
+import {
+  buildFilePathTree,
+  collectAncestorFolderKeysForFile,
+  collectFilesUnderDir,
+  collectFolderKeys,
+  findFileRowIndex,
+  flattenVisibleFileTreeRows,
+  rootFolderKeys,
+  type FileListTreeFlatRow,
+  type FileListTreeNode,
+} from "../utils/fileListTree";
 import { isPlainTextBookPath } from "../ebook/ebookFormat";
 import { icons } from "../icons";
 import { fileListEmptyHint, fileListDropHint, fileListNoMatchHint } from "../constants/appUi";
@@ -44,8 +56,10 @@ import { useAnchoredAppShellMenu } from "../composables/useAnchoredAppShellMenu"
 import AppShellMenuTeleport from "./AppShellMenuTeleport.vue";
 import { appToast } from "../services/appToast";
 import { appLoading } from "../services/appLoading";
+import { appConfirm } from "../services/appDialog";
 
 const FILES_HEADER_MORE_MENU_W = 140;
+const TREE_INDENT_PX = 14;
 
 const props = withDefaults(
   defineProps<{
@@ -57,16 +71,24 @@ const props = withDefaults(
     liveReadingProgressPercent?: number;
     fileCategory: string;
     fileSort: FileSortMode;
+    fileListViewMode?: FileListViewMode;
     fileCategoryCatalog: FileCategoryDefinition[];
     /** 全屏浮动侧栏是否展开；从展开变为收起时关闭 Teleport 到 body 的浮层 */
     showFullscreenSidebar?: boolean;
     /** 侧栏标题行「更多」按钮（锚定菜单） */
     menuAnchorEl?: HTMLButtonElement | null;
+    /** App 脉冲：将当前文件滚入视口并居中（树模式下由本面板处理） */
+    shouldCenterFileList?: boolean;
+    /** 侧栏当前是否显示本面板（隐藏时不主动滚动定位） */
+    panelVisible?: boolean;
   }>(),
   {
     metaProgressMap: () => new Map<string, number>(),
     liveReadingProgressPercent: undefined,
+    fileListViewMode: "list",
     menuAnchorEl: null,
+    shouldCenterFileList: false,
+    panelVisible: true,
   },
 );
 
@@ -201,13 +223,196 @@ defineExpose({
   moreOpen,
 });
 
+const listRef = ref<InstanceType<typeof VirtualList> | null>(null);
+
 function onBindListRef(value: Element | ComponentPublicInstance | null) {
   if (value && typeof value === "object" && "$el" in value) {
+    listRef.value = value as InstanceType<typeof VirtualList>;
     emit("bindListRef", value as InstanceType<typeof VirtualList>);
     return;
   }
+  listRef.value = null;
   emit("bindListRef", null);
 }
+
+const isTreeMode = computed(() => props.fileListViewMode === "tree");
+
+/** path → 列表项，避免树行渲染时对 filesFiltered 线性 find */
+const fileByPath = computed(() => {
+  const m = new Map<string, SidebarFileItem>();
+  for (const f of props.files) m.set(f.path, f as SidebarFileItem);
+  for (const f of props.filesFiltered) m.set(f.path, f);
+  return m;
+});
+
+const fileTreeRoots = computed(() => {
+  if (!isTreeMode.value) return [];
+  return buildFilePathTree(props.filesFiltered, props.fileSort);
+});
+
+/** 展开的目录 fullDirPath（初始化/切换分类：仅当前文件路径上的目录，或全收起） */
+const expandedFolderPaths = ref<Set<string>>(new Set());
+
+function folderExpandSetsEqual(a: Set<string>, b: Set<string>): boolean {
+  if (a.size !== b.size) return false;
+  for (const k of a) {
+    if (!b.has(k)) return false;
+  }
+  return true;
+}
+
+/**
+ * 初始化 / 列表重建（含切换分类）：
+ * - 当前打开文件在筛选列表中 → 只展开其祖先目录
+ * - 否则 → 全部收起
+ * @returns 是否应滚到当前文件
+ */
+function applyExpandForCurrentFileOnTreeRebuild(
+  roots: readonly FileListTreeNode[],
+): boolean {
+  const path = props.currentFilePath?.trim() ?? "";
+  const inList =
+    !!path && props.filesFiltered.some((f) => f.path === path);
+  if (!inList) {
+    if (expandedFolderPaths.value.size > 0) {
+      expandedFolderPaths.value = new Set();
+    }
+    return false;
+  }
+  const ancestors = collectAncestorFolderKeysForFile(roots, path);
+  if (!ancestors) {
+    if (expandedFolderPaths.value.size > 0) {
+      expandedFolderPaths.value = new Set();
+    }
+    return false;
+  }
+  const next = new Set(ancestors);
+  if (!folderExpandSetsEqual(next, expandedFolderPaths.value)) {
+    expandedFolderPaths.value = next;
+  }
+  return true;
+}
+
+async function scrollTreeToCurrentFileRow(
+  mode: "edge" | "center" = "center",
+) {
+  await nextTick();
+  if (!isTreeMode.value || !props.panelVisible) return;
+  const path = props.currentFilePath;
+  if (!path) return;
+  const idx = findFileRowIndex(treeFlatRows.value, path);
+  if (idx < 0) return;
+  const vl = listRef.value;
+  if (!vl) return;
+  vl.scrollToIndex(idx, {
+    align: mode === "center" ? "center" : "auto",
+    behavior: "auto",
+  });
+}
+
+watch(
+  fileTreeRoots,
+  (roots) => {
+    if (roots.length === 0) {
+      if (expandedFolderPaths.value.size > 0) {
+        expandedFolderPaths.value = new Set();
+      }
+      return;
+    }
+    const shouldScroll = applyExpandForCurrentFileOnTreeRebuild(roots);
+    if (shouldScroll && props.panelVisible) {
+      void scrollTreeToCurrentFileRow("center");
+    }
+  },
+  { immediate: true },
+);
+
+const treeFlatRows = computed((): FileListTreeFlatRow[] => {
+  if (!isTreeMode.value) return [];
+  return flattenVisibleFileTreeRows(
+    fileTreeRoots.value,
+    expandedFolderPaths.value,
+  );
+});
+
+const displayItemCount = computed(() =>
+  isTreeMode.value ? treeFlatRows.value.length : props.filesFiltered.length,
+);
+
+const treeItemKeyFn = (i: number): string | number => treeRowKey(i);
+const listItemKeyFn = (i: number): string | number =>
+  props.filesFiltered[i]?.path ?? i;
+
+function treeRowKey(index: number): string {
+  const row = treeFlatRows.value[index];
+  if (!row) return `i:${index}`;
+  if (row.kind === "folder") return `d:${row.fullDirPath}`;
+  return `f:${row.file.path}`;
+}
+
+function toggleFolderExpanded(fullDirPath: string) {
+  const next = new Set(expandedFolderPaths.value);
+  if (next.has(fullDirPath)) next.delete(fullDirPath);
+  else next.add(fullDirPath);
+  expandedFolderPaths.value = next;
+}
+
+function onTreeFolderClick(fullDirPath: string) {
+  toggleFolderExpanded(fullDirPath);
+}
+
+const treeRootFolderKeys = computed(() => rootFolderKeys(fileTreeRoots.value));
+
+/** 所有根文件夹均折叠 → 显示「全部展开」；否则「全部折叠」 */
+const allRootFoldersCollapsed = computed(() => {
+  const roots = treeRootFolderKeys.value;
+  if (roots.length === 0) return true;
+  return roots.every((k) => !expandedFolderPaths.value.has(k));
+});
+
+function onToggleExpandAllFolders() {
+  if (allRootFoldersCollapsed.value) {
+    expandedFolderPaths.value = collectFolderKeys(fileTreeRoots.value);
+  } else {
+    expandedFolderPaths.value = new Set();
+  }
+}
+
+function fileItemFromPath(path: string): SidebarFileItem | undefined {
+  return fileByPath.value.get(path);
+}
+
+/** 打开/居中当前文件时：展开其路径（可保留其它已展开目录）并滚入视口 */
+async function scrollTreeToCurrentFile(mode: "edge" | "center" = "center") {
+  await nextTick();
+  const path = props.currentFilePath;
+  if (!path || !isTreeMode.value || !props.panelVisible) return;
+  const roots = fileTreeRoots.value;
+  if (roots.length === 0) return;
+  if (!props.filesFiltered.some((f) => f.path === path)) return;
+  const ancestors = collectAncestorFolderKeysForFile(roots, path);
+  if (!ancestors) return;
+  const next = new Set(expandedFolderPaths.value);
+  for (const a of ancestors) next.add(a);
+  if (!folderExpandSetsEqual(next, expandedFolderPaths.value)) {
+    expandedFolderPaths.value = next;
+  }
+  await scrollTreeToCurrentFileRow(mode);
+}
+
+watch(
+  () => props.shouldCenterFileList,
+  (v) => {
+    if (!v || !isTreeMode.value) return;
+    void scrollTreeToCurrentFile("center");
+  },
+);
+
+watch(isTreeMode, (tree) => {
+  if (tree && props.currentFilePath && props.panelVisible) {
+    void scrollTreeToCurrentFile("center");
+  }
+});
 
 const filterVisible = ref(false);
 const fileFilterInputRef = ref<HTMLInputElement | null>(null);
@@ -277,6 +482,19 @@ const {
   enterEditFileListMode,
   onRemoveSelectedFileListItems,
 } = selection;
+
+function onTreeFileClick(path: string, index: number, e: MouseEvent) {
+  const item = fileItemFromPath(path);
+  if (!item) return;
+  const visibleFilePaths = treeFlatRows.value
+    .filter((r): r is Extract<FileListTreeFlatRow, { kind: "file" }> => r.kind === "file")
+    .map((r) => r.file.path);
+  onFileItemClick(item, index, e, visibleFilePaths);
+}
+
+function resolveTreeFileItem(row: Extract<FileListTreeFlatRow, { kind: "file" }>): SidebarFileItem {
+  return fileByPath.value.get(row.file.path) ?? (row.file as SidebarFileItem);
+}
 
 const renamingFilePath = ref<string | null>(null);
 const renameDraft = ref("");
@@ -535,6 +753,11 @@ function closeFileContextMenuAll() {
   closeFileCtxCategorySub();
 }
 
+function onFileItemContextMenu(path: string, ev: MouseEvent) {
+  closeFolderContextMenuAll();
+  menus.onFileItemContextMenu(path, ev);
+}
+
 function onFileCtxRename() {
   const target = fileCtxTargetPath();
   if (!target) return;
@@ -584,6 +807,182 @@ function onFileCtxCategoryPicked(name: string) {
   closeFileContextMenuAll();
 }
 
+/** 树状：文件夹右键 */
+const folderCtxOpen = ref(false);
+const folderCtxDirPath = ref<string | null>(null);
+const folderCtxRawX = ref(0);
+const folderCtxRawY = ref(0);
+const folderCtxMenuLeft = ref(0);
+const folderCtxMenuTop = ref(0);
+const folderCtxMenuPanelRef = useTemplateRef<HTMLElement>("folderCtxMenuPanelRef");
+const folderCtxCategoryFlyoutRef = useTemplateRef<HTMLElement>(
+  "folderCtxCategoryFlyoutRef",
+);
+const folderCtxCategorySubOpen = ref(false);
+const folderCtxFlyoutUseLeft = ref(false);
+const folderCtxFlyoutTransform = ref("");
+const folderCtxFlyoutPositionReady = ref(false);
+
+const folderCtxFlyoutPanelStyle = computed(() => {
+  const s: Record<string, string> = {};
+  if (folderCtxFlyoutTransform.value) {
+    s.transform = folderCtxFlyoutTransform.value;
+  }
+  if (folderCtxCategorySubOpen.value) {
+    s.visibility = folderCtxFlyoutPositionReady.value ? "visible" : "hidden";
+    s.pointerEvents = folderCtxFlyoutPositionReady.value ? "auto" : "none";
+  }
+  return s;
+});
+
+function closeFolderCtxCategorySub() {
+  folderCtxCategorySubOpen.value = false;
+  folderCtxFlyoutUseLeft.value = false;
+  folderCtxFlyoutTransform.value = "";
+  folderCtxFlyoutPositionReady.value = false;
+}
+
+function closeFolderContextMenuAll() {
+  folderCtxOpen.value = false;
+  folderCtxDirPath.value = null;
+  closeFolderCtxCategorySub();
+}
+
+function clampFolderContextMenuToViewport() {
+  if (!folderCtxOpen.value) return;
+  const el = folderCtxMenuPanelRef.value;
+  if (!el) return;
+  const margin = 8;
+  const rawX = folderCtxRawX.value;
+  const rawY = folderCtxRawY.value;
+  const maxX = Math.max(margin, window.innerWidth - el.offsetWidth - margin);
+  const maxY = Math.max(margin, window.innerHeight - el.offsetHeight - margin);
+  folderCtxMenuLeft.value = Math.min(Math.max(margin, rawX), maxX);
+  folderCtxMenuTop.value = Math.min(Math.max(margin, rawY), maxY);
+}
+
+function applyFolderCtxCategoryFlyoutTranslateClamp() {
+  const flyout = folderCtxCategoryFlyoutRef.value;
+  if (!flyout || !folderCtxCategorySubOpen.value) return;
+  const margin = 8;
+  const r = flyout.getBoundingClientRect();
+  let dx = 0;
+  let dy = 0;
+  if (r.bottom > window.innerHeight - margin) {
+    dy = window.innerHeight - margin - r.bottom;
+  }
+  if (r.top + dy < margin) {
+    dy = margin - r.top;
+  }
+  if (r.right + dx > window.innerWidth - margin) {
+    dx = window.innerWidth - margin - r.right;
+  }
+  if (r.left + dx < margin) {
+    dx = margin - r.left;
+  }
+  folderCtxFlyoutTransform.value =
+    dx !== 0 || dy !== 0 ? `translate(${dx}px, ${dy}px)` : "";
+}
+
+async function layoutFolderCtxCategoryFlyoutInViewport(opts?: {
+  instant?: boolean;
+}) {
+  if (!folderCtxOpen.value || !folderCtxCategorySubOpen.value) {
+    closeFolderCtxCategorySub();
+    return;
+  }
+  if (!opts?.instant) {
+    folderCtxFlyoutPositionReady.value = false;
+  }
+  folderCtxFlyoutUseLeft.value = false;
+  folderCtxFlyoutTransform.value = "";
+  await nextTick();
+  await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+  const flyout = folderCtxCategoryFlyoutRef.value;
+  if (!flyout || !folderCtxCategorySubOpen.value) {
+    folderCtxFlyoutPositionReady.value = true;
+    return;
+  }
+  const margin = 8;
+  const r = flyout.getBoundingClientRect();
+  if (r.right > window.innerWidth - margin) {
+    folderCtxFlyoutUseLeft.value = true;
+    await nextTick();
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+  }
+  applyFolderCtxCategoryFlyoutTranslateClamp();
+  folderCtxFlyoutPositionReady.value = true;
+}
+
+async function layoutFolderContextMenuPanel() {
+  if (!folderCtxOpen.value) return;
+  folderCtxMenuLeft.value = folderCtxRawX.value;
+  folderCtxMenuTop.value = folderCtxRawY.value;
+  if (!folderCtxCategorySubOpen.value) {
+    closeFolderCtxCategorySub();
+  }
+  await nextTick();
+  requestAnimationFrame(() => {
+    clampFolderContextMenuToViewport();
+    if (folderCtxCategorySubOpen.value) {
+      void layoutFolderCtxCategoryFlyoutInViewport();
+    }
+  });
+}
+
+watch(folderCtxOpen, (open) => {
+  if (open) void layoutFolderContextMenuPanel();
+});
+
+function onFolderContextMenu(fullDirPath: string, ev: MouseEvent) {
+  ev.preventDefault();
+  ev.stopPropagation();
+  closeFileContextMenuAll();
+  menus.closeEditContextMenu();
+  folderCtxDirPath.value = fullDirPath;
+  folderCtxRawX.value = ev.clientX;
+  folderCtxRawY.value = ev.clientY;
+  folderCtxOpen.value = true;
+  closeFolderCtxCategorySub();
+  void layoutFolderContextMenuPanel();
+}
+
+function folderCtxTargetPaths(): string[] {
+  const dir = folderCtxDirPath.value;
+  if (!dir) return [];
+  return collectFilesUnderDir(props.files, dir).map((f) => f.path);
+}
+
+function onFolderCtxCategoryPicked(name: string) {
+  const paths = folderCtxTargetPaths();
+  if (paths.length === 0) {
+    closeFolderContextMenuAll();
+    return;
+  }
+  emit("setFilesCategory", paths, name);
+  closeFolderContextMenuAll();
+}
+
+async function onFolderCtxRemove() {
+  const paths = folderCtxTargetPaths();
+  closeFolderContextMenuAll();
+  if (paths.length === 0) return;
+  const ok = await appConfirm("是否要移除该文件夹下的所有文件？");
+  if (!ok) return;
+  emit("removeFileList", paths);
+}
+
+function onFolderCtxOpenInExplorer() {
+  const dir = folderCtxDirPath.value;
+  closeFolderContextMenuAll();
+  if (!dir) return;
+  void window.colorTxt.openPath(dir).then((r) => {
+    if (r && "ok" in r && !r.ok) {
+      appToast(r.error || "无法打开文件夹", { kind: "warning" });
+    }
+  });
+}
+
 function onEditCtxRename() {
   const target =
     menus.editContextMenuFilePath ||
@@ -621,6 +1020,7 @@ const fullscreenFileListPopoversOpenComputed = computed(
     Boolean(
       moreOpen.value ||
         menus.fileContextMenuOpen ||
+        folderCtxOpen.value ||
         menus.editContextMenuOpen ||
         menus.categoryPickerOpen ||
         manageModalOpen.value ||
@@ -638,6 +1038,7 @@ watch(
 function dismissAllFullscreenTeleportUi() {
   closeMoreMenu();
   menus.dismissAllTeleportMenus();
+  closeFolderContextMenuAll();
   filterVisible.value = false;
   manageModalOpen.value = false;
   categoryToolbarSelectRef.value?.closePanel?.();
@@ -816,6 +1217,21 @@ onBeforeUnmount(() => {
         class="fileToolbarRow"
         :class="{ 'fileToolbarRow--filterOpen': filterVisible }"
       >
+        <button
+          v-if="isTreeMode && treeRootFolderKeys.length > 0"
+          type="button"
+          class="aiActivityLikeBtn fileTreeExpandToggle"
+          :aria-label="allRootFoldersCollapsed ? '全部展开' : '全部折叠'"
+          :title="allRootFoldersCollapsed ? '全部展开' : '全部折叠'"
+          @click="onToggleExpandAllFolders"
+        >
+          <span
+            class="svg"
+            v-html="
+              allRootFoldersCollapsed ? icons.allExpand : icons.allCollapse
+            "
+          />
+        </button>
         <AppCustomSelect
           ref="categoryToolbarSelectRef"
           class="fileToolbarSelect"
@@ -888,13 +1304,136 @@ onBeforeUnmount(() => {
           <VirtualList
             :ref="onBindListRef"
             class="sidebarList sidebarList--itemGap"
-            :item-count="filesFiltered.length"
+            :item-count="displayItemCount"
             :row-stride="READER_SIDEBAR_ROW_STRIDE"
             :overscan="10"
-            :item-key="(i) => filesFiltered[i]?.path ?? i"
+            :item-key="isTreeMode ? treeItemKeyFn : listItemKeyFn"
           >
             <template #default="{ index }">
+              <template v-if="isTreeMode">
+                <template
+                  v-for="row in [treeFlatRows[index]]"
+                  :key="treeRowKey(index)"
+                >
+                  <button
+                    v-if="row?.kind === 'folder'"
+                    type="button"
+                    class="sidebarItem fileItem fileItem--folder"
+                    :title="row.fullDirPath"
+                    @click="onTreeFolderClick(row.fullDirPath)"
+                    @contextmenu="onFolderContextMenu(row.fullDirPath, $event)"
+                  >
+                    <span
+                      class="fileItemMain"
+                      :style="{
+                        paddingLeft: row.depth * TREE_INDENT_PX + 'px',
+                      }"
+                    >
+                      <span
+                        class="fileTreeChevron"
+                        :class="{
+                          'fileTreeChevron--expanded': row.expanded,
+                        }"
+                        aria-hidden="true"
+                        v-html="icons.foldChevron"
+                      />
+                      <span class="itemName">{{ row.name }}</span>
+                      <span class="itemMeta itemMeta--folderStats"
+                        >({{ row.fileCount }} 文件，{{
+                          formatFileSize(row.totalSize)
+                        }})</span
+                      >
+                    </span>
+                  </button>
+                  <button
+                    v-else-if="row?.kind === 'file'"
+                    type="button"
+                    class="sidebarItem fileItem"
+                    :class="{
+                      active: row.file.path === currentFilePath,
+                    }"
+                    :title="row.file.path"
+                    @click="
+                      renamingFilePath === row.file.path
+                        ? undefined
+                        : onTreeFileClick(row.file.path, index, $event)
+                    "
+                    @contextmenu="
+                      onFileItemContextMenu(row.file.path, $event)
+                    "
+                  >
+                    <span
+                      class="fileItemMain"
+                      :style="{
+                        paddingLeft: row.depth * TREE_INDENT_PX + 'px',
+                      }"
+                    >
+                      <span
+                        v-if="isEditingFileList"
+                        class="checkbox fileItemCheckboxWrap"
+                        aria-hidden="true"
+                      >
+                        <input
+                          type="checkbox"
+                          :checked="
+                            selectedFilePaths.includes(row.file.path)
+                          "
+                          tabindex="-1"
+                          aria-hidden="true"
+                        />
+                      </span>
+                      <span
+                        v-if="
+                          fileItemShowCategoryMarkRow(resolveTreeFileItem(row))
+                        "
+                        class="fileItemCatMark"
+                        aria-hidden="true"
+                        :style="{
+                          backgroundColor: borderColorForFileRow(
+                            resolveTreeFileItem(row),
+                          ),
+                        }"
+                      />
+                      <input
+                        v-if="renamingFilePath === row.file.path"
+                        ref="renameInputRef"
+                        v-model="renameDraft"
+                        class="fileItemRenameInput"
+                        type="text"
+                        spellcheck="false"
+                        autocomplete="off"
+                        @click.stop
+                        @keydown.stop.enter.prevent="commitRenamingFile"
+                        @keydown.stop.esc.prevent="cancelRenamingFile"
+                        @blur="commitRenamingFile"
+                      />
+                      <span v-else class="itemName">{{ row.file.name }}</span>
+                      <span
+                        v-if="
+                          typeof fileRowProgress(row.file.path) === 'number'
+                        "
+                        class="itemMeta itemMeta--progress"
+                        :class="{
+                          'itemMeta--progress-complete': isProgressComplete(
+                            fileRowProgress(row.file.path),
+                          ),
+                        }"
+                      >
+                        {{
+                          formatFileReadProgress(
+                            fileRowProgress(row.file.path) as number,
+                          )
+                        }}
+                      </span>
+                      <span class="itemMeta">{{
+                        formatFileSize(row.file.size)
+                      }}</span>
+                    </span>
+                  </button>
+                </template>
+              </template>
               <button
+                v-else
                 class="sidebarItem fileItem"
                 :class="{
                   active: filesFiltered[index].path === currentFilePath,
@@ -906,7 +1445,7 @@ onBeforeUnmount(() => {
                     : onFileItemClick(filesFiltered[index], index, $event)
                 "
                 @contextmenu="
-                  menus.onFileItemContextMenu(filesFiltered[index].path, $event)
+                  onFileItemContextMenu(filesFiltered[index].path, $event)
                 "
               >
                 <span class="fileItemMain">
@@ -1146,6 +1685,84 @@ onBeforeUnmount(() => {
     </Teleport>
     <Teleport to="body">
       <div
+        v-if="folderCtxOpen"
+        ref="folderCtxMenuPanelRef"
+        data-fullscreen-sidebar-float
+        class="fileCtxMenu appShellMenuPanel"
+        :style="{
+          left: `${folderCtxMenuLeft}px`,
+          top: `${folderCtxMenuTop}px`,
+        }"
+        role="menu"
+        @click.stop
+      >
+        <div
+          class="appShellMenuSubWrap"
+          @mouseenter="
+            folderCtxCategorySubOpen = true;
+            void layoutFolderCtxCategoryFlyoutInViewport();
+          "
+          @mouseleave="closeFolderCtxCategorySub"
+        >
+          <button
+            type="button"
+            class="appShellMenuItem"
+            role="menuitem"
+            aria-haspopup="menu"
+            :aria-expanded="folderCtxCategorySubOpen"
+          >
+            <span class="appShellMenuLabel">分类</span>
+            <span class="appShellMenuSubChevron">›</span>
+          </button>
+          <div
+            v-show="folderCtxCategorySubOpen"
+            ref="folderCtxCategoryFlyoutRef"
+            class="appShellMenuFlyout fileCtxCategoryFlyout"
+            :class="
+              folderCtxFlyoutUseLeft
+                ? 'appShellMenuFlyout--left'
+                : 'appShellMenuFlyout--right'
+            "
+            :style="folderCtxFlyoutPanelStyle"
+            role="menu"
+            @click.stop
+          >
+            <FileCategoryFlyoutList
+              :catalog="fileCategoryCatalog"
+              :menu-counts="categoryMenuCounts"
+              @pick="onFolderCtxCategoryPicked"
+            />
+          </div>
+        </div>
+        <button
+          type="button"
+          class="appShellMenuItem appShellMenuItem--danger"
+          role="menuitem"
+          @click="onFolderCtxRemove"
+        >
+          移除
+        </button>
+        <div class="appShellMenuDivider" role="separator" />
+        <button
+          type="button"
+          class="appShellMenuItem"
+          role="menuitem"
+          @click="onFolderCtxOpenInExplorer"
+        >
+          在文件管理器中打开
+        </button>
+      </div>
+    </Teleport>
+    <Teleport to="body">
+      <div
+        v-if="folderCtxOpen"
+        data-fullscreen-sidebar-float
+        class="fileCtxMenuBackdrop"
+        @pointerdown="closeFolderContextMenuAll"
+      />
+    </Teleport>
+    <Teleport to="body">
+      <div
         v-if="menus.editContextMenuOpen"
         ref="editCtxMenuPanelRef"
         data-fullscreen-sidebar-float
@@ -1331,6 +1948,7 @@ onBeforeUnmount(() => {
   flex: 1;
   min-width: 0;
 }
+.fileTreeExpandToggle,
 .fileSearchToggle {
   flex-shrink: 0;
 }
@@ -1432,6 +2050,36 @@ onBeforeUnmount(() => {
   align-items: stretch;
   gap: 6px;
   padding-left: 6px;
+}
+.fileItem--folder .itemName {
+  font-weight: 600;
+}
+.fileTreeChevron {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 2px;
+  color: var(--tab-fg);
+  transform: rotate(-90deg);
+  transition: transform 0.12s ease;
+}
+.fileTreeChevron--expanded {
+  transform: rotate(0deg);
+}
+.fileTreeChevron :deep(svg) {
+  width: 12px;
+  height: 12px;
+  display: block;
+}
+.fileTreeChevron :deep(svg path) {
+  fill: currentColor;
+}
+.itemMeta--folderStats {
+  flex-shrink: 0;
+  opacity: 0.75;
 }
 .fileItemCatMark {
   flex-shrink: 0;

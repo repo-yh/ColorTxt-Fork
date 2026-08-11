@@ -237,11 +237,13 @@ import {
 } from "./services/fileListService";
 import {
   cloneDefaultFileCategoryCatalog,
+  DEFAULT_FILE_LIST_VIEW_MODE,
   DEFAULT_FILE_SORT,
   FILE_CATEGORY_FILTER_ALL,
   FILE_CATEGORY_FILTER_UNCATEGORIZED,
   type CategoryEditorRow,
   type FileCategoryDefinition,
+  type FileListViewMode,
   type FileSortMode,
 } from "./constants/fileCategories";
 
@@ -593,6 +595,7 @@ const CHAPTER_REFRESH_DEBOUNCE_MS = 400;
 const txtFiles = ref<TxtFileItem[]>([]);
 const fileCategory = ref<string>(FILE_CATEGORY_FILTER_ALL);
 const fileSort = ref<FileSortMode>(DEFAULT_FILE_SORT);
+const fileListViewMode = ref<FileListViewMode>(DEFAULT_FILE_LIST_VIEW_MODE);
 const fileCategoryCatalog = ref<FileCategoryDefinition[]>(
   cloneDefaultFileCategoryCatalog(),
 );
@@ -1218,6 +1221,7 @@ const persistence = useAppPersistence({
   characterCardTextureEffect,
   fileCategory,
   fileSort,
+  fileListViewMode,
   fileCategoryCatalog,
   fileListEditing,
   syncCurrentFile,
@@ -1344,17 +1348,22 @@ function onSetFilesCategory(paths: string[], category: string) {
   }
 }
 
-/** 侧栏筛选为具体分类时，新加入列表的文件自动归入该分类 */
-function applyCurrentFileCategoryToNewPaths(paths: string[]) {
+/**
+ * 侧栏筛选非「全部」时：将路径归入当前筛选。
+ * - 具体分类名：写入 `category`
+ * - 「未分类」：清除 `category`
+ * 路径可含新加入与已在列表中再次添加的项。
+ */
+function applyCurrentFileCategoryToPaths(paths: string[]) {
   const fc = fileCategory.value;
-  if (
-    fc === FILE_CATEGORY_FILTER_ALL ||
-    fc === FILE_CATEGORY_FILTER_UNCATEGORIZED ||
-    paths.length === 0
-  ) {
+  if (fc === FILE_CATEGORY_FILTER_ALL || paths.length === 0) {
     return;
   }
-  onSetFilesCategory(paths, fc);
+  if (fc === FILE_CATEGORY_FILTER_UNCATEGORIZED) {
+    onSetFilesCategory(paths, "");
+  } else {
+    onSetFilesCategory(paths, fc);
+  }
 }
 
 function onApplyCategoryCatalog(payload: {
@@ -2042,7 +2051,7 @@ const fileSession = useAppFileSession({
   bookPackUnpackDir,
   bookPackPassword,
   characterPortraitCacheDir,
-  applyCurrentFileCategoryIfConcrete: applyCurrentFileCategoryToNewPaths,
+  applyCurrentFileCategoryIfConcrete: applyCurrentFileCategoryToPaths,
   readerEditMode,
   readerEditorDirty,
   confirmIfReaderEditDiscard,
@@ -3718,6 +3727,7 @@ useAppShellThemeWatch({
           :file-meta-records="fileMetaRecords"
           :file-category="fileCategory"
           :file-sort="fileSort"
+          :file-list-view-mode="fileListViewMode"
           :file-category-catalog="fileCategoryCatalog"
           :meta-progress-by-path-key="metaProgressByPathKey"
           :live-reading-progress-percent="liveReadingProgressForUi"
@@ -3811,6 +3821,7 @@ useAppShellThemeWatch({
           @persist-ui="onPersistUi"
           @update:file-category="fileCategory = $event"
           @update:file-sort="fileSort = $event"
+          @update:file-list-view-mode="fileListViewMode = $event"
           @apply-category-catalog="onApplyCategoryCatalog"
           @set-files-category="onSetFilesCategory"
           @update:fullscreen-file-list-popovers-open="

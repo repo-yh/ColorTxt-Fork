@@ -48,13 +48,16 @@ import {
 } from "../utils/defaultCacheDirs";
 import type {
   FileCategoryDefinition,
+  FileListViewMode,
   FileSortMode,
 } from "../constants/fileCategories";
 import {
   cloneDefaultFileCategoryCatalog,
+  DEFAULT_FILE_LIST_VIEW_MODE,
   DEFAULT_FILE_SORT,
   isFileSortMode,
   normalizeCategoryFilter,
+  parseFileListViewMode,
 } from "../constants/fileCategories";
 import {
   fileHistoryKey,
@@ -295,6 +298,7 @@ export function useAppPersistence(deps: {
   characterCardTextureEffect: Ref<CharacterCardTextureEffectId>;
   fileCategory: Ref<string>;
   fileSort: Ref<FileSortMode>;
+  fileListViewMode: Ref<FileListViewMode>;
   fileCategoryCatalog: Ref<FileCategoryDefinition[]>;
   /** 侧栏文件列表「编辑」模式：为 true 时跳过文件列表 localStorage 写入，退出并保存时由 App 再落盘 */
   fileListEditing: Ref<boolean>;
@@ -447,6 +451,7 @@ export function useAppPersistence(deps: {
       characterCardTextureEffect: deps.characterCardTextureEffect.value,
       fileCategory: deps.fileCategory.value,
       fileSort: deps.fileSort.value,
+      fileListViewMode: deps.fileListViewMode.value,
       fileCategoryCatalog: deps.fileCategoryCatalog.value,
       aiSkillsEnabled: deps.aiSkillsEnabled.value,
       aiSkillOverrides:
@@ -1419,6 +1424,10 @@ export function useAppPersistence(deps: {
     deps.fileSort.value = isFileSortMode(data.fileSort)
       ? data.fileSort
       : DEFAULT_FILE_SORT;
+    deps.fileListViewMode.value =
+      data.fileListViewMode !== undefined
+        ? parseFileListViewMode(data.fileListViewMode)
+        : DEFAULT_FILE_LIST_VIEW_MODE;
     if (data.fileCategoryCatalog && data.fileCategoryCatalog.length > 0) {
       deps.fileCategoryCatalog.value = data.fileCategoryCatalog.map((c) => ({
         ...c,

@@ -2,11 +2,13 @@ import { isVoiceReadEngineId } from "@shared/voiceReadEngines";
 import type { ChapterMatchRule } from "../chapter";
 import type {
   FileCategoryDefinition,
+  FileListViewMode,
   FileSortMode,
 } from "../constants/fileCategories";
 import {
   isFileSortMode,
   parseFileCategoryCatalog,
+  parseFileListViewMode,
 } from "../constants/fileCategories";
 import {
   migrateTxtFileListAddedAt,
@@ -187,6 +189,8 @@ export type PersistedSettingsData = {
   fileCategory?: string;
   /** 文件列表排序方式 */
   fileSort?: FileSortMode;
+  /** 文件列表：列表 / 树状 */
+  fileListViewMode?: FileListViewMode;
   /** 用户维护的分类名称与颜色表 */
   fileCategoryCatalog?: FileCategoryDefinition[];
   /** 监控当前打开文件，磁盘变更后自动重新加载 */
@@ -548,6 +552,9 @@ export function loadPersistedSettingsData(
   }
   if (typeof obj.fileSort === "string" && isFileSortMode(obj.fileSort)) {
     data.fileSort = obj.fileSort;
+  }
+  if (obj.fileListViewMode !== undefined) {
+    data.fileListViewMode = parseFileListViewMode(obj.fileListViewMode);
   }
   const catalog = parseFileCategoryCatalog(obj.fileCategoryCatalog);
   if (catalog) data.fileCategoryCatalog = catalog;

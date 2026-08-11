@@ -4,6 +4,7 @@ import type { Chapter } from "../chapter";
 import { useReaderSidebarLists } from "../composables/useReaderSidebarLists";
 import type {
   FileCategoryDefinition,
+  FileListViewMode,
   FileSortMode,
 } from "../constants/fileCategories";
 import { SIDEBAR_ACTIVITY_BAR_WIDTH } from "../constants/appUi";
@@ -122,6 +123,7 @@ const props = withDefaults(
     shouldCenterBookmarkList?: boolean;
     fileCategory: string;
     fileSort: FileSortMode;
+    fileListViewMode: FileListViewMode;
     fileCategoryCatalog: FileCategoryDefinition[];
     /** AI 助手：阅读器实例（取全文建索引） */
     readerMainRef?: InstanceType<typeof ReaderMain> | null;
@@ -217,6 +219,7 @@ const emit = defineEmits<{
   "update:showChapterCounts": [value: boolean];
   "update:fileCategory": [value: string];
   "update:fileSort": [value: FileSortMode];
+  "update:fileListViewMode": [value: FileListViewMode];
   pickDirectory: [];
   importDroppedPaths: [paths: string[]];
   pickFiles: [];
@@ -860,6 +863,27 @@ defineExpose({
         <div class="sidebarHeaderStart">
           <span class="sidebarHeaderTitle">{{ activePanelTitle }}</span>
           <button
+            v-if="activeTab === 'files'"
+            type="button"
+            class="aiReaderSidebarHeaderIconBtn"
+            :class="{ active: fileListViewMode === 'tree' }"
+            :title="
+              fileListViewMode === 'tree' ? '切换为列表' : '切换为树状'
+            "
+            :aria-label="
+              fileListViewMode === 'tree' ? '切换为列表' : '切换为树状'
+            "
+            @click="
+              emit(
+                'update:fileListViewMode',
+                fileListViewMode === 'tree' ? 'list' : 'tree',
+              );
+              emit('persistUi');
+            "
+          >
+            <span class="svg" v-html="icons.tree" />
+          </button>
+          <button
             v-if="activeTab === 'chapters' && showEditChapterRefreshButton"
             type="button"
             class="aiReaderSidebarHeaderIconBtn"
@@ -1065,7 +1089,10 @@ defineExpose({
         :live-reading-progress-percent="liveReadingProgressPercent"
         :file-category="fileCategory"
         :file-sort="fileSort"
+        :file-list-view-mode="fileListViewMode"
         :file-category-catalog="fileCategoryCatalog"
+        :should-center-file-list="shouldCenterFileList"
+        :panel-visible="activeTab === 'files'"
         :menu-anchor-el="filesHeaderMoreBtnRef"
         @update-file-filter-query="fileFilterQuery = $event"
         @update:file-category="emit('update:fileCategory', $event)"

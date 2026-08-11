@@ -682,9 +682,54 @@ async function maybeRenameThreadFromFirstExchange(tid: string) {
   await loadThreadList();
 }
 
-async function loadMessagesForThread(tid: string) {
+/**
+ * 从 DB 拉取并展示消息。
+ * `reuseAssistantId`：Agent 正常结束后整表刷新时，复用流式占位助手气泡的 id，
+ * 避免 Vue 因 key 变化销毁/重建思维导图、词云等子树（大图弹层会因此被关掉）。
+ */
+async function loadMessagesForThread(
+  tid: string,
+  opts?: { reuseAssistantId?: string },
+) {
   const rows = await window.colorTxt.ai.messageList(tid);
-  messages.value = rowsToUiMessages(rows);
+  const next = rowsToUiMessages(rows);
+  const reuseId = opts?.reuseAssistantId?.trim();
+  if (reuseId) {
+    const prevAsst = [...messages.value]
+      .reverse()
+      .find((m) => m.role === "assistant" && m.id === reuseId);
+    for (let i = next.length - 1; i >= 0; i--) {
+      const m = next[i];
+      if (m?.role !== "assistant") continue;
+      m.id = reuseId;
+      if (prevAsst?.role === "assistant") {
+        for (const nt of m.tools) {
+          const pt = prevAsst.tools.find((t) => t.toolCallId === nt.toolCallId);
+          if (!pt) continue;
+          if (
+            pt.mindmap &&
+            nt.mindmap &&
+            pt.mindmap.markdown === nt.mindmap.markdown &&
+            pt.mindmap.title === nt.mindmap.title
+          ) {
+            nt.mindmap = pt.mindmap;
+          }
+          if (
+            pt.wordcloud &&
+            nt.wordcloud &&
+            pt.wordcloud.title === nt.wordcloud.title &&
+            pt.wordcloud.mode === nt.wordcloud.mode &&
+            (pt.wordcloud.layoutSeed ?? 0) === (nt.wordcloud.layoutSeed ?? 0) &&
+            pt.wordcloud.words.length === nt.wordcloud.words.length
+          ) {
+            nt.wordcloud = pt.wordcloud;
+          }
+        }
+      }
+      break;
+    }
+  }
+  messages.value = next;
   await scrollListToBottomAfterMessagesLoad();
 }
 
@@ -1000,11 +1045,16 @@ onMounted(() => {
         /** 多轮 tool 之间模型常在 assistant.content 里重复输出草稿；清空以免叠在同一条气泡里 */
         liveAssistant.answer = "";
         break;
-      case "done":
+      case "done": {
         streaming.value = false;
         chatAwaitingReply.value = false;
         currentTurnAbort.value = null;
         awaitingAgentDone.value = false;
+        /** 须在清 agentLive 前记下占位 id，供整表刷新时复用，保住思维导图大图等本地 UI 状态 */
+        const reuseAssistantId =
+          liveAssistant?.id.startsWith("pending_") === true
+            ? liveAssistant.id
+            : undefined;
         if (liveAssistant) {
           liveAssistant.agentLive = false;
           finalizeLiveThinkingAfterStop(liveAssistant);
@@ -1031,11 +1081,12 @@ onMounted(() => {
         void (async () => {
           const tid = threadId.value;
           if (tid) {
-            await loadMessagesForThread(tid);
+            await loadMessagesForThread(tid, { reuseAssistantId });
             await maybeRenameThreadFromFirstExchange(tid);
           }
         })();
         break;
+      }
       case "error":
         streaming.value = false;
         chatAwaitingReply.value = false;

@@ -664,13 +664,24 @@ function onKeydown(ev: KeyboardEvent) {
 }
 
 watch(
-  () => [props.markdown, props.chapters] as const,
-  () => {
+  () => markmapMarkdown.value,
+  (md, prev) => {
+    if (md === prev) return;
     void nextTick(() => {
       void refreshMaps();
     });
   },
-  { deep: true },
+);
+
+watch(
+  () => props.chapters,
+  (chapters, prev) => {
+    if (chapters === prev) return;
+    if (!props.markdown?.trim()) return;
+    void nextTick(() => {
+      void refreshMaps();
+    });
+  },
 );
 
 watch(svgRef, (svg) => {

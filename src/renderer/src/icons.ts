@@ -53,6 +53,9 @@ import closeIcon from "./assets/close.svg?raw";
 import ascIcon from "./assets/asc.svg?raw";
 import descIcon from "./assets/desc.svg?raw";
 import folderOpenIcon from "./assets/folder_open.svg?raw";
+import treeIcon from "./assets/tree.svg?raw";
+import allExpandIcon from "./assets/all_expand.svg?raw";
+import allCollapseIcon from "./assets/all_collapse.svg?raw";
 import aiChatIcon from "./assets/AI_chat.svg?raw";
 import aiComposeIcon from "./assets/AI_compose.svg?raw";
 import brainIcon from "./assets/brain.svg?raw";
@@ -195,6 +198,12 @@ export const icons = {
   asc: ascIcon,
   desc: descIcon,
   folderOpen: folderOpenIcon,
+  /** 侧栏文件列表：列表 / 树状切换 */
+  tree: treeIcon,
+  /** 侧栏文件树：全部展开 */
+  allExpand: allExpandIcon,
+  /** 侧栏文件树：全部折叠 */
+  allCollapse: allCollapseIcon,
   aiChat: aiChatIcon,
   aiCompose: aiComposeIcon,
   brain: brainIcon,
