@@ -1,5 +1,6 @@
 /**
- * Monaco 布局层「行间距」：每个物理行（model line）结束后增加常数像素空隙。
+ * Monaco 布局层「段间距」（UI 文案；代码键仍为 lineSpacingPx）：
+ * 每个物理行（model line）结束后增加常数像素空隙。
  * 软换行产生的中间 view 行不加距。由 Vite transform 注入 LinesLayout 读取。
  *
  * 默认间距为模块级（阅读器设置）；个别 LinesLayout 可通过 override 固定为 0
@@ -70,7 +71,7 @@ export function setLineSpacingOverrideForLayout(
 }
 
 /**
- * Diff / 弹窗等独立编辑器：对该实例布局固定行间距为 0，不影响主阅读器。
+ * Diff / 弹窗等独立编辑器：对该实例布局固定段间距为 0，不影响主阅读器。
  * 依赖 Monaco 内部 `viewLayout._linesLayout`（与 ViewModel transform 同源）。
  */
 export function disableLineSpacingOnMonacoCodeEditor(editor: object): void {
@@ -142,7 +143,7 @@ export function lineSpacingGapsBeforeViewLine(
   return gap * Math.max(0, modelLineFor(layout, viewLineNumber) - 1);
 }
 
-/** 文档总行间距（每个物理行后一段，含末行） */
+/** 文档总段间距（每个物理行后一段，含末行） */
 export function lineSpacingTotalGaps(layout: object): number {
   const gap = gapPxForLayout(layout);
   if (gap <= 0) return 0;

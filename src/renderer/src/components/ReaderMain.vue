@@ -333,7 +333,7 @@ function disposeReaderMonacoOverflowHost(): void {
   readerMonacoOverflowHost = null;
 }
 
-/** 行高 = round(fontSize * multiple)，由 App 持久化并同步 */
+/** 行间距（lineHeight）= round(fontSize * multiple)，由 App 持久化并同步 */
 let lineHeightMultiple = defaultReaderLineHeightMultiple;
 let currentFontFamily = READER_EDITOR_DEFAULT_FONT_FAMILY;
 /** App 传入的主题名（vs / vs-dark），用于切换语法着色后重设 Monaco 主题 */
@@ -365,7 +365,7 @@ const props = withDefaults(
     monacoCustomHighlight?: boolean;
     /** 与「内容上色」同时生效：成对引号/括号是否允许跨行 */
     txtrDelimitedMatchCrossLine?: boolean;
-    /** 为 true 时由数据层压缩空行；章节标题留白由「章节标题前后保留空行」控制 */
+    /** 为 true 时由数据层压缩空行；章节标题留白由「章节标题上下保留空行」控制 */
     compressBlankLines?: boolean;
     /** Monaco 高级换行策略（wrappingStrategy: advanced） */
     monacoAdvancedWrapping?: boolean;
@@ -506,7 +506,7 @@ const emit = defineEmits<{
   viewportTopLineChange: [lineNumber: number];
   viewportEndLineChange: [lineNumber: number];
   viewportVisualProgressChange: [percent: number, atBottom: boolean];
-  /** 仅布局变化（行间距 / 换行优化等）且视口锚点已恢复；供侧栏章节列表强制重居中 */
+  /** 仅布局变化（段间距 / 换行优化等）且视口锚点已恢复；供侧栏章节列表强制重居中 */
   layoutViewportRestored: [];
   addHighlightTerm: [payload: { text: string; colorIndex: number }];
   removeHighlightTerm: [payload: { text: string }];
@@ -1937,7 +1937,7 @@ function setLineHeightMultiple(multiple: number) {
 }
 
 /**
- * 仅改布局（折行/行间距等）、不改展示行映射时：按 Monaco 展示行采锚并恢复，
+ * 仅改布局（折行/段间距等）、不改展示行映射时：按 Monaco 展示行采锚并恢复，
  * 避免 scrollTop 不变导致视口漂；并通知外层重居中章节列表。
  */
 async function applyWrappingLayoutChange(

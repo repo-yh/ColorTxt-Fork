@@ -237,7 +237,7 @@ export function useReaderSmartFormatDiff(deps: {
     );
     editor.setModel({ original: originalModel, modified: modifiedModel });
 
-    /** 行间距是布局层全局默认值；Diff 两侧单独覆盖为 0，避免左右垂直对齐错位 */
+    /** 段间距是布局层全局默认值；Diff 两侧单独覆盖为 0，避免左右垂直对齐错位 */
     const pinDiffLineSpacingOff = () => {
       disableLineSpacingOnMonacoCodeEditor(editor.getOriginalEditor());
       disableLineSpacingOnMonacoCodeEditor(editor.getModifiedEditor());

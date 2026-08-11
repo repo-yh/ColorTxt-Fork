@@ -93,7 +93,7 @@ export type ReaderEditorCreateOptionsInput = {
 };
 
 /**
- * 只读 / 编辑共用：字号、行高、字体、换行策略、平滑滚动、主题、行号与缩略图策略等。
+ * 只读 / 编辑共用：字号、行间距、字体、换行策略、平滑滚动、主题、行号与缩略图策略等。
  * 与「阅读器配色」相关的视觉由 `ensureReaderSyntaxThemes` + `--reader-bg` 承担，此处不区分模式。
  */
 export function buildReaderEditorSharedCoreOptions(
@@ -377,7 +377,7 @@ export function buildReaderEditorCreateOptions(
   } satisfies editor.IStandaloneEditorConstructionOptions;
 }
 
-/** 与 `setFontSize` 同步：更新字号与派生行高 */
+/** 与 `setFontSize` 同步：更新字号与派生行间距（lineHeight） */
 export function buildReaderEditorFontSizeUpdate(input: {
   fontSize: number;
   lineHeightMultiple: number;
@@ -391,7 +391,7 @@ export function buildReaderEditorFontSizeUpdate(input: {
   };
 }
 
-/** 与 `setLineHeightMultiple` 同步：仅更新行高 */
+/** 与 `setLineHeightMultiple` 同步：仅更新行间距（lineHeight） */
 export function buildReaderEditorLineHeightUpdate(input: {
   fontSize: number;
   lineHeightMultiple: number;

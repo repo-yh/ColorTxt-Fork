@@ -56,7 +56,7 @@ export function computeWrappedLineIndexInModelLine(
   const lineTop = editor.getTopForLineNumber(displayLine);
   if (!Number.isFinite(lineTop)) return 0;
   const lineBottom = editor.getBottomForLineNumber(displayLine);
-  // getBottom 含物理行后的行间距；折行带只按字高计算
+  // getBottom 含物理行后的段间距；折行带只按字高计算
   const blockH = Math.max(
     0,
     lineBottom - lineTop - Math.max(0, getLineSpacingPx()),
@@ -165,7 +165,7 @@ export function computeScrollTopForReaderViewportRestoreAnchor(
   const lineBottom = editor.getBottomForLineNumber(displayLine);
   if (!Number.isFinite(lineTop) || !Number.isFinite(lineBottom)) return null;
 
-  // 与采锚一致：行块高度去掉物理行后的行间距
+  // 与采锚一致：行块高度去掉物理行后的段间距
   const blockH = Math.max(
     0,
     lineBottom - lineTop - Math.max(0, getLineSpacingPx()),

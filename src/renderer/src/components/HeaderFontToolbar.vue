@@ -48,15 +48,15 @@ const emit = defineEmits<{
     />
     <IconButton
       :icon-html="icons.lineHeightDown"
-      title="减小行高"
-      aria-label="减小行高"
+      title="减小行间距"
+      aria-label="减小行间距"
       :disabled="disabled || !canDecreaseLineHeight"
       @click="emit('decreaseLineHeight')"
     />
     <IconButton
       :icon-html="icons.lineHeightUp"
-      title="加大行高"
-      aria-label="加大行高"
+      title="加大行间距"
+      aria-label="加大行间距"
       :disabled="disabled || !canIncreaseLineHeight"
       @click="emit('increaseLineHeight')"
     />

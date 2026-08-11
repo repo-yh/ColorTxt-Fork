@@ -117,7 +117,7 @@ export const defaultCompressBlankLines = false;
 /** 压缩空行时是否在每行（含非标题正文）下方保留一行空行 */
 export const defaultCompressBlankKeepOneBlank = false;
 
-/** 压缩空行时章节标题前后空行模式 */
+/** 压缩空行时章节标题上下空行模式 */
 export type ChapterTitleBlankMode =
   | "before1"
   | "before1After1"
@@ -129,9 +129,9 @@ export const CHAPTER_TITLE_BLANK_MODE_OPTIONS: readonly {
   value: ChapterTitleBlankMode;
   label: string;
 }[] = [
-  { value: "before1", label: "前面 1 空行" },
-  { value: "before1After1", label: "前面 1 空行，后面 1 空行" },
-  { value: "before2After1", label: "前面 2 空行，后面 1 空行" },
+  { value: "before1", label: "上面 1 空行" },
+  { value: "before1After1", label: "上面 1 空行，下面 1 空行" },
+  { value: "before2After1", label: "上面 2 空行，下面 1 空行" },
 ];
 
 export function isChapterTitleBlankMode(
@@ -157,7 +157,7 @@ export function chapterTitleBlankModeLabel(
   );
 }
 
-/** 章节标题前/后插入的空行数（仅压缩空行路径） */
+/** 章节标题上/下插入的空行数（仅压缩空行路径） */
 export function chapterTitleBlankCounts(mode: ChapterTitleBlankMode): {
   before: number;
   after: number;
@@ -340,7 +340,7 @@ export function normalizeLineHeightMultiple(m: number): number {
 }
 
 /**
- * 在给定字号下，行高倍数的上限（与 {@link readerEditorLineHeight}、Monaco 行高上限一致）。
+ * 在给定字号下，行间距倍数的上限（与 {@link readerEditorLineHeight}、Monaco lineHeight 上限一致）。
  */
 export function maxLineHeightMultipleForFontSize(fontSize: number): number {
   const F = Math.max(

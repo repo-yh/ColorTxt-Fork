@@ -642,7 +642,7 @@ const monacoCustomHighlight = ref(defaultMonacoCustomHighlight);
 const compressBlankLines = ref(defaultCompressBlankLines);
 /** 压缩空行时是否在每行（含章节标题）下方保留一行空行 */
 const compressBlankKeepOneBlank = ref(defaultCompressBlankKeepOneBlank);
-/** 压缩空行时章节标题前后空行模式 */
+/** 压缩空行时章节标题上下空行模式 */
 const chapterTitleBlankMode = ref<ChapterTitleBlankMode>(
   defaultChapterTitleBlankMode,
 );
@@ -2130,7 +2130,7 @@ async function syncChaptersAfterViewportSettled() {
   }
 }
 
-/** 行间距 / 换行优化等布局恢复后：activeChapterIdx 常不变，需强制重居中章节列表 */
+/** 段间距 / 换行优化等布局恢复后：activeChapterIdx 常不变，需强制重居中章节列表 */
 function onLayoutViewportRestored() {
   if (suppressChapterListAutoScroll.value) return;
   void readerSidebarRef.value?.centerActiveChapterInList?.(false);
@@ -3074,7 +3074,7 @@ async function onWebDavImportPackPaths(
 function onWebDavConfigDownloaded() {
   loadPersistedSettings();
   refreshReplaceRulesCache();
-  // loadPersistedSettings 只写 ref；字号/行高/字体等需推到 Monaco 才生效
+  // loadPersistedSettings 只写 ref；字号/行间距/字体等需推到 Monaco 才生效
   applyReaderAppearanceFromSettings();
   applyRecentFilesHistoryLimitFromSettings();
   // 替换、转换、压缩空行、行首缩进、章节字数等可能已变，按物理行重跑展示

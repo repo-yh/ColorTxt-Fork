@@ -51,8 +51,8 @@
 | <img src="./src/renderer/src/assets/indent.svg" width="18" height="18" alt=""> | 行首缩进 | 在行首添加全角缩进 |
 | <img src="./src/renderer/src/assets/ebook.svg" width="18" height="18" alt=""> | 文件列表 | 拖放添加文件 / 目录（会递归读取子目录），支持分类 / 排序 / 过滤 |
 | <img src="./src/renderer/src/assets/find.svg" width="18" height="18" alt=""> | 全文搜索 | 检索所有匹配项并给出结果列表（区别于阅读区的逐个查找） |
-| <img src="./src/renderer/src/assets/font_family.svg" width="18" height="18" alt=""> | 字体 | 可设置字体 / 字号 / 行高；内置 `京華老宋体`，也可以选择系统中安装的任意字体 |
-|  | 排版 | 可设置字间距 / 行间距 / 左右边距 |
+| <img src="./src/renderer/src/assets/font_family.svg" width="18" height="18" alt=""> | 字体 | 可设置字体 / 字号；内置 `京華老宋体`，也可以选择系统中安装的任意字体 |
+| <img src="./src/renderer/src/assets/line_height_up.svg" width="18" height="18" alt=""> | 排版 | 可设置字间距 / 行间距 / 段间距 / 左右边距 |
 | <img src="./src/renderer/src/assets/dark.svg" width="18" height="18" alt=""> | 主题切换 | 内置明亮 / 暗黑两种主题 |
 | <img src="./src/renderer/src/assets/enter_fullscreen.svg" width="18" height="18" alt=""> | 全屏阅读 | **沉浸式阅读体验**，阅读区域宽度可自由调整 |
 |  | 粘性标题栏 | 章节标题会常驻顶部，看到哪里一目了然 |

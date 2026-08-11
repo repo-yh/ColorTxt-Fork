@@ -99,13 +99,13 @@ export const SHORTCUT_ACTIONS: ShortcutActionDef[] = [
   {
     id: "decreaseLineHeight",
     scope: "window",
-    desc: "减小行高",
+    desc: "减小行间距",
     handlerKey: "decreaseLineHeight",
   },
   {
     id: "increaseLineHeight",
     scope: "window",
-    desc: "加大行高",
+    desc: "加大行间距",
     handlerKey: "increaseLineHeight",
   },
   { id: "toggleFind", scope: "window", desc: "查找", handlerKey: "toggleFind" },

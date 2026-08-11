@@ -96,7 +96,7 @@ export function useFindBookPanelShortcuts(deps: {
     unbindShortcuts = bindAppShortcuts(
       {
         openSettings: () => {
-          deps.openSettings(deps.showBookReader.value ? "reading" : "download");
+          deps.openSettings();
         },
         openBookSource: () => {
           deps.openBookSources();

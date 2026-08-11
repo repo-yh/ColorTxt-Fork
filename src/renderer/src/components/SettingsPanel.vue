@@ -422,7 +422,7 @@ async function loadWebDavPasswordDraft() {
 watch(modelValue, (open) => {
   if (!open) {
     voiceReadPanelRef.value?.cancelPreview?.();
-    activeTab.value = "general";
+    // 保留 activeTab：同窗口再次打开设置时回到上次标签（不持久化）
     return;
   }
   draftAi.value.embedding = normalizeEmbeddingEndpoint(draftAi.value.embedding);

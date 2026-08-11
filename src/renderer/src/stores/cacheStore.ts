@@ -65,7 +65,7 @@ export type PersistedSettingsData = {
   /** 侧边栏是否打开（非全屏时） */
   showSidebar?: boolean;
   fontSize?: number;
-  /** Monaco 行高倍数，实际行高 = round(fontSize * lineHeightMultiple) */
+  /** Monaco 行间距倍数（UI「行间距」），实际 lineHeight = round(fontSize * lineHeightMultiple) */
   lineHeightMultiple?: number;
   /** 每个物理行结束后的额外间距（px） */
   lineSpacingPx?: number;
@@ -83,7 +83,7 @@ export type PersistedSettingsData = {
   compressBlankLines?: boolean;
   /** 压缩空行时是否在每行（含章节标题）下方保留一行空行 */
   compressBlankKeepOneBlank?: boolean;
-  /** 压缩空行时章节标题前后空行模式 */
+  /** 压缩空行时章节标题上下空行模式 */
   chapterTitleBlankMode?: ChapterTitleBlankMode;
   /** 是否为正文行统一行首两个全角空格（章节标题行与空行除外） */
   leadIndentFullWidth?: boolean;

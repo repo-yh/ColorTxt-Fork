@@ -56,7 +56,7 @@ const props = withDefaults(
     /** 定时滚动已开启 */
     timedScrollActive?: boolean;
     canTimedScroll?: boolean;
-    /** 朗读模式中：禁用编辑/字体/行高/压缩空行/缩进/高级换行 */
+    /** 朗读模式中：禁用编辑/字体/行间距/压缩空行/缩进/高级换行 */
     voiceReadHeaderLocked?: boolean;
     /** 阅读器是否处于可编辑模式 */
     readerEditMode: boolean;

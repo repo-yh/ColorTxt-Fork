@@ -540,9 +540,9 @@ watch(
   (open) => {
     if (!open) {
       voiceReadPanelRef.value?.cancelPreview?.();
+      // 保留 activeTab：同窗口再次打开设置时回到上次标签（不持久化）
       return;
     }
-    activeTab.value = props.initialTab;
     void syncAllDraftsFromStores();
   },
 );
@@ -550,7 +550,8 @@ watch(
 watch(
   () => props.initialTab,
   (tab) => {
-    if (modelValue.value) activeTab.value = tab;
+    // 外部显式指定标签时才跳转（面板已打开，或打开瞬间写入）
+    activeTab.value = tab;
   },
 );
 

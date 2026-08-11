@@ -678,9 +678,11 @@ function onQuitApp() {
   window.colorTxt.quitApp();
 }
 
-function openSettings(tab: FindBookSettingsTabId = "download") {
+function openSettings(tab?: FindBookSettingsTabId) {
   closeMoreMenu();
-  settingsInitialTab.value = tab;
+  if (tab !== undefined) {
+    settingsInitialTab.value = tab;
+  }
   if (showBookReader.value) {
     void nextTick(() => {
       showSettingsPanel.value = true;
@@ -726,7 +728,7 @@ async function onCreateDesktopShortcut() {
 }
 
 function onOpenSettingsFromReader() {
-  openSettings("reading");
+  openSettings();
 }
 
 function openColorScheme() {
@@ -1765,7 +1767,7 @@ function onBack() {
           type="button"
           class="appShellMenuItem"
           role="menuitem"
-          @click="openSettings('download')"
+          @click="openSettings()"
         >
           <span class="appShellMenuIconSlot" v-html="icons.setting" />
           <span class="appShellMenuLabel">设置</span>

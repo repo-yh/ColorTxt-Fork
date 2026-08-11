@@ -75,7 +75,7 @@ const lineSpacingPath = resolve(
 ).replace(/\\/g, "/");
 
 /**
- * 行间距（物理行后常数 px）：注入 LinesLayout 垂直累加 + ViewModel 桥接（仅 renderer）
+ * 段间距（物理行后常数 px，键 lineSpacingPx）：注入 LinesLayout 垂直累加 + ViewModel 桥接（仅 renderer）
  */
 function monacoLineSpacingPlugin() {
   const linesLayoutPath =
@@ -365,7 +365,7 @@ export default defineConfig({
     optimizeDeps: {
       include: ["markmap-lib", "markmap-view", "d3-cloud", "d3-scale"],
       /**
-       * 必须排除：否则 esbuild 预构建会绕过本文件的 Monaco CJK 换行 / 行间距 transform/resolve，
+       * 必须排除：否则 esbuild 预构建会绕过本文件的 Monaco CJK 换行 / 段间距 transform/resolve，
        * 开发模式下去掉补丁（生产 Rollup 构建不受影响）。
        */
       exclude: ["monaco-editor"],

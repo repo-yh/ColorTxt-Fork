@@ -131,23 +131,6 @@ const selectListsEmpty: CustomSelectItem[] = [];
       <div class="settingsRow">
         <div class="settingsRowMain">
           <span class="settingsLabel short"
-            >行高（{{ draftLineHeightMultiple.toFixed(1) }}）</span
-          >
-          <RangeSlider
-            :model-value="draftLineHeightMultiple"
-            :min="minLineHeightMultiple"
-            :max="draftMaxLineHeightMultiple"
-            :step="lineHeightMultipleStep"
-            :show-percent="false"
-            aria-label="行高倍数"
-            @update:model-value="$emit('update:draftLineHeightMultiple', $event)"
-          />
-        </div>
-      </div>
-
-      <div class="settingsRow">
-        <div class="settingsRowMain">
-          <span class="settingsLabel short"
             >字间距（{{ draftLetterSpacingPx }} px）</span
           >
           <RangeSlider
@@ -165,7 +148,24 @@ const selectListsEmpty: CustomSelectItem[] = [];
       <div class="settingsRow">
         <div class="settingsRowMain">
           <span class="settingsLabel short"
-            >行间距（{{ draftLineSpacingPx }} px）</span
+            >行间距（{{ draftLineHeightMultiple.toFixed(1) }}）</span
+          >
+          <RangeSlider
+            :model-value="draftLineHeightMultiple"
+            :min="minLineHeightMultiple"
+            :max="draftMaxLineHeightMultiple"
+            :step="lineHeightMultipleStep"
+            :show-percent="false"
+            aria-label="行间距倍数"
+            @update:model-value="$emit('update:draftLineHeightMultiple', $event)"
+          />
+        </div>
+      </div>
+
+      <div class="settingsRow">
+        <div class="settingsRowMain">
+          <span class="settingsLabel short"
+            >段间距（{{ draftLineSpacingPx }} px）</span
           >
           <RangeSlider
             :model-value="draftLineSpacingPx"
@@ -173,7 +173,7 @@ const selectListsEmpty: CustomSelectItem[] = [];
             :max="maxLineSpacingPx"
             :step="lineSpacingPxStep"
             :show-percent="false"
-            aria-label="行间距"
+            aria-label="段间距"
             @update:model-value="$emit('update:draftLineSpacingPx', $event)"
           />
         </div>
@@ -486,7 +486,7 @@ const selectListsEmpty: CustomSelectItem[] = [];
 
       <div class="settingsRow">
         <div class="settingsRowMain settingsRowMain--baseline">
-          <span class="settingsLabel">章节标题前后保留空行</span>
+          <span class="settingsLabel">章节标题上下保留空行</span>
           <AppCustomSelect
             class="settingsSelect settingsSelect--chapterTitleBlank"
             :model-value="draftChapterTitleBlankMode"
@@ -495,7 +495,7 @@ const selectListsEmpty: CustomSelectItem[] = [];
             :scroll-items="chapterTitleBlankSelectItems"
             :fixed-bottom-items="selectListsEmpty"
             :scroll-max-height="160"
-            ariaLabel="压缩空行时章节标题前后保留空行"
+            ariaLabel="压缩空行时章节标题上下保留空行"
             @update:model-value="
               $emit(
                 'update:draftChapterTitleBlankMode',

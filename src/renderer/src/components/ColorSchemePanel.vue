@@ -415,7 +415,7 @@ function onResetLineationDefaults() {
 
 watch(modelValue, (open) => {
   if (!open) {
-    activeTab.value = props.visibleTabs[0] ?? "reader";
+    // 保留 activeTab：同窗口再次打开配色时回到上次标签（不持久化）
     pickerLive.value = {};
     highlightPickerLive.value = {};
     lineationPickerLive.value = {};
