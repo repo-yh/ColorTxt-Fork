@@ -398,6 +398,16 @@ export function resolveDetailLastChapterDisplay(
  */
 const LEGADO_INDENT_WS = "[\\t\\n\\r\\f\\v \\u3000]";
 
+function stripHtmlCommentsSafely(input: string): string {
+  let prev: string;
+  let next = input;
+  do {
+    prev = next;
+    next = next.replace(/<!--[^>]*-->/g, "");
+  } while (next !== prev);
+  return next;
+}
+
 /** Legado HtmlFormatter.format / formatKeepImg：HTML 正文转纯文本 */
 function formatLegadoHtmlContent(html: string, keepImg = false): string {
   if (!trimLegadoAsciiWhitespace(html)) return "";
@@ -406,13 +416,12 @@ function formatLegadoHtmlContent(html: string, keepImg = false): string {
   const tagStrip = keepImg
     ? /<\/?(?!img\b)[a-zA-Z]+(?=[ >])[^<>]*>/gi
     : /<\/?[a-zA-Z]+(?=[ >])[^<>]*>/gi;
-  return decoded
+  return stripHtmlCommentsSafely(decoded)
     .replace(/(&nbsp;|&lrm;)+/gi, " ")
     .replace(/\u200E/g, "")
     .replace(/(&ensp;|&emsp;)/gi, " ")
     .replace(/(&thinsp;|&zwnj;|&zwj;|\u2009|\u200C|\u200D)/g, "")
     .replace(/<\/?(?:div|p|br|hr|h\d|article|dd|dl)[^>]*>/gi, "\n")
-    .replace(/<!--[^>]*-->/g, "")
     .replace(tagStrip, "")
     // 对齐 Legado indent1/indent2：段间换行并规范为单个全角缩进（幂等）
     .replace(new RegExp(`${LEGADO_INDENT_WS}*\\n+${LEGADO_INDENT_WS}*`, "g"), "\n　　")
