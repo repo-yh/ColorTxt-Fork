@@ -179,6 +179,29 @@ export function resolveDefaultBookSourceChapterCacheDirSync(): string {
   return "";
 }
 
+/** 本地词典缓存目录默认 userData/dictionaries */
+export function resolveDefaultDictionariesDirSync(): string {
+  try {
+    const p = window.colorTxt?.getDefaultDictionariesDir?.();
+    if (typeof p === "string") {
+      const t = p.trim();
+      if (t) return t;
+    }
+  } catch {
+    /* ignore */
+  }
+  try {
+    const ud = window.colorTxt?.getUserDataPath?.();
+    if (typeof ud === "string") {
+      const t = ud.trim();
+      if (t) return joinFs(t, "dictionaries");
+    }
+  } catch {
+    /* ignore */
+  }
+  return "";
+}
+
 export async function resolveEffectiveAiDataCacheDir(
   configured: string,
 ): Promise<string> {

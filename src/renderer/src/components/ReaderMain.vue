@@ -100,6 +100,9 @@ import {
 import AppContextMenu from "./AppContextMenu.vue";
 import ReaderSelectionToolbar from "./ReaderSelectionToolbar.vue";
 import ReaderNoteInputPanel from "./ReaderNoteInputPanel.vue";
+import ReaderDictionaryPopup from "./ReaderDictionaryPopup.vue";
+import type { DictionarySettings } from "@shared/dictionaryTypes";
+import { mergeDictionarySettings } from "../constants/dictionarySettings";
 import ReaderImageLightbox from "./ReaderImageLightbox.vue";
 import ReaderPartialEditPanel from "./ReaderPartialEditPanel.vue";
 import VoiceReadResumeGuide from "./VoiceReadResumeGuide.vue";
@@ -448,6 +451,8 @@ const props = withDefaults(
     aiFeaturesEnabled?: boolean;
     /** 选区工具条可选按钮显示（设置 → 阅读 → 工具条） */
     selectionToolbarButtons?: SelectionToolbarButtons;
+    /** 词典设置（查词浮层） */
+    dictionarySettings?: DictionarySettings;
     /** 至少一项智能排版任务已开启（设置 → 编辑） */
     canUseAiSmartFormat?: boolean;
     /** 智能排版 Diff 预览（非 null 时在编辑器区域展示左右对比） */
@@ -475,6 +480,7 @@ const props = withDefaults(
     fastScrollSensitivity: defaultFastScrollSensitivity,
     stickyChapterTitleEnabled: defaultStickyChapterTitleEnabled,
     selectionToolbarButtons: () => ({ ...defaultSelectionToolbarButtons }),
+    dictionarySettings: () => mergeDictionarySettings(undefined),
     readerEditShowLineNumbers: defaultReaderEditShowLineNumbers,
     readerEditMinimap: defaultReaderEditMinimap,
     streamLoading: false,
@@ -543,6 +549,7 @@ const emit = defineEmits<{
   smartFormatReviewApply: [];
   smartFormatReviewDiscard: [];
   annotationQuotesChanged: [];
+  openDictionaryManage: [];
 }>();
 
 const smartFormatRunning = ref(false);
@@ -704,6 +711,14 @@ const {
   notePanelEditing,
   notePanelSourceText,
   closeNotePanel,
+  dictionaryPopupOpen,
+  dictionaryPopupWord,
+  dictionaryPopupCenterX,
+  dictionaryPopupTop,
+  dictionaryPopupOpenDownward,
+  dictionaryPopupMaxHeight,
+  dictionaryPopupRootRef,
+  closeDictionaryPopup,
   onToolbarAction,
   onHighlightPickConfirm,
   onHighlightPickRemove,
@@ -3890,6 +3905,19 @@ watch(smartFormatReviewActive, (active) => {
           @confirm="onNotePanelConfirm"
           @close="closeNotePanel"
           @delete-note="onNotePanelDelete"
+        />
+      </div>
+      <div ref="dictionaryPopupRootRef">
+        <ReaderDictionaryPopup
+          :open="dictionaryPopupOpen"
+          :word="dictionaryPopupWord"
+          :settings="dictionarySettings"
+          :float-center-x="dictionaryPopupCenterX"
+          :float-root-top="dictionaryPopupTop"
+          :open-downward="dictionaryPopupOpenDownward"
+          :max-height="dictionaryPopupMaxHeight"
+          @close="closeDictionaryPopup"
+          @open-dictionary-manage="emit('openDictionaryManage')"
         />
       </div>
     </div>

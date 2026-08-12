@@ -24,6 +24,7 @@ export const BOOK_SOURCE_IPC = {
   importPreview: "bookSource:importPreview",
   importCommit: "bookSource:importCommit",
   fetchUrl: "bookSource:fetchUrl",
+  fetchUrlAbort: "bookSource:fetchUrlAbort",
   readFile: "bookSource:readFile",
   search: "bookSource:search",
   searchCancel: "bookSource:searchCancel",
@@ -214,7 +215,16 @@ export type BookSourceIpcApi = {
   bookSourceImportCommit: (
     payload: BookSourceImportCommitPayload,
   ) => Promise<{ ok: boolean; added: number; updated: number }>;
-  bookSourceFetchUrl: (url: string) => Promise<{ ok: boolean; text?: string; message?: string }>;
+  bookSourceFetchUrl: (
+    url: string,
+    options?: { requestId?: number },
+  ) => Promise<{
+    ok: boolean;
+    text?: string;
+    message?: string;
+    aborted?: boolean;
+  }>;
+  bookSourceFetchUrlAbort: (requestId: number) => Promise<{ ok: boolean }>;
   bookSourceReadFile: (filePath: string) => Promise<{ ok: boolean; text?: string; message?: string }>;
   bookSourceSearch: (
     key: string,

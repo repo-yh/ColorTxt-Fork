@@ -284,6 +284,7 @@ export default defineConfig({
           "iconv-lite",
           "electron-updater",
           "better-sqlite3",
+          "mdict-js",
           "sqlite-vec",
           "ws",
           "@node-rs/jieba",

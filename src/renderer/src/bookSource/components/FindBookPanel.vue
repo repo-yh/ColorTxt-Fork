@@ -19,7 +19,9 @@ import FindBookshelfPanel from "./FindBookshelfPanel.vue";
 import FindBookListItem from "./FindBookListItem.vue";
 import { FIND_BOOK_LIST_ROW_STRIDE } from "./findBookListLayout";
 import FindBookSettingsPanel from "./FindBookSettingsPanel.vue";
-import ColorSchemePanel from "../../components/ColorSchemePanel.vue";
+import ColorSchemePanel, {
+  type ColorSchemeApplyPayload,
+} from "../../components/ColorSchemePanel.vue";
 import AboutPanel from "../../components/AboutPanel.vue";
 import ShortcutPanel from "../../components/ShortcutPanel.vue";
 import AppUpdateFlow from "../../components/AppUpdateFlow.vue";
@@ -336,6 +338,10 @@ const {
   monacoFontFamily: colorSchemeFontFamily,
   applyReaderPalettes,
 } = fbReaderSettings;
+
+function onApplyColorScheme(payload: ColorSchemeApplyPayload) {
+  if (payload.reader) applyReaderPalettes(payload.reader);
+}
 const effectiveCacheDir = findBookSettings.effectiveCacheDir;
 const effectiveDownloadDir = findBookSettings.effectiveDownloadDir;
 
@@ -2078,7 +2084,7 @@ function onBack() {
       :reader-palette-color-enabled-dark="colorSchemeColorEnabledDark"
       :monaco-font-family="colorSchemeFontFamily"
       :visible-tabs="['reader']"
-      @apply-reader-palettes="applyReaderPalettes"
+      @apply="onApplyColorScheme"
     />
 
     <ShortcutPanel

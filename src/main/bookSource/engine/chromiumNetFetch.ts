@@ -137,13 +137,17 @@ async function fetchViaUndici(opts: {
   timeoutMs?: number;
   proxy?: string | null;
   redirect?: RequestRedirect;
+  signal?: AbortSignal;
 }): Promise<ChromiumNetFetchResult> {
   const method = opts.method.toUpperCase();
   const init: RequestInit & { dispatcher?: unknown } = {
     method,
     headers: opts.headers,
     redirect: opts.redirect ?? "follow",
-    signal: AbortSignal.timeout(opts.timeoutMs ?? 20_000),
+    signal: combineAbortSignals(
+      AbortSignal.timeout(opts.timeoutMs ?? 20_000),
+      opts.signal,
+    ),
     dispatcher: getBookSourceDispatcher(opts.proxy),
   };
   if (method !== "GET" && method !== "HEAD" && opts.body != null) {
@@ -176,6 +180,8 @@ export async function fetchViaChromiumNet(opts: {
   /** 未带 Cookie 头时是否附加 CookieJar（对齐 enabledCookieJar） */
   useCookieJar?: boolean;
   redirect?: RequestRedirect;
+  /** 调用方取消（与超时信号合并） */
+  signal?: AbortSignal;
 }): Promise<ChromiumNetFetchResult> {
   const method = (opts.method ?? "GET").toUpperCase();
   const headers = sanitizeBookSourceRequestHeaders({
@@ -203,8 +209,10 @@ export async function fetchViaChromiumNet(opts: {
       timeoutMs: opts.timeoutMs,
       proxy: opts.proxy,
       redirect: opts.redirect,
+      signal: opts.signal,
     });
   } catch (undiciErr) {
+    if (opts.signal?.aborted) throw undiciErr;
     try {
       return await fetchViaChromiumSession({
         url: opts.url,
@@ -215,11 +223,32 @@ export async function fetchViaChromiumNet(opts: {
         timeoutMs: opts.timeoutMs,
         proxy: opts.proxy,
         redirect: opts.redirect,
+        signal: opts.signal,
       });
     } catch {
       throw undiciErr;
     }
   }
+}
+
+/** 超时与外部取消合并；已中止则立即返回该信号 */
+function combineAbortSignals(
+  timeout: AbortSignal,
+  external?: AbortSignal,
+): AbortSignal {
+  if (!external) return timeout;
+  if (typeof AbortSignal.any === "function") {
+    return AbortSignal.any([timeout, external]);
+  }
+  const ac = new AbortController();
+  const abort = () => ac.abort();
+  if (timeout.aborted || external.aborted) {
+    ac.abort();
+    return ac.signal;
+  }
+  timeout.addEventListener("abort", abort, { once: true });
+  external.addEventListener("abort", abort, { once: true });
+  return ac.signal;
 }
 
 /** Electron session.fetch：浏览器 TLS；关闭磁盘缓存 */
@@ -232,13 +261,17 @@ async function fetchViaChromiumSession(opts: {
   timeoutMs?: number;
   proxy?: string | null;
   redirect?: RequestRedirect;
+  signal?: AbortSignal;
 }): Promise<ChromiumNetFetchResult> {
   const method = opts.method.toUpperCase();
   const init: RequestInit = {
     method,
     headers: opts.headers,
     redirect: opts.redirect ?? "follow",
-    signal: AbortSignal.timeout(opts.timeoutMs ?? 20_000),
+    signal: combineAbortSignals(
+      AbortSignal.timeout(opts.timeoutMs ?? 20_000),
+      opts.signal,
+    ),
     referrerPolicy: "unsafe-url",
     credentials: "omit",
     cache: "no-store",

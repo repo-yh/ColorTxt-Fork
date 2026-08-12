@@ -102,6 +102,15 @@ export function useReaderAnnotations(opts: {
   const notePanelTargetAnnotationId = ref<string | null>(null);
   const notePanelPhysicalRange = ref<AnnotationRange | null>(null);
   const notePanelRootRef = ref<HTMLElement | null>(null);
+  const dictionaryPopupOpen = ref(false);
+  const dictionaryPopupWord = ref("");
+  const dictionaryPopupCenterX = ref(0);
+  const dictionaryPopupTop = ref(0);
+  const dictionaryPopupOpenDownward = ref(false);
+  /** 按阅读区可用空间钳制，避免贴顶/贴底被截断 */
+  const dictionaryPopupMaxHeight = ref(420);
+  const dictionaryPopupRootRef = ref<HTMLElement | null>(null);
+  let dictionaryPopupResizeObserver: ResizeObserver | null = null;
 
   let annotationViewportSyncTimer: ReturnType<typeof setTimeout> | null = null;
   let annotationViewportDecorLastKey = "";
@@ -431,6 +440,141 @@ export function useReaderAnnotations(opts: {
     suppressToolbarUntilMs = Date.now() + 300;
   }
 
+  const DICT_POPUP_W = 360;
+  const DICT_POPUP_MAX_H = 420;
+  const DICT_POPUP_MIN_H = 140;
+  const DICT_POPUP_ESTIMATE_H = 280;
+
+  function disconnectDictionaryPopupResizeObserver() {
+    dictionaryPopupResizeObserver?.disconnect();
+    dictionaryPopupResizeObserver = null;
+  }
+
+  function applyDictionaryPopupPlacement(measuredHeight?: number) {
+    const anchor = getAnchor();
+    const editorClip = getEditorClipRect();
+    const floatWidth = DICT_POPUP_W;
+
+    let floatHeight =
+      measuredHeight && measuredHeight > 0
+        ? measuredHeight
+        : DICT_POPUP_ESTIMATE_H;
+    floatHeight = Math.min(
+      DICT_POPUP_MAX_H,
+      Math.max(DICT_POPUP_MIN_H, floatHeight),
+    );
+
+    if (anchor) {
+      const spaceAbove = Math.max(
+        0,
+        anchor.anchorTop - FLOAT_GAP - (editorClip.top + FLOAT_MARGIN),
+      );
+      const spaceBelow = Math.max(
+        0,
+        editorClip.bottom - FLOAT_MARGIN - (anchor.lineBottom + FLOAT_GAP),
+      );
+      const maxAvail = Math.max(spaceAbove, spaceBelow, DICT_POPUP_MIN_H);
+      floatHeight = Math.min(floatHeight, maxAvail);
+
+      const base = {
+        selectionCenterX: anchor.selectionCenterX,
+        anchorTop: anchor.anchorTop,
+        lineBottom: anchor.lineBottom,
+        floatHeight,
+        floatWidth,
+        gap: FLOAT_GAP,
+        margin: FLOAT_MARGIN,
+      };
+
+      let placed = computeFloatPlacement({ ...base, clip: editorClip });
+      const rightEdge = placed.centerX + floatWidth / 2;
+      const windowRightLimit = window.innerWidth - FLOAT_MARGIN;
+      if (rightEdge > windowRightLimit + 0.5) {
+        placed = computeFloatPlacement({
+          ...base,
+          clip: {
+            top: editorClip.top,
+            bottom: editorClip.bottom,
+            left: 0,
+            right: window.innerWidth,
+          },
+        });
+      }
+
+      if (Math.abs(dictionaryPopupCenterX.value - placed.centerX) > 0.5) {
+        dictionaryPopupCenterX.value = placed.centerX;
+      }
+      if (Math.abs(dictionaryPopupTop.value - placed.rootTop) > 0.5) {
+        dictionaryPopupTop.value = placed.rootTop;
+      }
+      dictionaryPopupOpenDownward.value = placed.openDownward;
+
+      const avail = placed.openDownward
+        ? editorClip.bottom - FLOAT_MARGIN - placed.rootTop
+        : placed.rootTop - (editorClip.top + FLOAT_MARGIN);
+      const nextMax = Math.min(
+        DICT_POPUP_MAX_H,
+        Math.max(DICT_POPUP_MIN_H, avail),
+      );
+      if (Math.abs(dictionaryPopupMaxHeight.value - nextMax) > 0.5) {
+        dictionaryPopupMaxHeight.value = nextMax;
+      }
+      return;
+    }
+
+    // 选区锚点不可用时，退回工具条坐标并按窗口钳制高度
+    dictionaryPopupCenterX.value = floatCenterX.value;
+    dictionaryPopupTop.value = floatRootTop.value;
+    dictionaryPopupOpenDownward.value = floatOpenDownward.value;
+    const fallbackAvail = floatOpenDownward.value
+      ? window.innerHeight - FLOAT_MARGIN - floatRootTop.value
+      : floatRootTop.value - FLOAT_MARGIN;
+    dictionaryPopupMaxHeight.value = Math.min(
+      DICT_POPUP_MAX_H,
+      Math.max(DICT_POPUP_MIN_H, fallbackAvail),
+    );
+  }
+
+  function observeDictionaryPopupSize() {
+    disconnectDictionaryPopupResizeObserver();
+    const el = dictionaryPopupRootRef.value?.querySelector(".dictPopup");
+    if (!(el instanceof HTMLElement)) return;
+    dictionaryPopupResizeObserver = new ResizeObserver(() => {
+      if (!dictionaryPopupOpen.value) return;
+      const h = el.getBoundingClientRect().height;
+      if (h > 0) applyDictionaryPopupPlacement(h);
+    });
+    dictionaryPopupResizeObserver.observe(el);
+  }
+
+  function openDictionaryPopupFromToolbar() {
+    const text = draftText.value.trim();
+    if (!text) {
+      bindDraftFromSelection();
+    }
+    const word = draftText.value.trim();
+    if (!word) return;
+    dictionaryPopupWord.value = word;
+    applyDictionaryPopupPlacement();
+    dictionaryPopupOpen.value = true;
+    closeToolbarUi();
+    suppressToolbarUntilMs = Date.now() + 300;
+    void nextTick(() => {
+      observeDictionaryPopupSize();
+      const el = dictionaryPopupRootRef.value?.querySelector(".dictPopup");
+      if (el instanceof HTMLElement) {
+        const h = el.getBoundingClientRect().height;
+        if (h > 0) applyDictionaryPopupPlacement(h);
+      }
+    });
+  }
+
+  function closeDictionaryPopup() {
+    disconnectDictionaryPopupResizeObserver();
+    dictionaryPopupOpen.value = false;
+    dictionaryPopupWord.value = "";
+  }
+
   function ensureNotePanelAnnotationRecord(): ReaderAnnotationRecord | null {
     const existing = resolveAnnotationById(notePanelTargetAnnotationId.value);
     if (existing) return existing;
@@ -573,6 +717,7 @@ export function useReaderAnnotations(opts: {
     if (buttons.copy) actions += 1;
     if (opts.monacoCustomHighlight()) actions += 1;
     if (buttons.find) actions += 1;
+    if (buttons.dictionary) actions += 1;
     if (opts.aiFeaturesEnabled() && buttons.askAi) actions += 1;
     return actions * FLOAT_ACTION_W + FLOAT_TOOLBAR_PAD_X;
   }
@@ -1040,6 +1185,7 @@ export function useReaderAnnotations(opts: {
       | "straight"
       | "note"
       | "find"
+      | "dictionary"
       | "askAi",
   ) {
     if (action === "note") {
@@ -1062,6 +1208,10 @@ export function useReaderAnnotations(opts: {
     if (action === "find") {
       closeToolbarUi();
       opts.emitFindWithQuote(text);
+      return;
+    }
+    if (action === "dictionary") {
+      openDictionaryPopupFromToolbar();
       return;
     }
     if (action === "askAi") {
@@ -1172,6 +1322,7 @@ export function useReaderAnnotations(opts: {
     const onDocPointerDown = (ev: PointerEvent) => {
       if (floatRootRef.value?.contains(ev.target as Node)) return;
       if (notePanelRootRef.value?.contains(ev.target as Node)) return;
+      if (dictionaryPopupRootRef.value?.contains(ev.target as Node)) return;
       const editorDom = opts.editor.value?.getDomNode();
       if (!editorDom?.contains(ev.target as Node)) return;
       closeToolbarUi();
@@ -1200,6 +1351,14 @@ export function useReaderAnnotations(opts: {
     notePanelEditing,
     notePanelSourceText,
     notePanelRootRef,
+    dictionaryPopupOpen,
+    dictionaryPopupWord,
+    dictionaryPopupCenterX,
+    dictionaryPopupTop,
+    dictionaryPopupOpenDownward,
+    dictionaryPopupMaxHeight,
+    dictionaryPopupRootRef,
+    closeDictionaryPopup,
     closeToolbarUi,
     showToolbarFromSelectionIfAny,
     syncToolbarOnScroll,

@@ -651,6 +651,31 @@ function pruneOpencc(nodeModulesRoot, plat, arch) {
   process.exit(1);
 }
 
+/**
+ * mdict-js：运行时只 `require("mdict-js")` → `lib/mdict.js`；源码/测试/示例不进包。
+ * @param {string} nodeModulesRoot
+ */
+function pruneMdictJs(nodeModulesRoot) {
+  const pkgRoot = path.join(nodeModulesRoot, "mdict-js");
+  if (!fs.existsSync(pkgRoot)) return;
+
+  for (const name of [
+    "src",
+    "test",
+    "example",
+    "mdx",
+    "typings",
+    "tsconfig.json",
+    ".babelrc",
+    ".eslintrc",
+    ".eslintignore",
+    ".prettierrc",
+    "js-mdict-README.md",
+  ]) {
+    rm(path.join(pkgRoot, name));
+  }
+}
+
 function main() {
   const { plat, arch, nm } = parseArgs();
   if (!fs.existsSync(nm)) {
@@ -670,6 +695,7 @@ function main() {
   pruneSqliteVec(nm, plat, arch);
   pruneJiebaPlatformPackages(nm, plat, arch);
   pruneOpencc(nm, plat, arch);
+  pruneMdictJs(nm);
   pruneInstallOnlyPackages(nm);
   patchBetterSqlite3Manifest(nm);
 
@@ -692,8 +718,9 @@ function main() {
   const hfMb = dirSizeMb(path.join(nm, "@huggingface"));
   const sqliteMb = dirSizeMb(path.join(nm, "better-sqlite3"));
   const openccMb = dirSizeMb(path.join(nm, "opencc"));
+  const mdictMb = dirSizeMb(path.join(nm, "mdict-js"));
   console.log(
-    `[prune-pack-deps] ${plat}/${arch} done; node_modules ${beforeMb}MB → ${afterMb}MB (−${saved.toFixed(1)}MB); better-sqlite3≈${sqliteMb}MB opencc≈${openccMb}MB onnxruntime-node≈${ortMb}MB @huggingface≈${hfMb}MB`,
+    `[prune-pack-deps] ${plat}/${arch} done; node_modules ${beforeMb}MB → ${afterMb}MB (−${saved.toFixed(1)}MB); better-sqlite3≈${sqliteMb}MB opencc≈${openccMb}MB mdict-js≈${mdictMb}MB onnxruntime-node≈${ortMb}MB @huggingface≈${hfMb}MB`,
   );
 }
 

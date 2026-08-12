@@ -1,15 +1,18 @@
 import { computed, ref } from "vue";
 import {
   createInitialFindBookSettingsState,
+  loadFindBookProxySettings,
   loadMainSettingsData,
   patchPersistedMainSettings,
   persistFindBookSettings,
   sharedReaderSettingsFromMainData,
   snapshotFindBookOnlySettingsFromStore,
   snapshotSharedReaderSettingsForMain,
+  syncPersistedFindBookProxyToMain,
 } from "../services/findBookSettingsStore";
 import {
-  buildFindBookProxyUrl,
+  findBookProxyChangedEvent,
+  findBookSettingsKey,
   type FindBookProxySettings,
 } from "../constants/findBookSettings";
 import {
@@ -65,6 +68,7 @@ function createFindBookSettingsStore() {
   const timedScrollSettings = ref(initial.timedScrollSettings);
   const pomodoroSettings = ref(initial.pomodoroSettings);
   const selectionToolbarButtons = ref(initial.selectionToolbarButtons);
+  const dictionarySettings = ref(initial.dictionarySettings);
 
   /** 阅读/编辑共用字段落盘基线（不把磁盘合并进本窗内存） */
   const readerUiPersistBaseline: Record<string, unknown> = {};
@@ -79,9 +83,12 @@ function createFindBookSettingsStore() {
     return configured || resolveDefaultBookSourceDownloadDirSync();
   });
 
+  function applyProxyFromDisk() {
+    proxy.value = loadFindBookProxySettings();
+  }
+
   function syncHttpProxyToMain() {
-    const url = buildFindBookProxyUrl(proxy.value);
-    void window.colorTxt.bookSourceSetHttpProxy(url || null);
+    syncPersistedFindBookProxyToMain();
   }
 
   function sharedReaderSnapshot() {
@@ -116,6 +123,7 @@ function createFindBookSettingsStore() {
       timedScrollSettings: timedScrollSettings.value,
       pomodoroSettings: pomodoroSettings.value,
       selectionToolbarButtons: selectionToolbarButtons.value,
+      dictionarySettings: dictionarySettings.value,
     };
   }
 
@@ -144,6 +152,11 @@ function createFindBookSettingsStore() {
       }),
     );
     syncHttpProxyToMain();
+    try {
+      window.dispatchEvent(new CustomEvent(findBookProxyChangedEvent));
+    } catch {
+      // ignore
+    }
   }
 
   /** 阅读/编辑相关写入主界面 `colorTxt.ui.settings`（未改字段保留磁盘） */
@@ -186,13 +199,30 @@ function createFindBookSettingsStore() {
     timedScrollSettings.value = shared.timedScrollSettings;
     pomodoroSettings.value = shared.pomodoroSettings;
     selectionToolbarButtons.value = shared.selectionToolbarButtons;
+    dictionarySettings.value = shared.dictionarySettings;
     captureReaderUiPersistBaseline();
+  }
+
+  function onProxyExternalChange() {
+    applyProxyFromDisk();
+    syncHttpProxyToMain();
+  }
+
+  function onStorageSync(ev: StorageEvent) {
+    if (ev.storageArea !== window.localStorage) return;
+    if (ev.key !== null && ev.key !== findBookSettingsKey) return;
+    onProxyExternalChange();
   }
 
   captureReaderUiPersistBaseline();
 
   // 窗口启动时把已持久化的代理同步到主进程
   syncHttpProxyToMain();
+
+  if (typeof window !== "undefined") {
+    window.addEventListener("storage", onStorageSync);
+    window.addEventListener(findBookProxyChangedEvent, onProxyExternalChange);
+  }
 
   return {
     cacheDir,
@@ -204,6 +234,7 @@ function createFindBookSettingsStore() {
     effectiveCacheDir,
     effectiveDownloadDir,
     syncHttpProxyToMain,
+    applyProxyFromDisk,
     readerFontSize,
     readerLineHeightMultiple,
     readerLineSpacingPx,
@@ -237,6 +268,7 @@ function createFindBookSettingsStore() {
     timedScrollSettings,
     pomodoroSettings,
     selectionToolbarButtons,
+    dictionarySettings,
     persistAll,
     persistReaderUiPrefs,
     hydrateSharedReaderFromMain,

@@ -19,6 +19,12 @@ export const appLoading = {
     appLoadingModel.open = true;
   },
 
+  /** 更新当前蒙层文案（不改变嵌套深度） */
+  update(message: string): void {
+    if (!appLoadingModel.open) return;
+    appLoadingModel.message = message.trim() || "请稍候";
+  },
+
   close(): void {
     depth = Math.max(0, depth - 1);
     if (depth === 0) {

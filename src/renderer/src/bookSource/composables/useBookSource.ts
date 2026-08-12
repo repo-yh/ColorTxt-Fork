@@ -12,7 +12,47 @@ import type {
 import { parseBookSourceJson } from "@shared/bookSource/types";
 import { searchBookToBook } from "@shared/bookSource/bookModel";
 import { appPrompt } from "../../services/appDialog";
+import { appLoading } from "../../services/appLoading";
 import { ipcPlain } from "../ipcPlain";
+
+const NETWORK_IMPORT_MAX_RETRIES = 5;
+const NETWORK_IMPORT_RETRY_DELAY_MS = 1000;
+
+let nextNetworkImportRequestId = 1;
+
+export class NetworkImportAbortedError extends Error {
+  constructor(message = "已取消") {
+    super(message);
+    this.name = "NetworkImportAbortedError";
+  }
+}
+
+export function isNetworkImportAborted(e: unknown): boolean {
+  return e instanceof NetworkImportAbortedError;
+}
+
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new NetworkImportAbortedError());
+      return;
+    }
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+      reject(new NetworkImportAbortedError());
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+function throwIfAborted(signal: AbortSignal): void {
+  if (signal.aborted) throw new NetworkImportAbortedError();
+}
 
 export function useBookSourceApi() {
   const api = window.colorTxt;
@@ -52,21 +92,98 @@ export function useBookSourceApi() {
     return api.bookSourceImportPreview(sources);
   }
 
+  /** 拉取网络书源正文；失败则间隔重试；支持 Esc / AbortSignal 中断 */
+  async function fetchNetworkImportText(
+    url: string,
+    signal: AbortSignal,
+    hooks?: {
+      onRequestId?: (requestId: number) => void;
+      onRequestSettled?: () => void;
+    },
+  ): Promise<string> {
+    let lastMessage = "加载失败";
+    for (
+      let attempt = 0;
+      attempt <= NETWORK_IMPORT_MAX_RETRIES;
+      attempt++
+    ) {
+      throwIfAborted(signal);
+      if (attempt > 0) {
+        appLoading.update(
+          `获取失败，正在重试 ${attempt}/${NETWORK_IMPORT_MAX_RETRIES}`,
+        );
+        await sleep(NETWORK_IMPORT_RETRY_DELAY_MS, signal);
+        throwIfAborted(signal);
+        appLoading.update("正在获取书源");
+      }
+      const requestId = nextNetworkImportRequestId++;
+      hooks?.onRequestId?.(requestId);
+      try {
+        const res = await api.bookSourceFetchUrl(url, { requestId });
+        throwIfAborted(signal);
+        if (res.aborted) throw new NetworkImportAbortedError();
+        if (res.ok && res.text) return res.text;
+        lastMessage = res.message?.trim() || "加载失败";
+        // 入参无效无需重试
+        if (lastMessage === "URL 无效") break;
+      } finally {
+        hooks?.onRequestSettled?.();
+      }
+    }
+    throw new Error(lastMessage);
+  }
+
   async function importFromNetwork(): Promise<BookSourceImportPreviewItem[]> {
     const url = await appPrompt("", {
       title: "网络导入",
       placeholder: "URL",
     });
     if (!url?.trim()) return [];
-    const res = await api.bookSourceFetchUrl(url.trim());
-    if (!res.ok || !res.text) throw new Error(res.message ?? "加载失败");
-    const sources = parseBookSourceJson(res.text);
-    if (!sources.length) {
-      throw new Error(
-        "未解析到有效书源（需含 bookSourceUrl / bookSourceName）",
-      );
+
+    const ac = new AbortController();
+    let activeRequestId: number | null = null;
+    const onEsc = (ev: KeyboardEvent) => {
+      if (ev.key !== "Escape") return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      if (activeRequestId != null) {
+        void api.bookSourceFetchUrlAbort(activeRequestId);
+      }
+      ac.abort();
+    };
+
+    // 拦截 Esc，避免关掉书源面板等下层模态
+    window.addEventListener("keydown", onEsc, true);
+    try {
+      return await appLoading.with("正在获取书源", async () => {
+        const text = await fetchNetworkImportText(url.trim(), ac.signal, {
+          onRequestId: (id) => {
+            activeRequestId = id;
+          },
+          onRequestSettled: () => {
+            activeRequestId = null;
+          },
+        });
+        throwIfAborted(ac.signal);
+        appLoading.update("正在解析书源");
+        const sources = parseBookSourceJson(text);
+        throwIfAborted(ac.signal);
+        if (!sources.length) {
+          throw new Error(
+            "未解析到有效书源（需含 bookSourceUrl / bookSourceName）",
+          );
+        }
+        appLoading.update("正在准备导入预览");
+        const preview = await api.bookSourceImportPreview(sources);
+        throwIfAborted(ac.signal);
+        return preview;
+      });
+    } finally {
+      window.removeEventListener("keydown", onEsc, true);
+      if (activeRequestId != null) {
+        void api.bookSourceFetchUrlAbort(activeRequestId);
+      }
     }
-    return api.bookSourceImportPreview(sources);
   }
 
   /** 从系统剪贴板 JSON 解析书源并生成导入预览（数组或单对象） */

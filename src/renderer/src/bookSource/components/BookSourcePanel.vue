@@ -19,6 +19,7 @@ import BookSourceLoginPanel from "./BookSourceLoginPanel.vue";
 import BookSourceCenterState from "./BookSourceCenterState.vue";
 import CheckSourceConfigPanel from "./CheckSourceConfigPanel.vue";
 import {
+  isNetworkImportAborted,
   newEmptyBookSource,
   useBookSourceApi,
 } from "../composables/useBookSource";
@@ -655,6 +656,7 @@ async function onNetworkImport() {
     importItems.value = preview;
     showImport.value = true;
   } catch (e) {
+    if (isNetworkImportAborted(e)) return;
     console.error(e);
     appToast(e instanceof Error ? e.message : "网络导入失败", {
       kind: "warning",

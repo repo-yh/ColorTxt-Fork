@@ -34,6 +34,15 @@ import type {
   ColorTxtSaveDialogOptions,
   ColorTxtSaveDialogResult,
 } from "@shared/colorTxtOpenSaveDialog";
+import {
+  DICTIONARY_IPC,
+  type DictionaryImportRequest,
+  type DictionaryImportResponse,
+  type DictionaryLookupRequest,
+  type DictionaryLookupResponse,
+  type DictionaryRemoveRequest,
+  type DictionaryRemoveResponse,
+} from "@shared/dictionaryTypes";
 import type {
   AiTxt2ImgInvokeDraft,
   AiTxt2ImgInvokeResult,
@@ -1096,9 +1105,13 @@ const api = {
     ipcRenderer.invoke(BOOK_SOURCE_IPC.importCommit, payload) as ReturnType<
       BookSourceIpcApi["bookSourceImportCommit"]
     >,
-  bookSourceFetchUrl: (url: string) =>
-    ipcRenderer.invoke(BOOK_SOURCE_IPC.fetchUrl, url) as ReturnType<
+  bookSourceFetchUrl: (url: string, options?: { requestId?: number }) =>
+    ipcRenderer.invoke(BOOK_SOURCE_IPC.fetchUrl, url, options) as ReturnType<
       BookSourceIpcApi["bookSourceFetchUrl"]
+    >,
+  bookSourceFetchUrlAbort: (requestId: number) =>
+    ipcRenderer.invoke(BOOK_SOURCE_IPC.fetchUrlAbort, requestId) as ReturnType<
+      BookSourceIpcApi["bookSourceFetchUrlAbort"]
     >,
   bookSourceReadFile: (filePath: string) =>
     ipcRenderer.invoke(BOOK_SOURCE_IPC.readFile, filePath) as ReturnType<
@@ -1370,6 +1383,26 @@ const api = {
     if (!ud) return "";
     return joinUserDataSubdir(ud, "book_cache");
   },
+  getDefaultDictionariesDir: () => {
+    const ud = getPathFromMainSync("userData");
+    if (!ud) return "";
+    return joinUserDataSubdir(ud, "dictionaries");
+  },
+  dictionaryLookup: (payload: DictionaryLookupRequest) =>
+    ipcRenderer.invoke(
+      DICTIONARY_IPC.lookup,
+      payload,
+    ) as Promise<DictionaryLookupResponse>,
+  dictionaryImport: (payload: DictionaryImportRequest) =>
+    ipcRenderer.invoke(
+      DICTIONARY_IPC.import,
+      payload,
+    ) as Promise<DictionaryImportResponse>,
+  dictionaryRemove: (payload: DictionaryRemoveRequest) =>
+    ipcRenderer.invoke(
+      DICTIONARY_IPC.remove,
+      payload,
+    ) as Promise<DictionaryRemoveResponse>,
 };
 
 contextBridge.exposeInMainWorld("colorTxt", api);

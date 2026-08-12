@@ -366,6 +366,7 @@ function createFindBookReaderSettingsStore() {
     stickyChapterTitleEnabled: fb.stickyChapterTitleEnabled,
     chapterNavToolbarEnabled: fb.chapterNavToolbarEnabled,
     selectionToolbarButtons: fb.selectionToolbarButtons,
+    dictionarySettings: fb.dictionarySettings,
     readerEditShowLineNumbers: fb.readerEditShowLineNumbers,
     readerEditMinimap: fb.readerEditMinimap,
     fullscreenReaderWidthPercent: fb.fullscreenReaderWidthPercent,

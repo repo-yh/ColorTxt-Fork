@@ -6,6 +6,8 @@ export type SelectionToolbarButtons = {
   copy: boolean;
   find: boolean;
   askAi: boolean;
+  /** 词典查词（默认不显示） */
+  dictionary: boolean;
   /** 「查找」按钮：打开 Monaco 查找栏，或填入侧栏全文搜索 */
   findTarget: SelectionToolbarFindTarget;
 };
@@ -25,6 +27,7 @@ export const defaultSelectionToolbarButtons: SelectionToolbarButtons = {
   copy: true,
   find: false,
   askAi: true,
+  dictionary: false,
   findTarget: defaultSelectionToolbarFindTarget,
 };
 
@@ -50,6 +53,10 @@ export function mergeSelectionToolbarButtons(
       typeof partial?.askAi === "boolean"
         ? partial.askAi
         : defaultSelectionToolbarButtons.askAi,
+    dictionary:
+      typeof partial?.dictionary === "boolean"
+        ? partial.dictionary
+        : defaultSelectionToolbarButtons.dictionary,
     findTarget: isSelectionToolbarFindTarget(partial?.findTarget)
       ? partial.findTarget
       : defaultSelectionToolbarButtons.findTarget,

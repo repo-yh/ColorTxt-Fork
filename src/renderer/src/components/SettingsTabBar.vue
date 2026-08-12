@@ -10,6 +10,7 @@ export type SettingsTabId =
   | "vectorModel"
   | "txt2img"
   | "skills"
+  | "proxy"
   | "webDav";
 
 withDefaults(
@@ -115,6 +116,16 @@ const emit = defineEmits<{
           @click="emit('update:activeTab', 'skills')"
         >
           技能
+        </button>
+        <button
+          type="button"
+          role="tab"
+          class="tabBtn"
+          :class="{ active: activeTab === 'proxy' }"
+          :aria-selected="activeTab === 'proxy'"
+          @click="emit('update:activeTab', 'proxy')"
+        >
+          代理
         </button>
         <button
           type="button"

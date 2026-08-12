@@ -197,7 +197,7 @@ export type FloatPlacementResult = {
   openDownward: boolean;
 };
 
-/** 工具条/色盘浮层：钳制在传入 clip 内；上方放不下时改为向下展开 */
+/** 工具条/色盘/词典浮层：钳制在传入 clip 内；两边都能放下时优先空间更大的一侧 */
 export function computeFloatPlacement(
   input: FloatPlacementInput,
 ): FloatPlacementResult {
@@ -218,6 +218,9 @@ export function computeFloatPlacement(
   const downwardBottom = downwardTop + input.floatHeight;
   const fitsBelow = downwardBottom <= clipBottom;
 
+  const spaceAbove = upwardBottom - clipTop;
+  const spaceBelow = clipBottom - downwardTop;
+
   let openDownward: boolean;
   let rootTop: number;
 
@@ -228,18 +231,20 @@ export function computeFloatPlacement(
     openDownward = true;
     rootTop = downwardTop;
   } else if (fitsAbove && fitsBelow) {
-    openDownward = false;
-    rootTop = upwardBottom;
-  } else {
-    const spaceAbove = upwardBottom - clipTop;
-    const spaceBelow = clipBottom - downwardTop;
+    // 两边都能放下：往空间更大的一侧弹（词典等较高浮层尤其需要）
     if (spaceBelow > spaceAbove) {
       openDownward = true;
-      rootTop = Math.min(downwardTop, clipBottom - input.floatHeight);
+      rootTop = downwardTop;
     } else {
       openDownward = false;
-      rootTop = Math.max(upwardBottom, clipTop + input.floatHeight);
+      rootTop = upwardBottom;
     }
+  } else if (spaceBelow > spaceAbove) {
+    openDownward = true;
+    rootTop = Math.min(downwardTop, clipBottom - input.floatHeight);
+  } else {
+    openDownward = false;
+    rootTop = Math.max(upwardBottom, clipTop + input.floatHeight);
   }
 
   const centerX = Math.max(

@@ -60,6 +60,8 @@ import {
   mergeSelectionToolbarButtons,
   type SelectionToolbarButtons,
 } from "../constants/selectionToolbar";
+import { mergeDictionarySettings } from "../constants/dictionarySettings";
+import type { DictionarySettings } from "@shared/dictionaryTypes";
 import { normalizeCharacterCardTextureEffect } from "@shared/characterCardTextureEffects";
 import { parseWordcloudAngleMode } from "../constants/wordcloudUi";
 import { parseWordcloudPaletteId } from "../constants/wordcloudPalettes";
@@ -143,6 +145,8 @@ export type PersistedSettingsData = {
   pomodoro?: Partial<PomodoroSettings>;
   /** 选区浮动工具条可选按钮显示 */
   selectionToolbarButtons?: Partial<SelectionToolbarButtons>;
+  /** 词典（启用顺序、本地导入元数据、自定义网络） */
+  dictionarySettings?: Partial<DictionarySettings>;
   /** 用户自定义快捷键（动作ID -> accelerator） */
   shortcutBindings?: Partial<Record<ShortcutActionId, string>>;
   /** 阅读器表面色用户覆盖（亮色侧） */
@@ -475,6 +479,11 @@ export function loadPersistedSettingsData(
   ) {
     data.selectionToolbarButtons = mergeSelectionToolbarButtons(
       obj.selectionToolbarButtons as Partial<SelectionToolbarButtons>,
+    );
+  }
+  if (obj.dictionarySettings && typeof obj.dictionarySettings === "object") {
+    data.dictionarySettings = mergeDictionarySettings(
+      obj.dictionarySettings as Partial<DictionarySettings>,
     );
   }
   if (obj.shortcutBindings && typeof obj.shortcutBindings === "object") {

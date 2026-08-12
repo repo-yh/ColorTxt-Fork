@@ -18,14 +18,19 @@ import {
 } from "../constants/findBookSettings";
 import { icons } from "../../icons";
 
-const props = defineProps<{
-  draftProxyEnabled: boolean;
-  draftProxyType: FindBookProxyType;
-  draftProxyHost: string;
-  draftProxyPort: string;
-  draftProxyUsername: string;
-  draftProxyPassword: string;
-}>();
+const props = withDefaults(
+  defineProps<{
+    draftProxyEnabled: boolean;
+    draftProxyType: FindBookProxyType;
+    draftProxyHost: string;
+    draftProxyPort: string;
+    draftProxyUsername: string;
+    draftProxyPassword: string;
+    /** 找书窗口显示「书源 proxy 字段优先」说明；主界面设置不显示 */
+    showBookSourceProxyHint?: boolean;
+  }>(),
+  { showBookSourceProxyHint: false },
+);
 
 const emit = defineEmits<{
   "update:draftProxyEnabled": [v: boolean];
@@ -126,8 +131,8 @@ async function runProxyTest(): Promise<ConnectionTestResult | null> {
             @update:model-value="$emit('update:draftProxyEnabled', $event)"
           />
         </div>
-        <p class="settingsHint">
-          用于找书窗口的书源网络请求。书源规则 header / URL 中的
+        <p v-if="showBookSourceProxyHint" class="settingsHint">
+          书源规则 header / URL 中的
           <code>proxy</code> 字段优先于此处设置。
         </p>
       </div>

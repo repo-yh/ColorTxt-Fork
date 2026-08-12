@@ -33,6 +33,8 @@ import WebDavSyncPanel from "./components/WebDavSyncPanel.vue";
 import FullscreenSystemClock from "./components/FullscreenSystemClock.vue";
 import PomodoroBreakOverlay from "./components/PomodoroBreakOverlay.vue";
 import type { SettingsApplyPayload } from "./components/SettingsPanel.vue";
+import type { ColorSchemeApplyPayload } from "./components/ColorSchemePanel.vue";
+import { syncPersistedFindBookProxyToMain } from "./bookSource/services/findBookSettingsStore";
 import { usePomodoroTimer } from "./composables/usePomodoroTimer";
 import {
   mergePomodoroSettings,
@@ -42,6 +44,10 @@ import {
   mergeSelectionToolbarButtons,
   type SelectionToolbarButtons,
 } from "./constants/selectionToolbar";
+import {
+  mergeDictionarySettings,
+} from "./constants/dictionarySettings";
+import type { DictionarySettings } from "@shared/dictionaryTypes";
 import type { AiCustomSkill, AiSkillUserOverride } from "@shared/aiSkills";
 import type { ColorTxtShowMessageBoxOptions } from "@shared/colorTxtShowMessageBox";
 import type {
@@ -572,6 +578,8 @@ onMounted(() => {
       };
     });
   };
+  // 主窗口推送找书/设置共用的 HTTP 代理（词典等网络请求依赖主进程默认代理）
+  syncPersistedFindBookProxyToMain();
 });
 
 onBeforeUnmount(() => {
@@ -734,6 +742,10 @@ const pomodoroSettings = ref<PomodoroSettings>(mergePomodoroSettings(undefined))
 const selectionToolbarButtons = ref<SelectionToolbarButtons>(
   mergeSelectionToolbarButtons(undefined),
 );
+const dictionarySettings = ref<DictionarySettings>(
+  mergeDictionarySettings(undefined),
+);
+const showDictionaryManagePanel = ref(false);
 const {
   phase: pomodoroPhase,
   displayMode: pomodoroDisplayMode,
@@ -1205,6 +1217,7 @@ const persistence = useAppPersistence({
   timedScrollSettings,
   pomodoroSettings,
   selectionToolbarButtons,
+  dictionarySettings,
   fileMetaRecords,
   shortcutBindings,
   defaultShortcutBindings,
@@ -1285,6 +1298,11 @@ watch(
 );
 watch(
   timedScrollSettings,
+  () => persistSettings(),
+  { deep: true },
+);
+watch(
+  dictionarySettings,
   () => persistSettings(),
   { deep: true },
 );
@@ -1943,6 +1961,10 @@ async function onRemoveMissingReadingDataFiles() {
 
 function openReadingDataPanel() {
   showReadingDataPanel.value = true;
+}
+
+function onDictionarySettingsUpdate(v: DictionarySettings) {
+  dictionarySettings.value = mergeDictionarySettings(v);
 }
 
 /** 顶栏「更多」里最近文件：仅路径来自 recent，进度来自 meta（当前书用 live） */
@@ -3132,56 +3154,59 @@ function refreshReaderSurfaceAfterPaletteChange() {
   readerRef.value?.setTheme(currentTheme.value);
 }
 
-function onApplyReaderPalettes(payload: {
-  light: ReaderSurfacePalette;
-  dark: ReaderSurfacePalette;
-  colorEnabledLight: ReaderSurfaceColorEnabled;
-  colorEnabledDark: ReaderSurfaceColorEnabled;
-}) {
-  readerPaletteOverridesLight.value = overridesFromFullPalette(
-    payload.light,
-    defaultReaderPaletteLight,
-  );
-  readerPaletteOverridesDark.value = overridesFromFullPalette(
-    payload.dark,
-    defaultReaderPaletteDark,
-  );
-  readerPaletteColorEnabledOverridesLight.value = overridesFromColorEnabled(
-    payload.colorEnabledLight,
-  );
-  readerPaletteColorEnabledOverridesDark.value = overridesFromColorEnabled(
-    payload.colorEnabledDark,
-  );
+function onApplyColorScheme(payload: ColorSchemeApplyPayload) {
+  if (payload.reader) {
+    readerPaletteOverridesLight.value = overridesFromFullPalette(
+      payload.reader.light,
+      defaultReaderPaletteLight,
+    );
+    readerPaletteOverridesDark.value = overridesFromFullPalette(
+      payload.reader.dark,
+      defaultReaderPaletteDark,
+    );
+    readerPaletteColorEnabledOverridesLight.value = overridesFromColorEnabled(
+      payload.reader.colorEnabledLight,
+    );
+    readerPaletteColorEnabledOverridesDark.value = overridesFromColorEnabled(
+      payload.reader.colorEnabledDark,
+    );
+  }
+  if (payload.highlight) {
+    highlightColorsLight.value = mergeHighlightColors(
+      DEFAULT_HIGHLIGHT_COLORS_LIGHT,
+      payload.highlight.light.length >= MIN_HIGHLIGHT_COLORS
+        ? payload.highlight.light
+        : undefined,
+    );
+    highlightColorsDark.value = mergeHighlightColors(
+      DEFAULT_HIGHLIGHT_COLORS_DARK,
+      payload.highlight.dark.length >= MIN_HIGHLIGHT_COLORS
+        ? payload.highlight.dark
+        : undefined,
+    );
+  }
+  if (payload.lineation) {
+    lineationColorsLight.value = mergeLineationColors(
+      DEFAULT_LINEATION_COLORS_LIGHT,
+      payload.lineation.light.length >= MIN_LINEATION_COLORS
+        ? payload.lineation.light
+        : undefined,
+    );
+    lineationColorsDark.value = mergeLineationColors(
+      DEFAULT_LINEATION_COLORS_DARK,
+      payload.lineation.dark.length >= MIN_LINEATION_COLORS
+        ? payload.lineation.dark
+        : undefined,
+    );
+    lineationLastColors.value = clampLineationLastColorsToCount(
+      lineationLastColors.value,
+      lineationColorsForReader.value.length,
+    );
+  }
   persistSettings();
-  refreshReaderSurfaceAfterPaletteChange();
-}
-
-function onApplyHighlightColors(payload: { light: string[]; dark: string[] }) {
-  highlightColorsLight.value = mergeHighlightColors(
-    DEFAULT_HIGHLIGHT_COLORS_LIGHT,
-    payload.light.length >= MIN_HIGHLIGHT_COLORS ? payload.light : undefined,
-  );
-  highlightColorsDark.value = mergeHighlightColors(
-    DEFAULT_HIGHLIGHT_COLORS_DARK,
-    payload.dark.length >= MIN_HIGHLIGHT_COLORS ? payload.dark : undefined,
-  );
-  persistSettings();
-}
-
-function onApplyLineationColors(payload: { light: string[]; dark: string[] }) {
-  lineationColorsLight.value = mergeLineationColors(
-    DEFAULT_LINEATION_COLORS_LIGHT,
-    payload.light.length >= MIN_LINEATION_COLORS ? payload.light : undefined,
-  );
-  lineationColorsDark.value = mergeLineationColors(
-    DEFAULT_LINEATION_COLORS_DARK,
-    payload.dark.length >= MIN_LINEATION_COLORS ? payload.dark : undefined,
-  );
-  lineationLastColors.value = clampLineationLastColorsToCount(
-    lineationLastColors.value,
-    lineationColorsForReader.value.length,
-  );
-  persistSettings();
+  if (payload.reader) {
+    refreshReaderSurfaceAfterPaletteChange();
+  }
 }
 
 function onUpdateLineationLastColor(payload: {
@@ -3922,6 +3947,7 @@ useAppShellThemeWatch({
           :fast-scroll-sensitivity="fastScrollSensitivity"
           :sticky-chapter-title-enabled="stickyChapterTitleEnabled"
           :selection-toolbar-buttons="selectionToolbarButtons"
+          :dictionary-settings="dictionarySettings"
           :reader-edit-show-line-numbers="readerEditShowLineNumbers"
           :reader-edit-minimap="readerEditMinimap"
           :stream-loading="loading"
@@ -3970,6 +3996,7 @@ useAppShellThemeWatch({
           @update-lineation-last-color="onUpdateLineationLastColor"
           @ask-ai-with-quote="onAskAiWithQuote"
           @search-with-quote="onSearchWithQuote"
+          @open-dictionary-manage="showDictionaryManagePanel = true"
           @reader-edit-dirty-change="onReaderEditDirtyChange"
           @reader-edit-content-change="onReaderEditContentChange"
           @reader-edit-loaded="onReaderEditLoaded"
@@ -4154,6 +4181,7 @@ useAppShellThemeWatch({
       v-model:show-color-scheme-panel="showColorSchemePanel"
       v-model:show-chapter-rule-panel="showChapterRulePanel"
       v-model:show-reading-data-panel="showReadingDataPanel"
+      v-model:show-dictionary-manage-panel="showDictionaryManagePanel"
       v-model:show-replace-rule-panel="showReplaceRulePanel"
       v-model:add-bookmark-open="addBookmarkOpen"
       v-model:remove-bookmark-open="removeBookmarkOpen"
@@ -4186,6 +4214,7 @@ useAppShellThemeWatch({
       :timed-scroll-settings="timedScrollSettings"
       :pomodoro-settings="pomodoroSettings"
       :selection-toolbar-buttons="selectionToolbarButtons"
+      :dictionary-settings="dictionarySettings"
       :reader-edit-show-line-numbers="readerEditShowLineNumbers"
       :reader-edit-minimap="readerEditMinimap"
       :edit-auto-refresh-chapter-list="editAutoRefreshChapterList"
@@ -4240,10 +4269,10 @@ useAppShellThemeWatch({
         updateEditingBookmarkToCurrentViewportLine
       "
       @confirm-remove-active-bookmark="confirmRemoveActiveBookmark"
-      @apply-reader-palettes="onApplyReaderPalettes"
-      @apply-highlight-colors="onApplyHighlightColors"
-      @apply-lineation-colors="onApplyLineationColors"
+      @apply-color-scheme="onApplyColorScheme"
       @open-reading-data="openReadingDataPanel"
+      @open-dictionary-manage="showDictionaryManagePanel = true"
+      @update:dictionary-settings="onDictionarySettingsUpdate"
       @clear-reading-data-paths="onClearReadingDataPaths"
       @clear-all-reading-data="onClearAllReadingData"
       @remove-missing-reading-data-files="onRemoveMissingReadingDataFiles"

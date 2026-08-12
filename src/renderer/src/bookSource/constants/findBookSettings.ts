@@ -1,5 +1,8 @@
 export const findBookSettingsKey = "colortxt.findBook.settings";
 
+/** 同窗口内代理已写入 localStorage 并同步主进程后派发（跨窗口另走 storage） */
+export const findBookProxyChangedEvent = "colortxt-findbook-proxy-changed";
+
 export const DEFAULT_FIND_BOOK_DOWNLOAD_CATEGORY = "下载";
 
 export type FindBookDownloadAfterAction = "none" | "openMain" | "openNewWindow";
@@ -124,7 +127,7 @@ export type PersistedFindBookSettings = {
   downloadAfterAction?: FindBookDownloadAfterAction;
   downloadAddToMainFileList?: boolean;
   downloadDefaultCategory?: string;
-  /** 找书全局网络代理（书源 header `proxy` 优先） */
+  /** 全局网络代理（主界面设置与找书窗口共用；书源 header `proxy` 优先） */
   proxy?: FindBookProxySettings;
   /** 阅读器侧栏是否展开（非全屏） */
   showSidebar?: boolean;

@@ -32,6 +32,18 @@ import {
   MIN_LINEATION_COLORS,
 } from "../constants/lineationColors";
 
+/** 配色「应用」一次提交；字段随 visibleTabs 出现 */
+export type ColorSchemeApplyPayload = {
+  reader?: {
+    light: ReaderSurfacePalette;
+    dark: ReaderSurfacePalette;
+    colorEnabledLight: ReaderSurfaceColorEnabled;
+    colorEnabledDark: ReaderSurfaceColorEnabled;
+  };
+  highlight?: { light: string[]; dark: string[] };
+  lineation?: { light: string[]; dark: string[] };
+};
+
 const props = withDefaults(
   defineProps<{
     currentTheme: string;
@@ -57,16 +69,7 @@ const props = withDefaults(
 );
 
 const emit = defineEmits<{
-  applyReaderPalettes: [
-    payload: {
-      light: ReaderSurfacePalette;
-      dark: ReaderSurfacePalette;
-      colorEnabledLight: ReaderSurfaceColorEnabled;
-      colorEnabledDark: ReaderSurfaceColorEnabled;
-    },
-  ];
-  applyHighlightColors: [payload: { light: string[]; dark: string[] }];
-  applyLineationColors: [payload: { light: string[]; dark: string[] }];
+  apply: [payload: ColorSchemeApplyPayload];
 }>();
 
 const modelValue = defineModel<boolean>({ default: false });
@@ -247,26 +250,28 @@ function onColorEnabledUpdate(
 }
 
 function onApplyAll() {
+  const payload: ColorSchemeApplyPayload = {};
   if (props.visibleTabs.includes("reader")) {
-    emit("applyReaderPalettes", {
+    payload.reader = {
       light: { ...draftLight.value },
       dark: { ...draftDark.value },
       colorEnabledLight: { ...draftColorEnabledLight.value },
       colorEnabledDark: { ...draftColorEnabledDark.value },
-    });
+    };
   }
   if (props.visibleTabs.includes("highlight")) {
-    emit("applyHighlightColors", {
+    payload.highlight = {
       light: draftHighlightLight.value.map((r) => r.color),
       dark: draftHighlightDark.value.map((r) => r.color),
-    });
+    };
   }
   if (props.visibleTabs.includes("lineation")) {
-    emit("applyLineationColors", {
+    payload.lineation = {
       light: draftLineationLight.value.map((r) => r.color),
       dark: draftLineationDark.value.map((r) => r.color),
-    });
+    };
   }
+  emit("apply", payload);
   modelValue.value = false;
 }
 

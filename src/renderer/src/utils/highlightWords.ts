@@ -28,7 +28,8 @@ export function buildHighlightFindQuery(
   if (cleaned.length === 0) return { query: "", useRegex: false };
   if (cleaned.length === 1) {
     const w = cleaned[0]!;
-    return { query: w.text, useRegex: w.isRegex };
+    // 单字符正则与字面量等价，且正则不支持重叠匹配会跳词，强制字面量
+    return { query: w.text, useRegex: false };
   }
   return {
     query: cleaned

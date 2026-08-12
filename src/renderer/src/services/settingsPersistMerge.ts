@@ -57,6 +57,7 @@ export const WINDOW_LOCAL_MAIN_SETTING_KEYS: ReadonlySet<string> = new Set([
   "timedScroll",
   "pomodoro",
   "selectionToolbarButtons",
+  "dictionarySettings",
   "voiceRead",
   "sidebarWidth",
 ]);

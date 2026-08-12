@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, toRaw, useTemplateRef, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref, toRaw, useTemplateRef, watch } from "vue";
 import {
   applyAllActiveProfilesToConfig,
 } from "@shared/aiEndpointProfiles";
@@ -30,6 +30,17 @@ import SettingsTxt2ImgPanel from "./SettingsTxt2ImgPanel.vue";
 import SettingsSkillsPanel from "./SettingsSkillsPanel.vue";
 import SettingsVoiceReadPanel from "./SettingsVoiceReadPanel.vue";
 import SettingsWebDavPanel from "./SettingsWebDavPanel.vue";
+import FindBookSettingsProxyPanel from "../bookSource/components/FindBookSettingsProxyPanel.vue";
+import {
+  DEFAULT_FIND_BOOK_PROXY_SETTINGS,
+  findBookProxyChangedEvent,
+  findBookSettingsKey,
+  type FindBookProxyType,
+} from "../bookSource/constants/findBookSettings";
+import {
+  loadFindBookProxySettings,
+  saveFindBookProxySettingsAndSync,
+} from "../bookSource/services/findBookSettingsStore";
 import {
   clampLineHeightMultipleForFontSize,
   defaultChapterMinCharCount,
@@ -231,6 +242,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   apply: [payload: SettingsApplyPayload];
   openReadingData: [];
+  openDictionaryManage: [];
 }>();
 
 const activeTab = ref<SettingsTabId>("general");
@@ -305,6 +317,12 @@ const draftWebDavPassword = ref("");
 const draftWebDavRemoteDir = ref("ColorTxt");
 const draftCharacterPortraitCacheDir = ref("");
 const showBookPackPassword = ref(false);
+const draftProxyEnabled = ref(DEFAULT_FIND_BOOK_PROXY_SETTINGS.enabled);
+const draftProxyType = ref<FindBookProxyType>(DEFAULT_FIND_BOOK_PROXY_SETTINGS.type);
+const draftProxyHost = ref(DEFAULT_FIND_BOOK_PROXY_SETTINGS.host);
+const draftProxyPort = ref(DEFAULT_FIND_BOOK_PROXY_SETTINGS.port);
+const draftProxyUsername = ref(DEFAULT_FIND_BOOK_PROXY_SETTINGS.username);
+const draftProxyPassword = ref(DEFAULT_FIND_BOOK_PROXY_SETTINGS.password);
 
 const draftAi = ref<AIConfig>(structuredClone(defaultAIConfig));
 const showAiExtensionTabs = computed(() => draftAi.value.aiEnabled);
@@ -395,6 +413,26 @@ function syncDraftFromProps() {
   draftVoiceRead.value = mergeVoiceReadSettings(props.voiceReadSettings);
   draftVoiceReadProfiles.value = cloneVoiceReadProfiles(props.voiceReadProfiles);
   draftActiveVoiceReadProfileId.value = props.activeVoiceReadProfileId;
+  syncProxyDraftFromDisk();
+}
+
+function syncProxyDraftFromDisk() {
+  const proxy = loadFindBookProxySettings();
+  draftProxyEnabled.value = proxy.enabled;
+  draftProxyType.value = proxy.type;
+  draftProxyHost.value = proxy.host;
+  draftProxyPort.value = proxy.port;
+  draftProxyUsername.value = proxy.username;
+  draftProxyPassword.value = proxy.password;
+}
+
+function resetProxyDraft() {
+  draftProxyEnabled.value = DEFAULT_FIND_BOOK_PROXY_SETTINGS.enabled;
+  draftProxyType.value = DEFAULT_FIND_BOOK_PROXY_SETTINGS.type;
+  draftProxyHost.value = DEFAULT_FIND_BOOK_PROXY_SETTINGS.host;
+  draftProxyPort.value = DEFAULT_FIND_BOOK_PROXY_SETTINGS.port;
+  draftProxyUsername.value = DEFAULT_FIND_BOOK_PROXY_SETTINGS.username;
+  draftProxyPassword.value = DEFAULT_FIND_BOOK_PROXY_SETTINGS.password;
 }
 
 async function syncAiFromMain() {
@@ -446,6 +484,39 @@ watch(modelValue, (open) => {
     voiceReadPanelRef.value?.initVoiceReadProfiles?.();
   });
   void syncAiFromMain();
+});
+
+function onProxyExternalChange() {
+  if (!modelValue.value) return;
+  syncProxyDraftFromDisk();
+}
+
+function onProxyStorageSync(ev: StorageEvent) {
+  if (ev.storageArea !== window.localStorage) return;
+  if (ev.key !== null && ev.key !== findBookSettingsKey) return;
+  onProxyExternalChange();
+}
+
+watch(
+  modelValue,
+  (open) => {
+    if (open) {
+      window.addEventListener("storage", onProxyStorageSync);
+      window.addEventListener(findBookProxyChangedEvent, onProxyExternalChange);
+    } else {
+      window.removeEventListener("storage", onProxyStorageSync);
+      window.removeEventListener(
+        findBookProxyChangedEvent,
+        onProxyExternalChange,
+      );
+    }
+  },
+  { immediate: true },
+);
+
+onBeforeUnmount(() => {
+  window.removeEventListener("storage", onProxyStorageSync);
+  window.removeEventListener(findBookProxyChangedEvent, onProxyExternalChange);
 });
 
 watch(draftFontSize, (fs) => {
@@ -583,6 +654,7 @@ function onResetCurrentTab() {
   else if (activeTab.value === "txt2img") resetTxt2ImgDraft();
   else if (activeTab.value === "skills") resetSkillsDraft();
   else if (activeTab.value === "voiceRead") resetVoiceReadDraft();
+  else if (activeTab.value === "proxy") resetProxyDraft();
   else if (activeTab.value === "webDav") resetWebDavDraft();
 }
 
@@ -689,6 +761,15 @@ async function onConfirm() {
     );
     return;
   }
+
+  saveFindBookProxySettingsAndSync({
+    enabled: draftProxyEnabled.value,
+    type: draftProxyType.value,
+    host: draftProxyHost.value.trim(),
+    port: draftProxyPort.value.trim(),
+    username: draftProxyUsername.value.trim(),
+    password: draftProxyPassword.value,
+  });
 
   aiPanelRef.value?.finalizeChatProfiles?.();
   txt2imgPanelRef.value?.finalizeTxt2ImgProfiles?.();
@@ -1040,6 +1121,7 @@ async function onImportConfig(): Promise<void> {
                 draftSelectionToolbarButtons
               "
               :monaco-custom-highlight="monacoCustomHighlight"
+              @open-dictionary-manage="emit('openDictionaryManage')"
             />
 
             <SettingsEditPanel
@@ -1091,6 +1173,16 @@ async function onImportConfig(): Promise<void> {
               v-model:enabled="draftAiSkillsEnabled"
               v-model:overrides="draftAiSkillOverrides"
               v-model:custom-skills="draftAiCustomSkills"
+            />
+
+            <FindBookSettingsProxyPanel
+              v-show="activeTab === 'proxy'"
+              v-model:draft-proxy-enabled="draftProxyEnabled"
+              v-model:draft-proxy-type="draftProxyType"
+              v-model:draft-proxy-host="draftProxyHost"
+              v-model:draft-proxy-port="draftProxyPort"
+              v-model:draft-proxy-username="draftProxyUsername"
+              v-model:draft-proxy-password="draftProxyPassword"
             />
 
             <SettingsWebDavPanel

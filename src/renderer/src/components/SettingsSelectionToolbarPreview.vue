@@ -159,6 +159,29 @@ function toggleButton(key: keyof SelectionToolbarButtons) {
       <div
         class="stbAction stbAction--checkable"
         role="checkbox"
+        :aria-checked="modelValue.dictionary"
+        tabindex="0"
+        @click="toggleButton('dictionary')"
+        @keydown.space.prevent="toggleButton('dictionary')"
+        @keydown.enter.prevent="toggleButton('dictionary')"
+      >
+        <AppCheckbox
+          class="stbCheck"
+          passive
+          :model-value="modelValue.dictionary"
+          aria-label="工具条显示词典"
+        />
+        <span
+          class="stbActionIcon"
+          aria-hidden="true"
+          v-html="icons.dictionary"
+        />
+        <span class="stbActionLabel">词典</span>
+      </div>
+
+      <div
+        class="stbAction stbAction--checkable"
+        role="checkbox"
         :aria-checked="modelValue.askAi"
         tabindex="0"
         @click="toggleButton('askAi')"

@@ -84,14 +84,12 @@ import {
 import {
   DEFAULT_HIGHLIGHT_COLORS_DARK,
   DEFAULT_HIGHLIGHT_COLORS_LIGHT,
-  highlightColorsPersistPayload,
   mergeHighlightColors,
   parseHighlightColorsArray,
 } from "../constants/highlightColors";
 import {
   DEFAULT_LINEATION_COLORS_DARK,
   DEFAULT_LINEATION_COLORS_LIGHT,
-  lineationColorsPersistPayload,
   mergeLineationColors,
   parseLineationColorsArray,
 } from "../constants/lineationColors";
@@ -153,6 +151,8 @@ import {
   mergeSelectionToolbarButtons,
   type SelectionToolbarButtons,
 } from "../constants/selectionToolbar";
+import { mergeDictionarySettings } from "../constants/dictionarySettings";
+import type { DictionarySettings } from "@shared/dictionaryTypes";
 import {
   collectVoiceReadProfileApiKeys,
   hydrateVoiceReadProfilesApiKeys,
@@ -266,6 +266,7 @@ export function useAppPersistence(deps: {
   timedScrollSettings: Ref<TimedScrollSettings>;
   pomodoroSettings: Ref<import("../constants/pomodoro").PomodoroSettings>;
   selectionToolbarButtons: Ref<SelectionToolbarButtons>;
+  dictionarySettings: Ref<DictionarySettings>;
   fileMetaRecords: Ref<FileMetaRecord[]>;
   shortcutBindings: Ref<ShortcutBindingMap>;
   defaultShortcutBindings: ShortcutBindingMap;
@@ -332,6 +333,10 @@ export function useAppPersistence(deps: {
   const settingsPersistBaseline: Record<string, unknown> = {};
   /** 防止 persistSettings 写回 voice 触发 watch 再入 */
   let persistingSettings = false;
+  /** 已调度到 nextTick 的落盘（同 tick 多次调用合并为一次，用最终内存写盘） */
+  let persistSettingsQueued = false;
+  /** 落盘执行中又有请求时置位，清锁后再补写 */
+  let persistSettingsPending = false;
 
   function setVoiceReadProfileBaseline(
     profiles: readonly VoiceReadProfile[],
@@ -406,6 +411,7 @@ export function useAppPersistence(deps: {
       timedScroll: deps.timedScrollSettings.value,
       pomodoro: deps.pomodoroSettings.value,
       selectionToolbarButtons: deps.selectionToolbarButtons.value,
+      dictionarySettings: deps.dictionarySettings.value,
       shortcutBindings: deps.shortcutBindings.value,
       // 空对象也要写入：合并落盘时若用 undefined 会跳过，磁盘上旧覆盖无法清除（恢复默认失效）
       readerPaletteOverridesLight: {
@@ -420,23 +426,12 @@ export function useAppPersistence(deps: {
       readerPaletteColorEnabledOverridesDark: {
         ...deps.readerPaletteColorEnabledOverridesDark.value,
       },
-      highlightColorsLight: highlightColorsPersistPayload(
-        deps.highlightColorsLight.value,
-        DEFAULT_HIGHLIGHT_COLORS_LIGHT,
-      ),
-      highlightColorsDark: highlightColorsPersistPayload(
-        deps.highlightColorsDark.value,
-        DEFAULT_HIGHLIGHT_COLORS_DARK,
-      ),
-      lineationColorsLight: lineationColorsPersistPayload(
-        deps.lineationColorsLight.value,
-        DEFAULT_LINEATION_COLORS_LIGHT,
-      ),
-      lineationColorsDark: lineationColorsPersistPayload(
-        deps.lineationColorsDark.value,
-        DEFAULT_LINEATION_COLORS_DARK,
-      ),
-      highlightWordsByIndexGlobal: deps.highlightWordsByIndexGlobal.value ?? {},
+      // 始终写入完整数组：PersistPayload 在与默认相同时返回 undefined，合并会跳过并保留磁盘旧表
+      highlightColorsLight: [...deps.highlightColorsLight.value],
+      highlightColorsDark: [...deps.highlightColorsDark.value],
+      lineationColorsLight: [...deps.lineationColorsLight.value],
+      lineationColorsDark: [...deps.lineationColorsDark.value],
+      highlightWordsByIndexGlobal: deps.highlightWordsByIndexGlobal.value,
       lineationLastColors:
         deps.lineationLastColors.value.marker ===
           DEFAULT_LINEATION_LAST_COLORS.marker &&
@@ -1333,6 +1328,9 @@ export function useAppPersistence(deps: {
       deps.selectionToolbarButtons.value = mergeSelectionToolbarButtons(
         data.selectionToolbarButtons,
       );
+      deps.dictionarySettings.value = mergeDictionarySettings(
+        data.dictionarySettings,
+      );
     }
     deps.shortcutBindings.value = mergeShortcutBindings(
       deps.defaultShortcutBindings,
@@ -1506,8 +1504,12 @@ export function useAppPersistence(deps: {
     };
   }
 
-  function persistSettings() {
-    if (!settingsLoaded.value || persistingSettings) return;
+  function flushPersistSettings() {
+    if (!settingsLoaded.value) return;
+    if (persistingSettings) {
+      persistSettingsPending = true;
+      return;
+    }
     try {
       if (
         typeof sessionStorage !== "undefined" &&
@@ -1578,8 +1580,23 @@ export function useAppPersistence(deps: {
       // watch(voiceRead*) 在当前 tick 结束后触发，延后清标志避免再入死循环
       void nextTick(() => {
         persistingSettings = false;
+        if (persistSettingsPending) {
+          persistSettingsPending = false;
+          persistSettings();
+        }
       });
     }
+  }
+
+  function persistSettings() {
+    if (!settingsLoaded.value) return;
+    // 配色「应用」会同步连调多次；先合并到 nextTick，用最终内存写盘，避免中途旧色表落盘
+    if (persistSettingsQueued) return;
+    persistSettingsQueued = true;
+    void nextTick(() => {
+      persistSettingsQueued = false;
+      flushPersistSettings();
+    });
   }
 
   /** 仅写入侧栏宽度（相对基线有改动时），不整份回写阅读等设置 */

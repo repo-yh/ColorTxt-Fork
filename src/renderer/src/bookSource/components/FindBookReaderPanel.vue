@@ -21,6 +21,9 @@ import PomodoroBreakOverlay from "../../components/PomodoroBreakOverlay.vue";
 import FindBookReaderFooter from "./FindBookReaderFooter.vue";
 import FindBookReaderHeader from "./FindBookReaderHeader.vue";
 import FindBookReaderChapterSidebar from "./FindBookReaderChapterSidebar.vue";
+import DictionaryManageModal from "../../components/DictionaryManageModal.vue";
+import { mergeDictionarySettings } from "../../constants/dictionarySettings";
+import type { DictionarySettings } from "@shared/dictionaryTypes";
 import {
   countCharsForLine,
   floorReadingProgressPercentByLines,
@@ -220,6 +223,7 @@ const {
   stickyChapterTitleEnabled,
   chapterNavToolbarEnabled,
   selectionToolbarButtons,
+  dictionarySettings,
   readerEditShowLineNumbers,
   readerEditMinimap,
   fullscreenReaderWidthPercent,
@@ -251,6 +255,13 @@ const {
   download: startOfflineCacheDownload,
   cancel: cancelOfflineCache,
 } = useBookSourceDownload();
+
+const showDictionaryManagePanel = ref(false);
+
+function onDictionarySettingsUpdate(v: DictionarySettings) {
+  dictionarySettings.value = mergeDictionarySettings(v);
+  persistReaderUiPrefs();
+}
 const { isInBookshelf, toggle: toggleBookshelf, updateReadProgress } =
   useFindBookBookshelf();
 
@@ -2037,6 +2048,8 @@ const modalRef = ref<InstanceType<typeof AppModal> | null>(null);
             :fast-scroll-sensitivity="fastScrollSensitivity"
             :sticky-chapter-title-enabled="stickyChapterTitleEnabled"
             :selection-toolbar-buttons="selectionToolbarButtons"
+            :dictionary-settings="dictionarySettings"
+            @open-dictionary-manage="showDictionaryManagePanel = true"
             :reader-surface-light="effectiveReaderSurfaceLight"
             :reader-surface-dark="effectiveReaderSurfaceDark"
             :reader-palette-color-enabled="readerPaletteColorEnabledForReader"
@@ -2156,6 +2169,11 @@ const modalRef = ref<InstanceType<typeof AppModal> | null>(null);
       @search-source="onSearchFromEdit"
     />
     <BookSourceLoginPanel v-model="showLogin" :source="loginSource" />
+    <DictionaryManageModal
+      v-model="showDictionaryManagePanel"
+      :settings="dictionarySettings"
+      @update:settings="onDictionarySettingsUpdate"
+    />
   </AppModal>
 </template>
 

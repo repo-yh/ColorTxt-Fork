@@ -48,6 +48,8 @@ import {
   mergeSelectionToolbarButtons,
   type SelectionToolbarButtons,
 } from "../../constants/selectionToolbar";
+import { mergeDictionarySettings } from "../../constants/dictionarySettings";
+import type { DictionarySettings } from "@shared/dictionaryTypes";
 import { READER_EDITOR_DEFAULT_FONT_FAMILY } from "../../monaco/readerEditorOptions";
 import {
   resolveDefaultBookSourceDownloadDirSync,
@@ -62,9 +64,11 @@ import {
   DEFAULT_FIND_BOOK_DOWNLOAD_CATEGORY,
   DEFAULT_FIND_BOOK_PROXY_SETTINGS,
   defaultFindBookShowChapterTag,
+  findBookProxyChangedEvent,
   findBookSettingsKey,
   isFindBookDownloadAfterAction,
   normalizeFindBookProxySettings,
+  buildFindBookProxyUrl,
   type FindBookDownloadAfterAction,
   type FindBookProxySettings,
   type PersistedFindBookSettings,
@@ -106,6 +110,38 @@ export function persistFindBookSettings(data: PersistedFindBookSettings) {
   } catch {
     // ignore
   }
+}
+
+export function loadFindBookProxySettings(): FindBookProxySettings {
+  return normalizeFindBookProxySettings(
+    loadPersistedFindBookSettings().proxy ?? DEFAULT_FIND_BOOK_PROXY_SETTINGS,
+  );
+}
+
+/** 合并写入找书设置中的 proxy，并同步主进程默认代理；同窗派发事件便于实时刷新草稿 */
+export function saveFindBookProxySettingsAndSync(
+  proxy: FindBookProxySettings,
+): FindBookProxySettings {
+  const normalized = normalizeFindBookProxySettings(proxy);
+  const current = loadPersistedFindBookSettings();
+  persistFindBookSettings({
+    ...current,
+    proxy: normalized,
+  });
+  const url = buildFindBookProxyUrl(normalized);
+  void window.colorTxt?.bookSourceSetHttpProxy(url || null);
+  try {
+    window.dispatchEvent(new CustomEvent(findBookProxyChangedEvent));
+  } catch {
+    // ignore
+  }
+  return normalized;
+}
+
+/** 主界面 / 找书启动：把已持久化的代理推到主进程 */
+export function syncPersistedFindBookProxyToMain(): void {
+  const url = buildFindBookProxyUrl(loadFindBookProxySettings());
+  void window.colorTxt?.bookSourceSetHttpProxy(url || null);
 }
 
 export function loadMainSettingsData(): PersistedSettingsData {
@@ -167,6 +203,7 @@ export type SharedReaderSettingsSnapshot = {
   timedScrollSettings: TimedScrollSettings;
   pomodoroSettings: PomodoroSettings;
   selectionToolbarButtons: SelectionToolbarButtons;
+  dictionarySettings: DictionarySettings;
 };
 
 export function sharedReaderSettingsFromMainData(
@@ -279,6 +316,7 @@ export function sharedReaderSettingsFromMainData(
     selectionToolbarButtons: mergeSelectionToolbarButtons(
       data.selectionToolbarButtons,
     ),
+    dictionarySettings: mergeDictionarySettings(data.dictionarySettings),
   };
 }
 
@@ -316,6 +354,7 @@ export function snapshotSharedReaderSettingsForMain(
     timedScroll: state.timedScrollSettings,
     pomodoro: state.pomodoroSettings,
     selectionToolbarButtons: state.selectionToolbarButtons,
+    dictionarySettings: state.dictionarySettings,
   };
 }
 

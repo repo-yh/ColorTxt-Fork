@@ -19,13 +19,17 @@ import { bookmarkNoteInputRefKey } from "../injectionKeys";
 import type { FileBookmarkItem } from "../stores/fileMetaStore";
 import AboutPanel from "./AboutPanel.vue";
 import AppModal from "./AppModal.vue";
-import ColorSchemePanel from "./ColorSchemePanel.vue";
+import ColorSchemePanel, {
+  type ColorSchemeApplyPayload,
+} from "./ColorSchemePanel.vue";
 import AppUpdateFlow from "./AppUpdateFlow.vue";
 import ChapterRulePanel from "./ChapterRulePanel.vue";
 import ReadingDataPanel from "./ReadingDataPanel.vue";
 import ReplaceRulePanel from "../bookSource/components/ReplaceRulePanel.vue";
 import type { ReplaceRule } from "@shared/bookSource/replaceRule";
 import SettingsPanel, { type SettingsApplyPayload } from "./SettingsPanel.vue";
+import DictionaryManageModal from "./DictionaryManageModal.vue";
+import type { DictionarySettings } from "@shared/dictionaryTypes";
 import ShortcutPanel from "./ShortcutPanel.vue";
 import DragDropChoiceModal from "./DragDropChoiceModal.vue";
 import type { ShortcutBindingMap } from "../services/shortcutRegistry";
@@ -69,6 +73,7 @@ const props = defineProps<{
   timedScrollSettings: TimedScrollSettings;
   pomodoroSettings: PomodoroSettings;
   selectionToolbarButtons: import("../constants/selectionToolbar").SelectionToolbarButtons;
+  dictionarySettings: DictionarySettings;
   chapterRules: ChapterMatchRule[];
   chapterRuleErrorText: string;
   /** 编辑态打开文本替换时面板主按钮为「应用」 */
@@ -133,22 +138,15 @@ const emit = defineEmits<{
   updateBookmarkToCurrentViewportLine: [];
   confirmRemoveActiveBookmark: [];
   applyShortcutBindings: [payload: ShortcutBindingMap];
-  applyReaderPalettes: [
-    payload: {
-      light: ReaderSurfacePalette;
-      dark: ReaderSurfacePalette;
-      colorEnabledLight: ReaderSurfaceColorEnabled;
-      colorEnabledDark: ReaderSurfaceColorEnabled;
-    },
-  ];
-  applyHighlightColors: [payload: { light: string[]; dark: string[] }];
-  applyLineationColors: [payload: { light: string[]; dark: string[] }];
+  applyColorScheme: [payload: ColorSchemeApplyPayload];
   applyReplaceRuleFormat: [rules: ReplaceRule[]];
   openReadingData: [];
   clearReadingDataPaths: [paths: string[]];
   clearAllReadingData: [];
   removeMissingReadingDataFiles: [];
   openReadingDataPath: [path: string];
+  openDictionaryManage: [];
+  "update:dictionarySettings": [v: DictionarySettings];
 }>();
 
 const showAboutPanel = defineModel<boolean>("showAboutPanel", {
@@ -166,6 +164,12 @@ const showChapterRulePanel = defineModel<boolean>("showChapterRulePanel", {
 const showReadingDataPanel = defineModel<boolean>("showReadingDataPanel", {
   default: false,
 });
+const showDictionaryManagePanel = defineModel<boolean>(
+  "showDictionaryManagePanel",
+  {
+    default: false,
+  },
+);
 const showReplaceRulePanel = defineModel<boolean>("showReplaceRulePanel", {
   default: false,
 });
@@ -322,6 +326,12 @@ onBeforeUnmount(() => {
     :character-roster="characterRoster"
     @apply="emit('applySettings', $event)"
     @open-reading-data="emit('openReadingData')"
+    @open-dictionary-manage="emit('openDictionaryManage')"
+  />
+  <DictionaryManageModal
+    v-model="showDictionaryManagePanel"
+    :settings="dictionarySettings"
+    @update:settings="emit('update:dictionarySettings', $event)"
   />
   <ReadingDataPanel
     v-model="showReadingDataPanel"
@@ -357,9 +367,7 @@ onBeforeUnmount(() => {
     :highlight-colors-dark="highlightColorsDark"
     :lineation-colors-light="lineationColorsLight"
     :lineation-colors-dark="lineationColorsDark"
-    @apply-reader-palettes="emit('applyReaderPalettes', $event)"
-    @apply-highlight-colors="emit('applyHighlightColors', $event)"
-    @apply-lineation-colors="emit('applyLineationColors', $event)"
+    @apply="emit('applyColorScheme', $event)"
   />
 
   <AppModal

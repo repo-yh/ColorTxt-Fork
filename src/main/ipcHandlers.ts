@@ -63,6 +63,7 @@ import { attributeVoiceReadSpeakers } from "./ai/voiceReadSpeaker";
 import { registerVoiceReadIpcHandlers } from "./voiceRead/registerVoiceReadIpc";
 import { registerBookSourceIpcHandlers } from "./bookSource/registerBookSourceIpc";
 import { registerWebDavIpcHandlers } from "./webdav/registerWebDavIpc";
+import { registerDictionaryIpcHandlers } from "./dictionary/registerDictionaryIpc";
 import { createFindBookDesktopShortcut } from "./findBookLaunch";
 import {
   focusOrOpenFindBookWindow,
@@ -1228,4 +1229,5 @@ function unknownQuoteAttributions(
   registerSecretsIpcHandlers();
   registerTextConvertIpcHandlers();
   registerWebDavIpcHandlers();
+  registerDictionaryIpcHandlers();
 }

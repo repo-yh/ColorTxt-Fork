@@ -84,6 +84,9 @@ function sendTo(
   if (!wc.isDestroyed()) wc.send(channel, payload);
 }
 
+/** 网络导入等：按 requestId 取消进行中的 fetchUrl */
+const fetchUrlAbortByRequestId = new Map<number, AbortController>();
+
 export function registerBookSourceIpcHandlers(): void {
   ipcMain.handle(BOOK_SOURCE_IPC.list, () => listBookSources());
 
@@ -132,9 +135,19 @@ export function registerBookSourceIpcHandlers(): void {
     },
   );
 
-  ipcMain.handle(BOOK_SOURCE_IPC.fetchUrl, async (_e, url: unknown) => {
+  ipcMain.handle(BOOK_SOURCE_IPC.fetchUrl, async (_e, url: unknown, options: unknown) => {
     if (typeof url !== "string" || !url.trim()) {
       return { ok: false, message: "URL 无效" };
+    }
+    const requestId =
+      options &&
+      typeof options === "object" &&
+      typeof (options as { requestId?: unknown }).requestId === "number"
+        ? Math.trunc((options as { requestId: number }).requestId)
+        : null;
+    const ac = new AbortController();
+    if (requestId != null && Number.isFinite(requestId)) {
+      fetchUrlAbortByRequestId.set(requestId, ac);
     }
     try {
       // 与书源请求一致：undici 失败时回退 Chromium session（部分站点 Node TLS 会被重置）
@@ -142,14 +155,30 @@ export function registerBookSourceIpcHandlers(): void {
         url: url.trim(),
         method: "GET",
         timeoutMs: 30_000,
+        signal: ac.signal,
       });
       return { ok: true, text: res.body };
     } catch (e) {
+      if (ac.signal.aborted) {
+        return { ok: false, aborted: true, message: "已取消" };
+      }
       return {
         ok: false,
         message: e instanceof Error ? e.message : String(e),
       };
+    } finally {
+      if (requestId != null) fetchUrlAbortByRequestId.delete(requestId);
     }
+  });
+
+  ipcMain.handle(BOOK_SOURCE_IPC.fetchUrlAbort, (_e, requestId: unknown) => {
+    if (typeof requestId !== "number" || !Number.isFinite(requestId)) {
+      return { ok: false };
+    }
+    const id = Math.trunc(requestId);
+    fetchUrlAbortByRequestId.get(id)?.abort();
+    fetchUrlAbortByRequestId.delete(id);
+    return { ok: true };
   });
 
   ipcMain.handle(BOOK_SOURCE_IPC.readFile, async (_e, filePath: unknown) => {
