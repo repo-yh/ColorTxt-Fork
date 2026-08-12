@@ -245,11 +245,19 @@ export function useReaderInlineSearch(deps: {
       }
       if (idx < 0) idx = matches.length - 1;
     } else {
+      const cur = inlineSearchCurrentMatch;
       idx = matches.findIndex((it) => {
         const r = it.range;
         if (r.startLineNumber > pos.lineNumber) return true;
         if (r.startLineNumber < pos.lineNumber) return false;
-        return r.startColumn > pos.column;
+        if (
+          cur &&
+          r.startLineNumber === cur.lineNumber &&
+          r.startColumn === cur.startColumn &&
+          r.endColumn === cur.endColumn
+        )
+          return false;
+        return r.startColumn >= pos.column;
       });
       if (idx < 0) idx = 0;
     }
