@@ -418,9 +418,9 @@ function formatLegadoHtmlContent(html: string, keepImg = false): string {
   do {
     prev = safe;
     safe = safe
-      .replace(/<script[\s\S]*?<\/script>/gi, "")
-      .replace(/<iframe[\s\S]*?<\/iframe>/gi, "")
-      .replace(/<object[\s\S]*?<\/object>/gi, "")
+      .replace(/<script[\s\S]*?<\/script(?:\s[^>]*)?>/gi, "")
+      .replace(/<iframe[\s\S]*?<\/iframe(?:\s[^>]*)?>/gi, "")
+      .replace(/<object[\s\S]*?<\/object(?:\s[^>]*)?>/gi, "")
       .replace(/<embed[\s\S]*?>/gi, "");
   } while (safe !== prev);
   return safe
