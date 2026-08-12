@@ -13,10 +13,12 @@ import {
   upsertFileMetaRecord,
   upsertHighlightGroupForFile,
   type FileMetaRecord,
+  type HighlightWord,
   type HighlightWordsByIndex,
 } from "../stores/fileMetaStore";
 import {
   buildHighlightListTerms,
+  findGroupLocation,
   groupExistsInHighlightMap,
   highlightGroupsEqual,
   mergeHighlightGroupsInMap,
@@ -70,6 +72,9 @@ export function useAppHighlightTerms(deps: {
   ensurePinBeforeRevealFindWidget: () => void;
   editorContentChangeEpoch: Ref<number>;
 }) {
+  function groupTexts(g: HighlightWord[]): string[] {
+    return g.map((w) => w.text);
+  }
   const currentFileHighlightWords = computed(() => {
     const path = deps.currentFile.value;
     if (!path) return undefined;
@@ -147,17 +152,17 @@ export function useAppHighlightTerms(deps: {
       if (!map) return undefined;
       const out: HighlightWordsByIndex = {};
       for (const [key, groups] of Object.entries(map)) {
-        const convertedGroups: string[][] = [];
+        const convertedGroups: HighlightWord[][] = [];
         for (const group of groups) {
-          const converted: string[] = [];
-          for (const stored of group) {
-            if (!stored) continue;
-            let display = displayByStored.get(stored);
+          const converted: HighlightWord[] = [];
+          for (const w of group) {
+            if (!w.text) continue;
+            let display = displayByStored.get(w.text);
             if (display == null) {
-              display = await applyTextDisplayConverts(stored, convertOpts);
-              displayByStored.set(stored, display);
+              display = await applyTextDisplayConverts(w.text, convertOpts);
+              displayByStored.set(w.text, display);
             }
-            converted.push(display);
+            converted.push({ text: display, ...(w.isRegex ? { isRegex: true } as const : {}) });
           }
           if (converted.length > 0) convertedGroups.push(converted);
         }
@@ -232,7 +237,7 @@ export function useAppHighlightTerms(deps: {
       if (payload.scope === "global") {
         deps.highlightWordsByIndexGlobal.value = removeHighlightGroupFromMap(
           deps.highlightWordsByIndexGlobal.value,
-          group,
+          payload.storedTerms,
         );
         deps.persistSettings();
         return;
@@ -242,7 +247,7 @@ export function useAppHighlightTerms(deps: {
       deps.fileMetaRecords.value = removeHighlightGroupFromFile(
         deps.fileMetaRecords.value,
         path,
-        group,
+        payload.storedTerms,
       );
       deps.persistFileMeta();
       return;
@@ -273,17 +278,22 @@ export function useAppHighlightTerms(deps: {
     colorIndex: number;
   }) {
     const path = deps.currentFile.value;
-    const group = normalizeHighlightGroup(payload.storedTerms);
-    if (!path || !group) return;
+    const bookGroup = currentFileHighlightWords.value
+      ? findGroupLocation(currentFileHighlightWords.value, payload.storedTerms)
+      : null;
+    const realGroup = bookGroup
+      ? currentFileHighlightWords.value![bookGroup.key]![bookGroup.index]!
+      : payload.storedTerms.map((t) => ({ text: t }));
+    if (!path || !realGroup.length) return;
     deps.fileMetaRecords.value = removeHighlightGroupFromFile(
       deps.fileMetaRecords.value,
       path,
-      group,
+      payload.storedTerms,
     );
     deps.highlightWordsByIndexGlobal.value = upsertHighlightGroupInMap(
       deps.highlightWordsByIndexGlobal.value,
       payload.colorIndex,
-      group,
+      realGroup,
     );
     deps.persistFileMeta();
     deps.persistSettings();
@@ -293,23 +303,28 @@ export function useAppHighlightTerms(deps: {
     storedTerms: string[];
     colorIndex: number;
   }) {
-    const group = normalizeHighlightGroup(payload.storedTerms);
-    if (!group) return;
+    const globalGroup = deps.highlightWordsByIndexGlobal.value
+      ? findGroupLocation(deps.highlightWordsByIndexGlobal.value, payload.storedTerms)
+      : null;
+    const realGroup = globalGroup
+      ? deps.highlightWordsByIndexGlobal.value![globalGroup.key]![globalGroup.index]!
+      : payload.storedTerms.map((t) => ({ text: t }));
+    if (!realGroup.length) return;
     deps.highlightWordsByIndexGlobal.value = removeHighlightGroupFromMap(
       deps.highlightWordsByIndexGlobal.value,
-      group,
+      payload.storedTerms,
     );
     const path = deps.currentFile.value;
     const bookHas = groupExistsInHighlightMap(
       currentFileHighlightWords.value,
-      group,
+      payload.storedTerms,
     );
     if (!bookHas && path) {
       deps.fileMetaRecords.value = upsertHighlightGroupForFile(
         deps.fileMetaRecords.value,
         path,
         payload.colorIndex,
-        group,
+        realGroup,
       );
       deps.persistFileMeta();
     }
@@ -364,36 +379,56 @@ export function useAppHighlightTerms(deps: {
       colorIndex: number;
     };
   }) {
-    const source = normalizeHighlightGroup(payload.source.storedTerms);
-    const target = normalizeHighlightGroup(payload.target.storedTerms);
-    if (!source || !target) return;
-    // 拖到自身整组，或单词语已在目标组内
-    if (highlightGroupsEqual(source, target)) return;
-    if (source.every((t) => target.includes(t))) return;
-
-    const merged = normalizeHighlightGroup([...target, ...source]);
-    if (!merged) return;
+    if (
+      highlightGroupsEqual(
+        payload.source.storedTerms,
+        payload.target.storedTerms,
+      )
+    )
+      return;
 
     if (payload.source.scope === payload.target.scope) {
+      const scopeMap = mapForScope(payload.target.scope);
+      const sloc = scopeMap
+        ? findGroupLocation(scopeMap, payload.source.storedTerms)
+        : null;
+      const tloc = scopeMap
+        ? findGroupLocation(scopeMap, payload.target.storedTerms)
+        : null;
+      if (!sloc || !tloc) return;
+      const realSource = scopeMap![sloc.key]![sloc.index]!;
+      const realTarget = scopeMap![tloc.key]![tloc.index]!;
+      if (
+        realSource.every((t) =>
+          realTarget.some((w) => w.text === t.text),
+        )
+      )
+        return;
+
       const next = mergeHighlightGroupsInMap(
-        mapForScope(payload.target.scope),
-        source,
-        target,
+        scopeMap!,
+        realSource,
+        realTarget,
         payload.target.colorIndex,
       );
       persistScopeMap(payload.target.scope, next);
       return;
     }
 
-    // 跨 scope：从 source 剔除被拖词语，再写入 target
-    stripTermsFromScope(payload.source.scope, source);
+    // 跨 scope
+    const source = normalizeHighlightGroup(payload.source.storedTerms);
+    const target = normalizeHighlightGroup(payload.target.storedTerms);
+    if (!source || !target) return;
+    stripTermsFromScope(payload.source.scope, groupTexts(source));
+    const merged = normalizeHighlightGroup([...target, ...source]);
+    if (!merged) return;
 
     if (payload.target.scope === "global") {
       deps.highlightWordsByIndexGlobal.value = upsertHighlightGroupInMap(
         deps.highlightWordsByIndexGlobal.value,
         payload.target.colorIndex,
         merged,
-        { replaceStoredTerms: target },
+        { replaceStoredTerms: groupTexts(target) },
       );
       deps.persistSettings();
     } else {
@@ -404,7 +439,7 @@ export function useAppHighlightTerms(deps: {
         path,
         payload.target.colorIndex,
         merged,
-        target,
+        groupTexts(target),
       );
       deps.persistFileMeta();
     }
@@ -431,7 +466,7 @@ export function useAppHighlightTerms(deps: {
     mode: "add" | "edit";
     scope: "global" | "book";
     colorIndex: number;
-    terms: string[];
+    terms: HighlightWord[];
     /** 编辑时替换的原词组 */
     replaceStoredTerms?: string[];
   }) {

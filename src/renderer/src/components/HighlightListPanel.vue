@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import type { HighlightWord } from "../stores/fileMetaStore";
 import { icons } from "../icons";
 import {
   buildHighlightFindQuery,
@@ -122,16 +123,18 @@ function bindMorePanel(el: HTMLElement | null) {
 const editOpen = ref(false);
 const editMode = ref<"add" | "edit">("add");
 const editScope = ref<"global" | "book">("book");
-const editInitialTerms = ref<string[]>([]);
+const editInitialTerms = ref<HighlightWord[]>([]);
 const editInitialColorIndex = ref(0);
 
 function openAddModal(prefillTerms?: readonly string[]) {
   editMode.value = "add";
   editScope.value = "book";
   editInitialTerms.value = prefillTerms?.length
-    ? [...prefillTerms]
+    ? prefillTerms.map((t) => ({ text: t }))
     : [];
-  editInitialColorIndex.value = 0;
+  editInitialColorIndex.value = props.highlightColors.length > 0
+    ? Math.floor(Math.random() * props.highlightColors.length)
+    : 0;
   editOpen.value = true;
 }
 
@@ -139,7 +142,7 @@ function openEditModal(item: HighlightListTerm) {
   closeGroupExpand();
   editMode.value = "edit";
   editScope.value = item.scope;
-  editInitialTerms.value = [...item.storedTerms];
+  editInitialTerms.value = item.storedWords?.map((w) => ({ ...w })) ?? [];
   editInitialColorIndex.value = item.colorIndex;
   editOpen.value = true;
 }
@@ -262,7 +265,9 @@ function onItemClick(item: HighlightListTerm) {
     suppressItemClick.value = false;
     return;
   }
-  const { query, useRegex } = buildHighlightFindQuery(item.terms);
+  const { query, useRegex } = buildHighlightFindQuery(
+    item.storedWords ?? item.terms.map((t) => ({ text: t, isRegex: false })),
+  );
   if (!query) return;
   emit("findHighlightTerm", { query, useRegex });
 }
@@ -279,7 +284,9 @@ function onHighlightItemClick(
 
 function onHighlightItemContextMenu(item: HighlightListRow) {
   if (isItemExpanded(item)) return;
-  const { query, useRegex } = buildHighlightFindQuery(item.terms);
+  const { query, useRegex } = buildHighlightFindQuery(
+    item.storedWords ?? item.terms.map((t) => ({ text: t, isRegex: false })),
+  );
   if (!query) return;
   emit("findHighlightTermPrev", { query, useRegex });
 }
@@ -296,7 +303,8 @@ function onTermClick(
   }
   const term = item.terms[termIndex]?.trim();
   if (!term) return;
-  emit("findHighlightTerm", { query: term, useRegex: false });
+  const useRegex = item.storedWords?.[termIndex]?.isRegex === true;
+  emit("findHighlightTerm", { query: term, useRegex });
 }
 
 function onTermContextMenu(
@@ -307,7 +315,8 @@ function onTermContextMenu(
   ev.stopPropagation();
   const term = item.terms[termIndex]?.trim();
   if (!term) return;
-  emit("findHighlightTermPrev", { query: term, useRegex: false });
+  const useRegex = item.storedWords?.[termIndex]?.isRegex === true;
+  emit("findHighlightTermPrev", { query: term, useRegex });
 }
 
 function onEditCommit(payload: HighlightTermEditCommit) {
@@ -475,7 +484,7 @@ function commitGroupTermOrder(
     mode: "edit",
     scope: item.scope,
     colorIndex: item.colorIndex,
-    terms: next,
+    terms: next.map((t: string) => ({ text: t })),
     replaceStoredTerms: [...item.storedTerms],
   });
 }

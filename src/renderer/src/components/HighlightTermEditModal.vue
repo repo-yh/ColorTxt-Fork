@@ -2,8 +2,8 @@
 import { computed, nextTick, ref, watch } from "vue";
 import { icons } from "../icons";
 import { useAnchoredAppShellMenu } from "../composables/useAnchoredAppShellMenu";
-import { useSortableReorder } from "../composables/useSortableReorder";
 import { normalizeHighlightGroup } from "../utils/highlightWords";
+import type { HighlightWord } from "../stores/fileMetaStore";
 import AppModal from "./AppModal.vue";
 
 const HL_SWATCH_SIZE = 26;
@@ -21,7 +21,7 @@ export type HighlightTermEditCommit = {
   mode: "add" | "edit";
   scope: "global" | "book";
   colorIndex: number;
-  terms: string[];
+  terms: HighlightWord[];
   replaceStoredTerms?: string[];
 };
 
@@ -30,9 +30,8 @@ const open = defineModel<boolean>("open", { default: false });
 const props = withDefaults(
   defineProps<{
     mode: "add" | "edit";
-    /** 编辑时原 scope；添加固定为 book */
     scope?: "global" | "book";
-    initialTerms?: string[];
+    initialTerms?: HighlightWord[];
     initialColorIndex?: number;
     highlightColors: readonly string[];
     highlightPreviewBg?: string;
@@ -51,33 +50,32 @@ const emit = defineEmits<{
   commit: [payload: HighlightTermEditCommit];
 }>();
 
-const draftTerms = ref<string[]>([]);
+const draftTerms = ref<HighlightWord[]>([]);
 const draftColorIndex = ref(0);
 const draftInput = ref("");
 const isRegexMode = ref(false);
 const inputEl = ref<HTMLInputElement | null>(null);
 const tagInputRef = ref<HTMLElement | null>(null);
 const colorBtnRef = ref<HTMLButtonElement | null>(null);
-const tagCount = computed(() => draftTerms.value.length);
+const dragIndex = ref<number | null>(null);
 
-useSortableReorder({
-  containerRef: tagInputRef,
-  draggable: ".hlTag",
-  handle: false,
-  filter: ".hlTagRemove, .hlTagField",
-  preferDraggableIndex: true,
-  active: open,
-  itemCount: tagCount,
-  enabled: computed(() => draftTerms.value.length > 1),
-  onReorder(from, to) {
-    if (from === to) return;
-    const arr = draftTerms.value.slice();
-    const [item] = arr.splice(from, 1);
-    if (!item) return;
-    arr.splice(to, 0, item);
-    draftTerms.value = arr;
-  },
-});
+function onTagDragStart(i: number) {
+  dragIndex.value = i;
+}
+function onTagDragOver(i: number, ev: DragEvent) {
+  ev.preventDefault();
+}
+function onTagDrop(i: number) {
+  if (dragIndex.value == null || dragIndex.value === i) return;
+  const arr = draftTerms.value.slice();
+  const [item] = arr.splice(dragIndex.value, 1);
+  arr.splice(i, 0, item!);
+  draftTerms.value = arr;
+  dragIndex.value = null;
+}
+function onTagDragEnd() {
+  dragIndex.value = null;
+}
 
 const title = computed(() =>
   props.mode === "add" ? "添加高亮词" : "编辑高亮词",
@@ -94,7 +92,6 @@ const canConfirm = computed(() => {
   if (props.mode === "add") {
     return normalizeHighlightGroup(draftTerms.value) != null;
   }
-  // 编辑：空词组表示删除，允许确定
   return true;
 });
 
@@ -132,7 +129,8 @@ watch(open, (v) => {
     closeColorPicker();
     return;
   }
-  draftTerms.value = [...props.initialTerms];
+  draftTerms.value = props.initialTerms.map((w) => ({ text: w.text, isRegex: w.isRegex ?? false }));
+  isRegexMode.value = false;
   const maxIdx = Math.max(0, props.highlightColors.length - 1);
   draftColorIndex.value = Math.min(
     Math.max(0, Math.floor(props.initialColorIndex)),
@@ -145,8 +143,8 @@ watch(open, (v) => {
 function tryCommitInput() {
   const t = draftInput.value.trim();
   if (!t) return;
-  if (!draftTerms.value.includes(t)) {
-    draftTerms.value = [...draftTerms.value, t];
+  if (!draftTerms.value.some((d) => d.text === t)) {
+    draftTerms.value = [...draftTerms.value, { text: t, isRegex: isRegexMode.value }];
   }
   draftInput.value = "";
 }
@@ -197,7 +195,7 @@ function onConfirm() {
     colorIndex: draftColorIndex.value,
     terms,
     replaceStoredTerms:
-      props.mode === "edit" ? [...props.initialTerms] : undefined,
+      props.mode === "edit" ? props.initialTerms.map((w) => w.text) : undefined,
   });
   close();
 }
@@ -224,15 +222,20 @@ function focusInput() {
       >
         <span
           v-for="(term, i) in draftTerms"
-          :key="term"
+          :key="i"
           class="hlTag"
           :style="{
             backgroundColor: highlightPreviewBg,
             color: draftColor,
           }"
           :title="draftTerms.length > 1 ? '拖动调整顺序' : undefined"
+          draggable="true"
+          @dragstart="onTagDragStart(i)"
+          @dragover="onTagDragOver(i, $event)"
+          @drop="onTagDrop(i)"
+          @dragend="onTagDragEnd"
         >
-          <span class="hlTagText">{{ term }}</span>
+          <span class="hlTagText">{{ term.text }}</span>
           <button
             type="button"
             class="hlTagRemove"

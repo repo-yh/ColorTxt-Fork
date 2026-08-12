@@ -30,23 +30,19 @@ export type FileBookmarkItem = {
 /** Monaco `saveViewState()` 的 JSON 形态，按路径持久化在 meta 中 */
 export type PersistedEditorViewState = Record<string, unknown>;
 
-// ============================================================
-// 旧版 HighlightWord 类型（已迁移至 string[][]，保留以供参考）
-// ============================================================
-// /** 单条高亮词：文本 + 是否正则表达式 */
-// export type HighlightWord = {
-//   /** 高亮词文本；正则模式下为正则表达式源码 */
-//   text: string;
-//   /** 是否将 `text` 作为正则表达式处理（默认 `false`） */
-//   isRegex?: boolean;
-// };
+/**
+ * 高亮词组内单条：文本 + 可选正则标志。
+ */
+export type HighlightWord = {
+  text: string;
+  isRegex?: boolean;
+};
 
 /**
- * 自定义高亮词：键为色索引字符串 `"0"`,`"1"`…，值为该色下的**词组**列表。
- * 每组 `string[]` 长度 ≥ 1；侧栏一行一组，多词组内各词同色上色。
- * 旧版曾为 `Record<string, string[]>`（扁平词列表），由 normalize 迁成每词一组。
+ * 自定义高亮词：键为色索引字符串，值为该色下的词组列表（每组 HighlightWord[]）。
+ * 兼容旧 string[] 和 string[][] 格式。
  */
-export type HighlightWordsByIndex = Record<string, string[][]>;
+export type HighlightWordsByIndex = Record<string, HighlightWord[][]>;
 
 export type ReaderLineationType = "marker" | "wavy" | "straight";
 
@@ -170,27 +166,30 @@ const MAX_HIGHLIGHT_TERM_LEN = 100;
 function normalizeHighlightGroupTerms(
   rawGroup: unknown,
   seenGlobal: Set<string>,
-): string[] | null {
-  /** 旧版扁平：桶内元素为 string */
+): HighlightWord[] | null {
   if (typeof rawGroup === "string") {
     const t = rawGroup.trim();
-    if (!t || t.length > MAX_HIGHLIGHT_TERM_LEN || seenGlobal.has(t)) {
-      return null;
-    }
+    if (!t || t.length > MAX_HIGHLIGHT_TERM_LEN || seenGlobal.has(t)) return null;
     seenGlobal.add(t);
-    return [t];
+    return [{ text: t }];
   }
   if (!Array.isArray(rawGroup)) return null;
-  const terms: string[] = [];
+  const terms: HighlightWord[] = [];
   const seenLocal = new Set<string>();
   for (const w of rawGroup) {
-    if (typeof w !== "string") continue;
-    const t = w.trim();
+    let t: string | undefined;
+    let isRegex = false;
+    if (typeof w === "string") {
+      t = w.trim();
+    } else if (typeof w === "object" && w !== null && typeof (w as any).text === "string") {
+      t = ((w as any).text as string).trim();
+      isRegex = (w as any).isRegex === true;
+    }
     if (!t || t.length > MAX_HIGHLIGHT_TERM_LEN) continue;
     if (seenLocal.has(t) || seenGlobal.has(t)) continue;
     seenLocal.add(t);
     seenGlobal.add(t);
-    terms.push(t);
+    terms.push({ text: t, ...(isRegex ? { isRegex: true } as const : {}) });
   }
   return terms.length > 0 ? terms : null;
 }
@@ -253,7 +252,7 @@ export function normalizeHighlightWordsByIndex(
     const idx = Number.parseInt(k, 10);
     if (!Number.isFinite(idx) || idx < 0 || String(idx) !== k) continue;
     if (!Array.isArray(v)) continue;
-    const groups: string[][] = [];
+    const groups: HighlightWord[][] = [];
     for (const item of v) {
       const group = normalizeHighlightGroupTerms(item, seenGlobal);
       if (group) groups.push(group);
@@ -729,15 +728,18 @@ export function upsertHighlightGroupForFile(
   items: FileMetaRecord[],
   path: string,
   colorIndex: number,
-  terms: readonly string[],
+  terms: readonly string[] | readonly HighlightWord[],
   replaceStoredTerms?: readonly string[],
 ) {
   if (colorIndex < 0 || !Number.isFinite(colorIndex)) return items;
+  const words: HighlightWord[] = terms.length > 0 && typeof terms[0] === "object"
+    ? (terms as readonly HighlightWord[]).map((w) => ({ ...w }))
+    : (terms as readonly string[]).map((t) => ({ text: t }));
   return upsertFileMetaRecord(items, path, (rec) => {
     const next = upsertHighlightGroupInMap(
       rec?.highlightWordsByIndex,
       colorIndex,
-      terms,
+      words,
       replaceStoredTerms ? { replaceStoredTerms } : undefined,
     );
     if (next === rec?.highlightWordsByIndex) return {};

@@ -150,7 +150,7 @@ import {
 import { annotationMarkerCssRules } from "../reader/readerAnnotationDecor";
 import { floorReadingPercentFromScrollRatio } from "../utils/format";
 import { bookTitleForExport } from "../utils/readerAnnotationExport";
-import { buildHighlightFindQuery } from "../utils/highlightWords";
+import { buildHighlightFindQuery, type HighlightListTerm } from "../utils/highlightWords";
 import {
   hasEscBeforeModalLayers,
   hasModalOnStack,
@@ -3035,24 +3035,24 @@ function emitProbeLine(fromScroll = false) {
 
 /** 统计高亮词匹配数 */
 function countHighlightTermMatches(
-  terms: import("../utils/highlightWords").HighlightListTerm[],
+  terms: HighlightListTerm[],
   m?: monaco.editor.ITextModel | null,
 ) {
   const modelToUse = m ?? model.value;
   if (!modelToUse) return terms.map((t) => ({ ...t, matchCount: 0 }));
   return terms.map((t) => {
-    const { query, useRegex } = buildHighlightFindQuery(t.terms);
+    const words = t.storedWords ?? t.terms.map((s) => ({ text: s, isRegex: false }));
+    const { query, useRegex } = buildHighlightFindQuery(words);
     if (!query) return { ...t, matchCount: 0 };
     const matches = modelToUse.findMatches(
       query, false, useRegex, false, null, false,
     );
     const termMatchCounts: number[] = [];
     if (t.terms.length > 1) {
-      for (const term of t.terms) {
-        const q = term.trim();
-        if (!q) { termMatchCounts.push(0); continue; }
+      for (const w of words) {
+        if (!w.text) { termMatchCounts.push(0); continue; }
         const m = modelToUse.findMatches(
-          q, false, false, false, null, false,
+          w.text, false, w.isRegex === true, false, null, false,
         );
         termMatchCounts.push(m?.length ?? 0);
       }

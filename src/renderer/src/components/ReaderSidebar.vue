@@ -11,7 +11,7 @@ import { SIDEBAR_ACTIVITY_BAR_WIDTH } from "../constants/appUi";
 import type { TxtFileItem } from "../services/fileListService";
 import type { SidebarFileItem } from "../composables/useReaderSidebarLists";
 import type { CategoryEditorRow } from "../constants/fileCategories";
-import type { FileMetaRecord } from "../stores/fileMetaStore";
+import type { FileMetaRecord, HighlightWord } from "../stores/fileMetaStore";
 import type {
   CharacterBookStylePersisted,
   CharacterRosterEntry,
@@ -283,7 +283,7 @@ const emit = defineEmits<{
       mode: "add" | "edit";
       scope: "global" | "book";
       colorIndex: number;
-      terms: string[];
+      terms: HighlightWord[];
       replaceStoredTerms?: string[];
     },
   ];
