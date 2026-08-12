@@ -50,15 +50,30 @@ let lookupSeq = 0;
 
 const hasVisibleSlots = computed(() => slots.value.length > 0);
 
+function removeHtmlComments(input: string): string {
+  let previous: string;
+  do {
+    previous = input;
+    input = input.replace(/<!--|--!?>/g, "");
+  } while (input !== previous);
+  return input;
+}
+
 function sanitizeHtml(html: string): string {
-  return html
-    .replace(/<script[\s\S]*?<\/script>/gi, "")
-    .replace(/<iframe[\s\S]*?<\/iframe>/gi, "")
-    .replace(/<object[\s\S]*?<\/object>/gi, "")
-    .replace(/<embed[\s\S]*?>/gi, "")
-    .replace(/\son\w+\s*=\s*(['"]).*?\1/gi, "")
-    .replace(/\son\w+\s*=\s*[^\s>]+/gi, "")
-    .replace(/javascript:/gi, "");
+  let result = html;
+  let previous: string;
+  do {
+    previous = result;
+    result = result
+      .replace(/<script[\s\S]*?<\/script>/gi, "")
+      .replace(/<iframe[\s\S]*?<\/iframe>/gi, "")
+      .replace(/<object[\s\S]*?<\/object>/gi, "")
+      .replace(/<embed[\s\S]*?>/gi, "")
+      .replace(/\son\w+\s*=\s*(['"]).*?\1/gi, "")
+      .replace(/\son\w+\s*=\s*[^\s>]+/gi, "")
+      .replace(/javascript:/gi, "");
+  } while (result !== previous);
+  return removeHtmlComments(result);
 }
 
 function splitProviderIds(settings: DictionarySettings): {

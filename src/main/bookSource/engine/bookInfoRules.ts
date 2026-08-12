@@ -406,13 +406,29 @@ function formatLegadoHtmlContent(html: string, keepImg = false): string {
   const tagStrip = keepImg
     ? /<\/?(?!img\b)[a-zA-Z]+(?=[ >])[^<>]*>/gi
     : /<\/?[a-zA-Z]+(?=[ >])[^<>]*>/gi;
-  return decoded
+  // 循环移除 HTML 注释, 防止含有 > 的注释被截断漏出内容
+  let noComments = decoded;
+  let prev: string;
+  do {
+    prev = noComments;
+    noComments = noComments.replace(/<!--|--!?>/g, "");
+  } while (noComments !== prev);
+  // 循环移除危险标签对, 防止嵌套绕过
+  let safe = noComments;
+  do {
+    prev = safe;
+    safe = safe
+      .replace(/<script[\s\S]*?<\/script>/gi, "")
+      .replace(/<iframe[\s\S]*?<\/iframe>/gi, "")
+      .replace(/<object[\s\S]*?<\/object>/gi, "")
+      .replace(/<embed[\s\S]*?>/gi, "");
+  } while (safe !== prev);
+  return safe
     .replace(/(&nbsp;|&lrm;)+/gi, " ")
     .replace(/\u200E/g, "")
     .replace(/(&ensp;|&emsp;)/gi, " ")
     .replace(/(&thinsp;|&zwnj;|&zwj;|\u2009|\u200C|\u200D)/g, "")
     .replace(/<\/?(?:div|p|br|hr|h\d|article|dd|dl)[^>]*>/gi, "\n")
-    .replace(/<!--[^>]*-->/g, "")
     .replace(tagStrip, "")
     // 对齐 Legado indent1/indent2：段间换行并规范为单个全角缩进（幂等）
     .replace(new RegExp(`${LEGADO_INDENT_WS}*\\n+${LEGADO_INDENT_WS}*`, "g"), "\n　　")
