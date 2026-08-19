@@ -346,13 +346,14 @@ const emptyMessage = computed(() => {
 
 function itemTitle(item: HighlightListTerm & { listKey?: string }): string {
   if (usesSummaryRow(item)) {
-    return `共 ${item.terms.length} 个词，点击跳转到下一个匹配`;
+    return `共 ${item.terms.length} 个词\n左键查找下一个\n右键查找上一个`;
   }
-  return "点击跳转到下一个：" + item.terms.join(" | ");
+  const joined = item.terms.join(" | ");
+  return "左键查找下一个：" + joined + "\n右键查找上一个：" + joined;
 }
 
 function termTitle(term: string): string {
-  return "点击跳转到下一个：" + term;
+  return "左键查找下一个：" + term + "\n右键查找上一个：" + term;
 }
 
 /** —— 拖放合并（整项 / 单个词）；词拖到列表外则拆分 —— */
@@ -821,6 +822,7 @@ function onItemDrop(item: HighlightListRow, ev: DragEvent) {
                     :style="{ color: item.color }"
                     draggable="true"
                     @click="onTermClick(item, ti, $event)"
+                    @contextmenu.prevent="onTermContextMenu(item, ti, $event)"
                     @dragstart="onTermDragStart(item, ti, $event)"
                     @dragend="onDragEnd"
                     >{{ term }}</span
@@ -859,6 +861,7 @@ function onItemDrop(item: HighlightListRow, ev: DragEvent) {
                     :style="{ color: item.color }"
                     draggable="true"
                     @click="onTermClick(item, ti, $event)"
+                    @contextmenu.prevent="onTermContextMenu(item, ti, $event)"
                     @dragstart="onTermDragStart(item, ti, $event)"
                     @dragend="onDragEnd"
                     @dragover="onTermDragOver(item, ti, $event)"
