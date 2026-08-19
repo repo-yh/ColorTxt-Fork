@@ -185,6 +185,8 @@ export function useReaderInlineSearch(deps: {
       useRegex?: boolean;
     },
   ) {
+    /** 用户主动设置染色状态时恢复内联搜索装饰器 */
+    inlineSearchDecorationsDisabled = false;
     inlineSearchQuery = query.trim();
     inlineSearchCaseSensitive = options?.caseSensitive === true;
     inlineSearchWholeWord = options?.wholeWord === true;
@@ -206,6 +208,9 @@ export function useReaderInlineSearch(deps: {
     } else {
       inlineSearchCurrentMatch = null;
     }
+    /** 先清理（含关闭 Ctrl+F）再染色，与点击高亮词一致 */
+    deps.inlineSearchDecorationsCollection.value?.clear();
+    deps.onClearAllDecorations?.();
     applyInlineSearchDecorations();
   }
 

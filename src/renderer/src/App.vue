@@ -2304,6 +2304,7 @@ const {
   onImportFavoriteHighlightsJson,
   onFindHighlightTermFromSidebar,
   onFindHighlightTermPrevFromSidebar,
+  onColorAllHighlights,
 } = useAppHighlightTerms({
   readerRef,
   currentFile,
@@ -3886,6 +3887,7 @@ useAppShellThemeWatch({
           @import-bookmarks-json="onImportBookmarksJson"
           @find-highlight-term="(payload) => onFindHighlightTermFromSidebar(payload)"
           @find-highlight-term-prev="(payload) => onFindHighlightTermPrevFromSidebar(payload)"
+          @color-all-highlights="onColorAllHighlights"
           @add-highlight-term="(text: string, _isRegex: boolean) => onAddHighlightTerm({ text, colorIndex: Math.floor(Math.random() * highlightColorsForReader.length) })"
           @update:search-query="searchQuery = $event"
           @update:search-match-case="searchMatchCase = $event"

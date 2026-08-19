@@ -694,6 +694,26 @@ export function useAppHighlightTerms(deps: {
     );
   }
 
+  function onColorAllHighlights(payload: {
+    query: string;
+    useRegex: boolean;
+  }) {
+    if (
+      !deps.currentFile.value ||
+      deps.loading.value ||
+      deps.totalLineCount.value <= 0
+    )
+      return;
+    if (deps.isVoiceReadNavigationBlocked.value) return;
+    const q = payload.query.trim();
+    if (!q) return;
+    deps.readerRef.value?.setInlineSearchState?.(q, null, {
+      caseSensitive: false,
+      wholeWord: false,
+      useRegex: payload.useRegex,
+    });
+  }
+
   return {
     currentFileHighlightWords,
     mergedHighlightWordsForReader,
@@ -716,5 +736,6 @@ export function useAppHighlightTerms(deps: {
     onImportFavoriteHighlightsJson,
     onFindHighlightTermFromSidebar,
     onFindHighlightTermPrevFromSidebar,
+    onColorAllHighlights,
   };
 }

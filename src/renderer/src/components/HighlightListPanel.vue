@@ -90,6 +90,7 @@ const emit = defineEmits<{
   importBookHighlightsJson: [];
   exportFavoriteHighlightsJson: [];
   importFavoriteHighlightsJson: [];
+  colorAllHighlights: [payload: { query: string; useRegex: boolean }];
 }>();
 
 const moreBtnRef = ref<HTMLButtonElement | null>(null);
@@ -329,6 +330,7 @@ function onMoreSelect(action: string) {
   else if (action === "importBook") emit("importBookHighlightsJson");
   else if (action === "exportFavorite") emit("exportFavoriteHighlightsJson");
   else if (action === "importFavorite") emit("importFavoriteHighlightsJson");
+  else if (action === "colorAll") onColorAllHighlights();
 }
 
 const bookTermCount = computed(
@@ -666,6 +668,27 @@ function onItemDrop(item: HighlightListRow, ev: DragEvent) {
   clearDragState();
 }
 
+function onColorAllHighlights() {
+  const seen = new Set<string>();
+  const allWords: HighlightWord[] = [];
+  for (const item of props.highlightTerms) {
+    const words =
+      item.storedWords ??
+      item.terms.map((t) => ({ text: t, isRegex: false }));
+    for (const w of words) {
+      const text = w.text.trim();
+      if (!text) continue;
+      const key = `${text}\0${w.isRegex === true ? "1" : "0"}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      allWords.push({ text, isRegex: w.isRegex === true });
+    }
+  }
+  const { query, useRegex } = buildHighlightFindQuery(allWords);
+  if (!query) return;
+  emit("colorAllHighlights", { query, useRegex });
+}
+
 </script>
 
 <template>
@@ -955,6 +978,20 @@ function onItemDrop(item: HighlightListRow, ev: DragEvent) {
       :on-panel-mount="bindMorePanel"
       aria-label="高亮词更多"
     >
+      <button
+        type="button"
+        class="appShellMenuItem"
+        role="menuitem"
+        :disabled="!currentFilePath || highlightTerms.length === 0"
+        @click="onMoreSelect('colorAll')"
+      >
+        <span
+          class="appShellMenuIconSlot appShellMenuIconSlot--colorful"
+          v-html="icons.palette"
+        />
+        <span class="appShellMenuLabel">一键染色</span>
+      </button>
+      <div class="appShellMenuDivider" role="separator" />
       <button
         type="button"
         class="appShellMenuItem"

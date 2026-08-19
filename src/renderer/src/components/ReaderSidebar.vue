@@ -269,6 +269,7 @@ const emit = defineEmits<{
   refreshChaptersFromReader: [];
   findHighlightTerm: [payload: { query: string; useRegex: boolean }];
   findHighlightTermPrev: [payload: { query: string; useRegex: boolean }];
+  colorAllHighlights: [payload: { query: string; useRegex: boolean }];
   removeHighlightTerm: [
     payload: { storedTerms: string[]; scope: "global" | "book" },
   ];
@@ -1259,6 +1260,7 @@ defineExpose({
         @add-highlight-term="toggleAddHighlightInput"
         @find-highlight-term="emit('findHighlightTerm', $event)"
         @find-highlight-term-prev="emit('findHighlightTermPrev', $event)"
+        @color-all-highlights="emit('colorAllHighlights', $event)"
         @remove-highlight-term="emit('removeHighlightTerm', $event)"
         @favorite-highlight-term="emit('favoriteHighlightTerm', $event)"
         @unfavorite-highlight-term="emit('unfavoriteHighlightTerm', $event)"
