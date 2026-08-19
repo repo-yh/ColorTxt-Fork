@@ -67,8 +67,11 @@ export class TabfileReader {
         else if (key === "description") meta.description = def;
         continue;
       }
+      // dictd 风格的 meta 行（00database*）也跳过，不当词条
+      if (head.startsWith("00database")) continue;
       words.push(head);
-      definitions.push(def);
+      // 字面 \n 转成换行（dictd 转义约定）
+      definitions.push(def.replace(/\\n/g, "\n"));
     }
 
     // 大小写不敏感排序，供二分查找
