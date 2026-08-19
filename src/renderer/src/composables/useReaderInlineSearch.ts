@@ -76,6 +76,51 @@ export function useReaderInlineSearch(deps: {
     return matches;
   }
 
+  /**
+   * 从 searchStart 起逐条找「下一处/上一处」匹配（含起点列）。
+   * 用 findNextMatch/findPreviousMatch 逐个查找，突破 findMatches 的 19999 上限，
+   * 可跳转到全文任意匹配；guard 上限仅用于防止 wholeWord 过滤陷入死循环。
+   */
+  function findInlineSearchMatchFrom(
+    query: string,
+    searchStart: monaco.IPosition,
+    direction: "next" | "prev",
+  ): monaco.editor.FindMatch | null {
+    const m = deps.model.value;
+    if (!m) return null;
+    let start: monaco.IPosition = {
+      lineNumber: searchStart.lineNumber,
+      column: searchStart.column,
+    };
+    for (let guard = 0; guard < INLINE_SEARCH_MATCHES_LIMIT; guard++) {
+      const hit =
+        direction === "next"
+          ? m.findNextMatch(
+              query,
+              start,
+              inlineSearchUseRegex,
+              inlineSearchCaseSensitive,
+              null,
+              false,
+            )
+          : m.findPreviousMatch(
+              query,
+              start,
+              inlineSearchUseRegex,
+              inlineSearchCaseSensitive,
+              null,
+              false,
+            );
+      if (!hit) return null;
+      if (matchPassesWholeWord(hit)) return hit;
+      start =
+        direction === "next"
+          ? { lineNumber: hit.range.endLineNumber, column: hit.range.endColumn }
+          : { lineNumber: hit.range.startLineNumber, column: hit.range.startColumn };
+    }
+    return null;
+  }
+
   function applyInlineSearchDecorations() {
     const m = deps.model.value;
     const collection = deps.inlineSearchDecorationsCollection.value;
@@ -246,40 +291,21 @@ export function useReaderInlineSearch(deps: {
     inlineSearchWholeWord = options?.wholeWord === true;
     inlineSearchUseRegex = options?.useRegex === true;
 
-    const matches = findInlineSearchMatches(q);
-    if (matches.length === 0) {
+    const prev = options?.direction === "prev";
+    const sel = e.getSelection();
+    let searchStart: monaco.IPosition;
+    if (sel && !sel.isEmpty()) {
+      searchStart = prev ? sel.getStartPosition() : sel.getEndPosition();
+    } else {
+      searchStart = e.getPosition() ?? { lineNumber: 1, column: 1 };
+    }
+
+    const hit = findInlineSearchMatchFrom(q, searchStart, prev ? "prev" : "next");
+    if (!hit) {
       clearInlineSearchState();
       return false;
     }
-    const pos = e.getPosition() ?? { lineNumber: 1, column: 1 };
-    const prev = options?.direction === "prev";
-    let idx: number;
-    if (prev) {
-      idx = -1;
-      for (let i = matches.length - 1; i >= 0; i--) {
-        const r = matches[i]!.range;
-        if (r.startLineNumber < pos.lineNumber) { idx = i; break; }
-        if (r.startLineNumber === pos.lineNumber && r.startColumn < pos.column) { idx = i; break; }
-      }
-      if (idx < 0) idx = matches.length - 1;
-    } else {
-      const cur = inlineSearchCurrentMatch;
-      idx = matches.findIndex((it) => {
-        const r = it.range;
-        if (r.startLineNumber > pos.lineNumber) return true;
-        if (r.startLineNumber < pos.lineNumber) return false;
-        if (
-          cur &&
-          r.startLineNumber === cur.lineNumber &&
-          r.startColumn === cur.startColumn &&
-          r.endColumn === cur.endColumn
-        )
-          return false;
-        return r.startColumn >= pos.column;
-      });
-      if (idx < 0) idx = 0;
-    }
-    const target = matches[idx]!.range;
+    const target = hit.range;
     inlineSearchCurrentMatch = {
       lineNumber: target.startLineNumber,
       startColumn: target.startColumn,
