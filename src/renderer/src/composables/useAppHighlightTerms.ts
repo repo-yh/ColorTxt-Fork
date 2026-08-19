@@ -415,10 +415,20 @@ export function useAppHighlightTerms(deps: {
       return;
     }
 
-    // 跨 scope
-    const source = normalizeHighlightGroup(payload.source.storedTerms);
-    const target = normalizeHighlightGroup(payload.target.storedTerms);
-    if (!source || !target) return;
+    // 跨 scope：从各自 scope 的 map 取真实词组，保留 isRegex
+    const sourceMap = mapForScope(payload.source.scope);
+    const targetMap = mapForScope(payload.target.scope);
+    const sloc = sourceMap
+      ? findGroupLocation(sourceMap, payload.source.storedTerms)
+      : null;
+    const tloc = targetMap
+      ? findGroupLocation(targetMap, payload.target.storedTerms)
+      : null;
+    if (!sloc || !tloc) return;
+    const source = sourceMap![sloc.key]![sloc.index]!;
+    const target = targetMap![tloc.key]![tloc.index]!;
+    if (source.every((t) => target.some((w) => w.text === t.text))) return;
+
     stripTermsFromScope(payload.source.scope, groupTexts(source));
     const merged = normalizeHighlightGroup([...target, ...source]);
     if (!merged) return;
