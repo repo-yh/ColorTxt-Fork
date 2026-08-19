@@ -447,7 +447,8 @@ export function useAppPersistence(deps: {
       highlightColorsDark: [...deps.highlightColorsDark.value],
       lineationColorsLight: [...deps.lineationColorsLight.value],
       lineationColorsDark: [...deps.lineationColorsDark.value],
-      highlightWordsByIndexGlobal: deps.highlightWordsByIndexGlobal.value,
+      // 空对象兜底：最后一个高亮词删除后 value 为 undefined，合并会跳过并保留磁盘旧记录
+      highlightWordsByIndexGlobal: deps.highlightWordsByIndexGlobal.value ?? {},
       lineationLastColors:
         deps.lineationLastColors.value.marker ===
           DEFAULT_LINEATION_LAST_COLORS.marker &&
