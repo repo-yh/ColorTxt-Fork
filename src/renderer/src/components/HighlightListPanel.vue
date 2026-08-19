@@ -151,6 +151,7 @@ function openEditModal(item: HighlightListTerm) {
 defineExpose({
   openMoreMenu: toggleMoreMenu,
   openAddModal,
+  colorAllHighlights: onColorAllHighlights,
   moreOpen,
 });
 
@@ -330,7 +331,6 @@ function onMoreSelect(action: string) {
   else if (action === "importBook") emit("importBookHighlightsJson");
   else if (action === "exportFavorite") emit("exportFavoriteHighlightsJson");
   else if (action === "importFavorite") emit("importFavoriteHighlightsJson");
-  else if (action === "colorAll") onColorAllHighlights();
 }
 
 const bookTermCount = computed(
@@ -978,20 +978,6 @@ function onColorAllHighlights() {
       :on-panel-mount="bindMorePanel"
       aria-label="高亮词更多"
     >
-      <button
-        type="button"
-        class="appShellMenuItem"
-        role="menuitem"
-        :disabled="!currentFilePath || highlightTerms.length === 0"
-        @click="onMoreSelect('colorAll')"
-      >
-        <span
-          class="appShellMenuIconSlot appShellMenuIconSlot--colorful"
-          v-html="icons.palette"
-        />
-        <span class="appShellMenuLabel">一键染色</span>
-      </button>
-      <div class="appShellMenuDivider" role="separator" />
       <button
         type="button"
         class="appShellMenuItem"

@@ -1057,6 +1057,16 @@ defineExpose({
         </div>
         <div v-else-if="activeTab === 'highlights'" class="sidebarHeaderEnd">
           <button
+            type="button"
+            class="aiReaderSidebarHeaderIconBtn aiReaderSidebarHeaderIconBtn--colorful"
+            title="一键染色"
+            aria-label="一键染色"
+            :disabled="!currentFilePath"
+            @click="highlightPanelRef?.colorAllHighlights()"
+          >
+            <span class="svg" v-html="icons.palette" />
+          </button>
+          <button
             v-if="aiAssistantTabVisible"
             ref="highlightsAiSearchBtnRef"
             type="button"
@@ -1787,7 +1797,9 @@ defineExpose({
   display: block;
 }
 
-.aiReaderSidebarHeaderIconBtn .svg :deep(svg path) {
+.aiReaderSidebarHeaderIconBtn:not(.aiReaderSidebarHeaderIconBtn--colorful)
+  .svg
+  :deep(svg path) {
   fill: currentColor;
 }
 
