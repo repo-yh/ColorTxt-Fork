@@ -12,6 +12,9 @@ type InlineSearchGroup = { query: string; useRegex: boolean; color: string };
  * `findMatches` 默认仅 999 条：高亮词组全文匹配常超限，导致后文无装饰、且「下一处」回绕到文首。
  */
 const INLINE_SEARCH_MATCHES_LIMIT = 19999;
+/** 滚动条指示条：普通匹配色 / 当前匹配色 */
+const INLINE_SEARCH_DEFAULT_RULER_COLOR = "#a8ac94";
+const INLINE_SEARCH_CURRENT_RULER_COLOR = "#f7dc6f";
 
 export function useReaderInlineSearch(deps: {
   editor: ShallowRef<monaco.editor.IStandaloneCodeEditor | null>;
@@ -23,14 +26,11 @@ export function useReaderInlineSearch(deps: {
   /** 清除所有装饰器（包括 Ctrl+F 的） */
   onClearAllDecorations?: () => void;
 }) {
-  let inlineSearchQuery = "";
-  let inlineSearchCaseSensitive = false;
   let inlineSearchWholeWord = false;
-  let inlineSearchUseRegex = false;
   let inlineSearchCurrentMatch: MatchShape | null = null;
   /** Ctrl+F 打开时关闭内联搜索装饰器，需要时才恢复 */
   let inlineSearchDecorationsDisabled = false;
-  /** 一键染色多组状态；非空时 applyInlineSearchDecorations 走分组染色 */
+  /** 染色分组；单组查询也是「一组」（循环一次），一键染色为多组，统一循环染色不区分组数 */
   let inlineSearchGroups: InlineSearchGroup[] = [];
 
   function isWordChar(ch: string): boolean {
@@ -55,30 +55,12 @@ export function useReaderInlineSearch(deps: {
     return isWholeWordRange(lineText, start, end);
   }
 
-  function sameInlineSearchMatch(a: MatchShape, b: monaco.Range) {
+  function sameInlineSearchMatch(a: MatchShape, b: monaco.IRange) {
     return (
       a.lineNumber === b.startLineNumber &&
       a.startColumn === b.startColumn &&
       a.endColumn === b.endColumn
     );
-  }
-
-  function findInlineSearchMatches(query: string) {
-    const m = deps.model.value;
-    if (!m) return [] as monaco.editor.FindMatch[];
-    let matches = m.findMatches(
-      query,
-      false,
-      inlineSearchUseRegex,
-      inlineSearchCaseSensitive,
-      null,
-      false,
-      INLINE_SEARCH_MATCHES_LIMIT,
-    );
-    if (inlineSearchWholeWord) {
-      matches = matches.filter(matchPassesWholeWord);
-    }
-    return matches;
   }
 
   /**
@@ -90,6 +72,8 @@ export function useReaderInlineSearch(deps: {
     query: string,
     searchStart: monaco.IPosition,
     direction: "next" | "prev",
+    useRegex: boolean,
+    caseSensitive: boolean,
   ): monaco.editor.FindMatch | null {
     const m = deps.model.value;
     if (!m) return null;
@@ -100,22 +84,8 @@ export function useReaderInlineSearch(deps: {
     for (let guard = 0; guard < INLINE_SEARCH_MATCHES_LIMIT; guard++) {
       const hit =
         direction === "next"
-          ? m.findNextMatch(
-              query,
-              start,
-              inlineSearchUseRegex,
-              inlineSearchCaseSensitive,
-              null,
-              false,
-            )
-          : m.findPreviousMatch(
-              query,
-              start,
-              inlineSearchUseRegex,
-              inlineSearchCaseSensitive,
-              null,
-              false,
-            );
+          ? m.findNextMatch(query, start, useRegex, caseSensitive, null, false)
+          : m.findPreviousMatch(query, start, useRegex, caseSensitive, null, false);
       if (!hit) return null;
       if (matchPassesWholeWord(hit)) return hit;
       start =
@@ -126,16 +96,17 @@ export function useReaderInlineSearch(deps: {
     return null;
   }
 
-  /** 一键染色：循环每个颜色组，用该组色值给滚动条指示条染色 */
-  function applyGroupedInlineSearchDecorations() {
+  function applyInlineSearchDecorations() {
     const m = deps.model.value;
     const collection = deps.inlineSearchDecorationsCollection.value;
     if (!m || !collection) return;
+    if (inlineSearchDecorationsDisabled) return;
+
     const decorations: monaco.editor.IModelDeltaDecoration[] = [];
     for (const group of inlineSearchGroups) {
       const query = group.query.trim();
       if (!query) continue;
-      const matches = m.findMatches(
+      let matches = m.findMatches(
         query,
         false,
         group.useRegex,
@@ -144,6 +115,9 @@ export function useReaderInlineSearch(deps: {
         false,
         INLINE_SEARCH_MATCHES_LIMIT,
       );
+      if (inlineSearchWholeWord) {
+        matches = matches.filter(matchPassesWholeWord);
+      }
       for (const it of matches) {
         decorations.push({
           range: it.range,
@@ -157,65 +131,39 @@ export function useReaderInlineSearch(deps: {
         });
       }
     }
-    collection.set(decorations);
-  }
 
-  function applyInlineSearchDecorations() {
-    const m = deps.model.value;
-    const collection = deps.inlineSearchDecorationsCollection.value;
-    if (!m || !collection) return;
-    if (inlineSearchDecorationsDisabled) return;
-    if (inlineSearchGroups.length > 0) {
-      applyGroupedInlineSearchDecorations();
-      return;
-    }
-    const query = inlineSearchQuery.trim();
-    if (!query) {
-      collection.clear();
-      return;
-    }
-    const matches = findInlineSearchMatches(query);
-    if (matches.length === 0) {
-      collection.clear();
-      return;
-    }
-    let currentMatchIndex = -1;
+    /** 当前匹配特殊高亮（仅当有 currentMatch，与单组/多组无关） */
     if (inlineSearchCurrentMatch != null) {
-      currentMatchIndex = matches.findIndex((it) =>
-        sameInlineSearchMatch(inlineSearchCurrentMatch!, it.range),
+      const idx = decorations.findIndex((d) =>
+        sameInlineSearchMatch(inlineSearchCurrentMatch!, d.range),
       );
-    }
-    if (currentMatchIndex < 0) currentMatchIndex = 0;
-    const currentRange = matches[currentMatchIndex]!.range;
-    const decorations: monaco.editor.IModelDeltaDecoration[] = matches.map(
-      (it, idx) => ({
-        range: it.range,
-        options: {
-          inlineClassName:
-            idx === currentMatchIndex
-              ? "readerInlineSearchCurrentMatch"
-              : "readerInlineSearchMatch",
-          /** 在概览尺/滚动条上显示匹配位置指示条，颜色同 Ctrl+F */
-          overviewRuler: {
-            color: idx === currentMatchIndex ? "#f7dc6f" : "#a8ac94",
-            position: monaco.editor.OverviewRulerLane.Center,
+      if (idx >= 0) {
+        const currentRange = decorations[idx]!.range;
+        decorations[idx]!.options.inlineClassName =
+          "readerInlineSearchCurrentMatch";
+        (
+          decorations[idx]!.options.overviewRuler as { color: string }
+        ).color = INLINE_SEARCH_CURRENT_RULER_COLOR;
+        decorations.push({
+          range: new monaco.Range(
+            currentRange.startLineNumber,
+            1,
+            currentRange.startLineNumber,
+            m.getLineMaxColumn(currentRange.startLineNumber),
+          ),
+          options: {
+            isWholeLine: true,
+            className: "readerInlineSearchCurrentLine",
+            linesDecorationsClassName: "readerInlineSearchCurrentLineDecor",
           },
-        },
-      }),
-    );
-    decorations.push({
-      range: new monaco.Range(
-        currentRange.startLineNumber,
-        1,
-        currentRange.startLineNumber,
-        m.getLineMaxColumn(currentRange.startLineNumber),
-      ),
-      options: {
-        isWholeLine: true,
-        className: "readerInlineSearchCurrentLine",
-        linesDecorationsClassName: "readerInlineSearchCurrentLineDecor",
-      },
-    });
+        });
+      }
+    }
+
+    if (decorations.length === 0) {
+      collection.clear();
+      return;
+    }
     collection.set(decorations);
   }
 
@@ -230,11 +178,17 @@ export function useReaderInlineSearch(deps: {
   ) {
     /** 用户主动设置染色状态时恢复内联搜索装饰器 */
     inlineSearchDecorationsDisabled = false;
-    inlineSearchGroups = [];
-    inlineSearchQuery = query.trim();
-    inlineSearchCaseSensitive = options?.caseSensitive === true;
     inlineSearchWholeWord = options?.wholeWord === true;
-    inlineSearchUseRegex = options?.useRegex === true;
+    const q = query.trim();
+    inlineSearchGroups = q
+      ? [
+          {
+            query: q,
+            useRegex: options?.useRegex === true,
+            color: INLINE_SEARCH_DEFAULT_RULER_COLOR,
+          },
+        ]
+      : [];
     if (
       currentMatch &&
       Number.isFinite(currentMatch.lineNumber) &&
@@ -268,10 +222,7 @@ export function useReaderInlineSearch(deps: {
   }
 
   function clearInlineSearchState() {
-    inlineSearchQuery = "";
-    inlineSearchCaseSensitive = false;
     inlineSearchWholeWord = false;
-    inlineSearchUseRegex = false;
     inlineSearchCurrentMatch = null;
     inlineSearchGroups = [];
     deps.inlineSearchDecorationsCollection.value?.clear();
@@ -330,6 +281,7 @@ export function useReaderInlineSearch(deps: {
       useRegex?: boolean;
       smooth?: boolean;
       direction?: "prev" | "next";
+      color?: string;
     },
   ): boolean {
     const e = deps.editor.value;
@@ -342,14 +294,11 @@ export function useReaderInlineSearch(deps: {
     }
     /** 启用内联搜索装饰器（用户主动点击高亮词） */
     inlineSearchDecorationsDisabled = false;
-    inlineSearchGroups = [];
+    inlineSearchWholeWord = options?.wholeWord === true;
+    const useRegex = options?.useRegex === true;
+    const caseSensitive = options?.caseSensitive === true;
     /** 视口外光标先挪到视口首行，便于从当前阅读位置继续查找 */
     ensureSearchAnchorCursorInViewport(e);
-
-    inlineSearchQuery = q;
-    inlineSearchCaseSensitive = options?.caseSensitive === true;
-    inlineSearchWholeWord = options?.wholeWord === true;
-    inlineSearchUseRegex = options?.useRegex === true;
 
     const prev = options?.direction === "prev";
     const sel = e.getSelection();
@@ -360,7 +309,13 @@ export function useReaderInlineSearch(deps: {
       searchStart = e.getPosition() ?? { lineNumber: 1, column: 1 };
     }
 
-    const hit = findInlineSearchMatchFrom(q, searchStart, prev ? "prev" : "next");
+    const hit = findInlineSearchMatchFrom(
+      q,
+      searchStart,
+      prev ? "prev" : "next",
+      useRegex,
+      caseSensitive,
+    );
     if (!hit) {
       clearInlineSearchState();
       return false;
@@ -371,6 +326,13 @@ export function useReaderInlineSearch(deps: {
       startColumn: target.startColumn,
       endColumn: target.endColumn,
     };
+    inlineSearchGroups = [
+      {
+        query: q,
+        useRegex,
+        color: options?.color ?? INLINE_SEARCH_DEFAULT_RULER_COLOR,
+      },
+    ];
     /** 先清除内联搜索装饰器确保干净 */
     deps.inlineSearchDecorationsCollection.value?.clear();
     deps.onClearAllDecorations?.();
@@ -385,7 +347,7 @@ export function useReaderInlineSearch(deps: {
   }
 
   function hasInlineSearchQuery(): boolean {
-    return inlineSearchQuery.trim().length > 0;
+    return inlineSearchGroups.length > 0;
   }
 
   return {

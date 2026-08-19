@@ -653,6 +653,7 @@ export function useAppHighlightTerms(deps: {
   function onFindHighlightTermFromSidebar(payload: {
     query: string;
     useRegex: boolean;
+    color: string;
   }) {
     if (
       !deps.currentFile.value ||
@@ -669,6 +670,7 @@ export function useAppHighlightTerms(deps: {
       wholeWord: false,
       useRegex: payload.useRegex,
       smooth: true,
+      color: payload.color,
     });
     hasInlineSearchHighlight.value = found === true;
   }

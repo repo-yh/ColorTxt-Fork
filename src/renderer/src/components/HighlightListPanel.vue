@@ -54,7 +54,7 @@ const props = withDefaults(
 );
 
 const emit = defineEmits<{
-  findHighlightTerm: [payload: { query: string; useRegex: boolean }];
+  findHighlightTerm: [payload: { query: string; useRegex: boolean; color: string }];
   findHighlightTermPrev: [payload: { query: string; useRegex: boolean }];
   removeHighlightTerm: [
     payload: { storedTerms: string[]; scope: "global" | "book" },
@@ -273,7 +273,7 @@ function onItemClick(item: HighlightListTerm) {
     item.storedWords ?? item.terms.map((t) => ({ text: t, isRegex: false })),
   );
   if (!query) return;
-  emit("findHighlightTerm", { query, useRegex });
+  emit("findHighlightTerm", { query, useRegex, color: item.color });
 }
 
 /** 展开态：整组跳转只由 header 触发，行内空白不跳转 */
@@ -308,7 +308,7 @@ function onTermClick(
   const term = item.terms[termIndex]?.trim();
   if (!term) return;
   const useRegex = item.storedWords?.[termIndex]?.isRegex === true;
-  emit("findHighlightTerm", { query: term, useRegex });
+  emit("findHighlightTerm", { query: term, useRegex, color: item.color });
 }
 
 function onTermContextMenu(

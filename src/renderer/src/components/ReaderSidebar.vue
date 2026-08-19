@@ -267,7 +267,7 @@ const emit = defineEmits<{
   openWebDav: [];
   openSettings: [];
   refreshChaptersFromReader: [];
-  findHighlightTerm: [payload: { query: string; useRegex: boolean }];
+  findHighlightTerm: [payload: { query: string; useRegex: boolean; color: string }];
   findHighlightTermPrev: [payload: { query: string; useRegex: boolean }];
   colorAllHighlights: [
     payload: { groups: { query: string; useRegex: boolean; color: string }[] },
