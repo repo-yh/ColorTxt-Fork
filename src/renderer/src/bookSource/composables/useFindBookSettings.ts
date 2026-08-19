@@ -23,6 +23,7 @@ import {
   clonePersistBaselineValue,
   WINDOW_LOCAL_MAIN_SETTING_KEYS,
 } from "../../services/settingsPersistMerge";
+import { stripTranslationSecretsForDisk } from "../../constants/translationSettings";
 
 let store: ReturnType<typeof createFindBookSettingsStore> | null = null;
 
@@ -69,6 +70,8 @@ function createFindBookSettingsStore() {
   const pomodoroSettings = ref(initial.pomodoroSettings);
   const selectionToolbarButtons = ref(initial.selectionToolbarButtons);
   const dictionarySettings = ref(initial.dictionarySettings);
+  const webSearchSettings = ref(initial.webSearchSettings);
+  const translationSettings = ref(initial.translationSettings);
 
   /** 阅读/编辑共用字段落盘基线（不把磁盘合并进本窗内存） */
   const readerUiPersistBaseline: Record<string, unknown> = {};
@@ -124,6 +127,10 @@ function createFindBookSettingsStore() {
       pomodoroSettings: pomodoroSettings.value,
       selectionToolbarButtons: selectionToolbarButtons.value,
       dictionarySettings: dictionarySettings.value,
+      webSearchSettings: webSearchSettings.value,
+      translationSettings: stripTranslationSecretsForDisk(
+        translationSettings.value,
+      ),
     };
   }
 
@@ -200,7 +207,25 @@ function createFindBookSettingsStore() {
     pomodoroSettings.value = shared.pomodoroSettings;
     selectionToolbarButtons.value = shared.selectionToolbarButtons;
     dictionarySettings.value = shared.dictionarySettings;
+    webSearchSettings.value = shared.webSearchSettings;
+    translationSettings.value = shared.translationSettings;
     captureReaderUiPersistBaseline();
+    void (async () => {
+      try {
+        const res = await window.colorTxt.secrets.getTranslationProviderKeys();
+        const {
+          applyTranslationSecrets,
+          mergeTranslationSettings,
+          parseTranslationSecretsBlob,
+        } = await import("../../constants/translationSettings");
+        translationSettings.value = applyTranslationSecrets(
+          mergeTranslationSettings(translationSettings.value),
+          parseTranslationSecretsBlob(res.keys ?? ""),
+        );
+      } catch {
+        /* ignore */
+      }
+    })();
   }
 
   function onProxyExternalChange() {
@@ -269,6 +294,8 @@ function createFindBookSettingsStore() {
     pomodoroSettings,
     selectionToolbarButtons,
     dictionarySettings,
+    webSearchSettings,
+    translationSettings,
     persistAll,
     persistReaderUiPrefs,
     hydrateSharedReaderFromMain,

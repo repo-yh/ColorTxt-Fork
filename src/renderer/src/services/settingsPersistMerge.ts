@@ -58,6 +58,8 @@ export const WINDOW_LOCAL_MAIN_SETTING_KEYS: ReadonlySet<string> = new Set([
   "pomodoro",
   "selectionToolbarButtons",
   "dictionarySettings",
+  "webSearchSettings",
+  "translationSettings",
   "voiceRead",
   "sidebarWidth",
 ]);

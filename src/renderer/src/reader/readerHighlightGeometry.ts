@@ -80,32 +80,46 @@ function lastColumnOnSameVisualRow(
   return best;
 }
 
-/**
- * 指定范围在视口中的锚点（水平居中 + 首行顶/底）。
- * 跨行/跨软换行时仅按**第一行上第一段视觉折行**定位。
- */
-export function getRangeViewportAnchor(
-  e: monaco.editor.IStandaloneCodeEditor,
-  m: monaco.editor.ITextModel,
-  range: monaco.IRange,
-): {
+export type RangeViewportAnchor = {
   selectionCenterX: number;
   selectionLeftX: number;
   selectionRightX: number;
   anchorTop: number;
   lineBottom: number;
-} | null {
-  const sel = monaco.Range.lift(range);
-  if (sel.isEmpty()) return null;
-  const dom = e.getDomNode();
-  if (!dom) return null;
-  const rect = dom.getBoundingClientRect();
-  const layout = e.getLayoutInfo();
-  const scrollLeft = e.getScrollLeft();
-  const baseX = rect.left + layout.contentLeft - scrollLeft;
+};
 
-  const dragStart = sel.getStartPosition();
-  const dragEnd = sel.getEndPosition();
+/** 选区与当前可见行的最早交集（文档顺序）；无交集返回 null */
+function firstVisibleIntersection(
+  ed: monaco.editor.IStandaloneCodeEditor,
+  range: monaco.Range,
+): monaco.Range | null {
+  let best: monaco.Range | null = null;
+  for (const vr of ed.getVisibleRanges()) {
+    const hit = range.intersectRanges(vr);
+    if (!hit || hit.isEmpty()) continue;
+    if (
+      !best ||
+      monaco.Range.compareRangesUsingStarts(hit, best) < 0
+    ) {
+      best = hit;
+    }
+  }
+  return best;
+}
+
+/**
+ * 按给定范围的文档起点锚到同一视觉折行首段。
+ * 起点不在视口（getScrolledVisiblePosition 为 null）时返回 null。
+ */
+function anchorAtRangeDocumentStart(
+  e: monaco.editor.IStandaloneCodeEditor,
+  m: monaco.editor.ITextModel,
+  range: monaco.Range,
+  domRect: DOMRect,
+  baseX: number,
+): RangeViewportAnchor | null {
+  const dragStart = range.getStartPosition();
+  const dragEnd = range.getEndPosition();
   const firstInDoc =
     monaco.Position.compare(dragStart, dragEnd) <= 0 ? dragStart : dragEnd;
   const lastInDoc =
@@ -138,7 +152,7 @@ export function getRangeViewportAnchor(
   });
   if (startVp == null) return null;
 
-  const top = rect.top + startVp.top;
+  const top = domRect.top + startVp.top;
   const lineBottom = top + Math.max(1, startVp.height);
 
   const selectionLeftX = baseX + startLeft;
@@ -154,6 +168,33 @@ export function getRangeViewportAnchor(
 }
 
 /**
+ * 指定范围在视口中的锚点（水平居中 + 首行顶/底）。
+ * 跨行/跨软换行时仅按**第一行上第一段视觉折行**定位。
+ * 若文档起点已滚出视口，则改锚到选区与可见行的最早交集，便于 Shift 扩展长选区后仍能弹出工具条。
+ */
+export function getRangeViewportAnchor(
+  e: monaco.editor.IStandaloneCodeEditor,
+  m: monaco.editor.ITextModel,
+  range: monaco.IRange,
+): RangeViewportAnchor | null {
+  const sel = monaco.Range.lift(range);
+  if (sel.isEmpty()) return null;
+  const dom = e.getDomNode();
+  if (!dom) return null;
+  const rect = dom.getBoundingClientRect();
+  const layout = e.getLayoutInfo();
+  const scrollLeft = e.getScrollLeft();
+  const baseX = rect.left + layout.contentLeft - scrollLeft;
+
+  const atStart = anchorAtRangeDocumentStart(e, m, sel, rect, baseX);
+  if (atStart) return atStart;
+
+  const visible = firstVisibleIntersection(e, sel);
+  if (!visible || visible.isEmpty()) return null;
+  return anchorAtRangeDocumentStart(e, m, visible, rect, baseX);
+}
+
+/**
  * 选区在视口中的锚点（水平居中 + 首行顶/底）。
  * 跨行/跨软换行时仅按**第一行上第一段视觉折行**定位（如「得井|井有」只锚「得井」），
  * 忽略后续折行或模型行；垂直位置用首段起始列的视觉行。
@@ -161,13 +202,7 @@ export function getRangeViewportAnchor(
 export function getSelectionViewportAnchor(
   e: monaco.editor.IStandaloneCodeEditor,
   m: monaco.editor.ITextModel,
-): {
-  selectionCenterX: number;
-  selectionLeftX: number;
-  selectionRightX: number;
-  anchorTop: number;
-  lineBottom: number;
-} | null {
+): RangeViewportAnchor | null {
   const sel = e.getSelection();
   if (!sel || sel.isEmpty()) return null;
   return getRangeViewportAnchor(e, m, sel);

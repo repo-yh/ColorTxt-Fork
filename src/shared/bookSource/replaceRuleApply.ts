@@ -198,3 +198,51 @@ export function applyTitleReplaceWithRules(
   if (!rules.length) return title;
   return applyReplaceRulesToText(title.replace(/\r?\n/g, ""), rules, logs);
 }
+
+/**
+ * 阅读展示全文：正文规则套全文；标题行恢复为套正文前原文再只套标题规则
+ *（对齐 Legado 分作用域，避免「仅作用于正文」改写章节标题行）。
+ * `titleDisplayLines` 为 1-based 展示行号。
+ * 若正文规则改变行数，则无法按行号恢复，退化为在正文替换后的标题行上再套标题规则。
+ */
+export function applyReplaceRulesToDisplayText(
+  text: string,
+  contentRules: ReplaceRule[],
+  titleRules: ReplaceRule[],
+  titleDisplayLines: ReadonlySet<number>,
+  logs?: string[],
+): string {
+  if (!contentRules.length && !titleRules.length) return text;
+
+  const linesBefore = text.length > 0 ? text.split("\n") : [];
+  if (!contentRules.length) {
+    if (!titleRules.length || titleDisplayLines.size === 0) return text;
+    const lines = [...linesBefore];
+    for (const lineNo of titleDisplayLines) {
+      const idx = lineNo - 1;
+      if (idx < 0 || idx >= lines.length) continue;
+      lines[idx] = applyTitleReplaceWithRules(lines[idx]!, titleRules, logs);
+    }
+    return lines.join("\n");
+  }
+
+  const afterContent = applyReplaceRulesToText(text, contentRules, logs);
+  if (titleDisplayLines.size === 0 && !titleRules.length) return afterContent;
+
+  const linesAfter =
+    afterContent.length > 0 ? afterContent.split("\n") : [];
+  const sameLineCount = linesAfter.length === linesBefore.length;
+
+  for (const lineNo of titleDisplayLines) {
+    const idx = lineNo - 1;
+    if (idx < 0 || idx >= linesAfter.length) continue;
+    let titleLine = sameLineCount
+      ? (linesBefore[idx] ?? linesAfter[idx]!)
+      : linesAfter[idx]!;
+    if (titleRules.length) {
+      titleLine = applyTitleReplaceWithRules(titleLine, titleRules, logs);
+    }
+    linesAfter[idx] = titleLine;
+  }
+  return linesAfter.join("\n");
+}

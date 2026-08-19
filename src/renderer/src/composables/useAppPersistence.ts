@@ -153,6 +153,16 @@ import {
 } from "../constants/selectionToolbar";
 import { mergeDictionarySettings } from "../constants/dictionarySettings";
 import type { DictionarySettings } from "@shared/dictionaryTypes";
+import { mergeWebSearchSettings } from "../constants/webSearchSettings";
+import type { WebSearchSettings } from "@shared/webSearchTypes";
+import {
+  applyTranslationSecrets,
+  mergeTranslationSettings,
+  parseTranslationSecretsBlob,
+  resolveTranslationSecretsWritePayload,
+  stripTranslationSecretsForDisk,
+} from "../constants/translationSettings";
+import type { TranslationSettings } from "@shared/translationTypes";
 import {
   collectVoiceReadProfileApiKeys,
   hydrateVoiceReadProfilesApiKeys,
@@ -267,6 +277,8 @@ export function useAppPersistence(deps: {
   pomodoroSettings: Ref<import("../constants/pomodoro").PomodoroSettings>;
   selectionToolbarButtons: Ref<SelectionToolbarButtons>;
   dictionarySettings: Ref<DictionarySettings>;
+  webSearchSettings: Ref<WebSearchSettings>;
+  translationSettings: Ref<TranslationSettings>;
   fileMetaRecords: Ref<FileMetaRecord[]>;
   shortcutBindings: Ref<ShortcutBindingMap>;
   defaultShortcutBindings: ShortcutBindingMap;
@@ -412,6 +424,10 @@ export function useAppPersistence(deps: {
       pomodoro: deps.pomodoroSettings.value,
       selectionToolbarButtons: deps.selectionToolbarButtons.value,
       dictionarySettings: deps.dictionarySettings.value,
+      webSearchSettings: deps.webSearchSettings.value,
+      translationSettings: stripTranslationSecretsForDisk(
+        deps.translationSettings.value,
+      ),
       shortcutBindings: deps.shortcutBindings.value,
       // 空对象也要写入：合并落盘时若用 undefined 会跳过，磁盘上旧覆盖无法清除（恢复默认失效）
       readerPaletteOverridesLight: {
@@ -990,6 +1006,31 @@ export function useAppPersistence(deps: {
     persistRecentFiles();
   }
 
+  async function hydrateTranslationSecretsFromVault(): Promise<void> {
+    try {
+      const res = await window.colorTxt.secrets.getTranslationProviderKeys();
+      const secrets = parseTranslationSecretsBlob(res.keys ?? "");
+      deps.translationSettings.value = applyTranslationSecrets(
+        mergeTranslationSettings(deps.translationSettings.value),
+        secrets,
+      );
+    } catch {
+      // ignore
+    }
+  }
+
+  async function persistTranslationSecretsToVault() {
+    const payload = await resolveTranslationSecretsWritePayload(
+      deps.translationSettings.value,
+      async () => {
+        const res = await window.colorTxt.secrets.getTranslationProviderKeys();
+        return res.keys ?? "";
+      },
+    );
+    if (!payload) return;
+    await window.colorTxt.secrets.setTranslationSecrets(payload);
+  }
+
   async function hydrateVoiceReadSecretsFromVault(): Promise<boolean> {
     let migrated = false;
     try {
@@ -1331,6 +1372,15 @@ export function useAppPersistence(deps: {
       deps.dictionarySettings.value = mergeDictionarySettings(
         data.dictionarySettings,
       );
+      deps.webSearchSettings.value = mergeWebSearchSettings(
+        data.webSearchSettings,
+      );
+      const mergedTranslation = mergeTranslationSettings(
+        data.translationSettings,
+      );
+      deps.translationSettings.value = stripTranslationSecretsForDisk(
+        mergedTranslation,
+      );
     }
     deps.shortcutBindings.value = mergeShortcutBindings(
       deps.defaultShortcutBindings,
@@ -1662,6 +1712,7 @@ export function useAppPersistence(deps: {
       characterPortraitCacheDirKeyPresent,
     } = loadPersistedSettings();
     await hydrateVoiceReadSecretsFromVault();
+    await hydrateTranslationSecretsFromVault();
     settingsLoaded.value = true;
     let needDefaultSettingsPersist = false;
     if (!ebookConvertOutputDirKeyPresent) {
@@ -1720,6 +1771,7 @@ export function useAppPersistence(deps: {
     persistSettings,
     persistSidebarWidth,
     persistVoiceReadSecretsToVault,
+    persistTranslationSecretsToVault,
     persistReadingSessionSnapshot,
     persistWindowUnloadState,
     persistFileListCache,

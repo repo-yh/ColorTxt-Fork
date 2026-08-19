@@ -3,7 +3,8 @@ import { computed, nextTick, onBeforeUnmount, ref, toRaw, watch } from "vue";
 import { icons } from "../icons";
 import { dictionaryDisplayName } from "../constants/dictionarySettings";
 import LoadingDotsBounce from "./LoadingDotsBounce.vue";
-import { registerModal } from "../utils/modalStack";
+import DictHtmlFrame from "./DictHtmlFrame.vue";
+import { isPointerOnAppModalAbove, registerModal } from "../utils/modalStack";
 import type { DictionarySettings } from "@shared/dictionaryTypes";
 import type { DictionaryLookupResultItem } from "@shared/dictionaryTypes";
 
@@ -18,6 +19,8 @@ type DictSlot = {
   status: "pending" | "ready";
   result?: DictionaryLookupResultItem;
   collapsed: boolean;
+  /** 本词典内部 entry 跳转栈（含当前词） */
+  navStack: string[];
 };
 
 const props = defineProps<{
@@ -47,6 +50,10 @@ const slots = ref<DictSlot[]>([]);
 const errorMessage = ref("");
 const lookupDone = ref(false);
 let lookupSeq = 0;
+/** 单词典内部跳转序号，避免慢请求覆盖新结果 */
+const slotNavSeq = new Map<string, number>();
+/** 词典 mdd 发音：同时只播一条 */
+let dictSoundAudio: HTMLAudioElement | null = null;
 
 const hasVisibleSlots = computed(() => slots.value.length > 0);
 
@@ -57,6 +64,171 @@ function removeHtmlComments(input: string): string {
     input = input.replace(/<!--|--!?>/g, "");
   } while (input !== previous);
   return input;
+}
+
+function stopDictSound() {
+  if (!dictSoundAudio) return;
+  try {
+    dictSoundAudio.pause();
+  } catch {
+    /* ignore */
+  }
+  dictSoundAudio = null;
+}
+
+function playDictSoundDataUrl(dataUrl: string) {
+  stopDictSound();
+  const audio = new Audio(dataUrl);
+  dictSoundAudio = audio;
+  audio.addEventListener(
+    "ended",
+    () => {
+      if (dictSoundAudio === audio) dictSoundAudio = null;
+    },
+    { once: true },
+  );
+  void audio.play().catch(() => {
+    if (dictSoundAudio === audio) dictSoundAudio = null;
+  });
+}
+
+function onDictHtmlNavigate(providerId: string, target: string) {
+  void navigateInSlot(providerId, target);
+}
+
+function onDictHtmlPlaySound(dataUrl: string) {
+  playDictSoundDataUrl(dataUrl);
+}
+
+function slotCanGoBack(slot: DictSlot): boolean {
+  return slot.navStack.length > 1;
+}
+
+function slotNavLabel(slot: DictSlot): string {
+  return slot.navStack[slot.navStack.length - 1] || "";
+}
+
+/** 把指定词典卡片滚到浮层内容区顶部（内部跳转后），保留一点上边距 */
+async function scrollSlotToTop(providerId: string) {
+  await nextTick();
+  await new Promise<void>((resolve) => {
+    requestAnimationFrame(() => resolve());
+  });
+  const body = popupBodyRef.value;
+  if (!body) return;
+  const card = body.querySelector(
+    `.dictCard[data-provider-id="${CSS.escape(providerId)}"]`,
+  );
+  if (!(card instanceof HTMLElement)) return;
+  const bodyTop = body.getBoundingClientRect().top;
+  const cardTop = card.getBoundingClientRect().top;
+  const topGap = 8;
+  body.scrollTop += cardTop - bodyTop - topGap;
+}
+
+async function navigateInSlot(providerId: string, target: string) {
+  const word = target.trim();
+  if (!word) return;
+  const slot = slots.value.find((s) => s.providerId === providerId);
+  if (!slot) return;
+  const top = slot.navStack[slot.navStack.length - 1];
+  if (top === word) return;
+
+  const prevResult = slot.result;
+  const prevStack = slot.navStack;
+  const seq = (slotNavSeq.get(providerId) ?? 0) + 1;
+  slotNavSeq.set(providerId, seq);
+
+  slots.value = slots.value.map((s) =>
+    s.providerId === providerId
+      ? { ...s, status: "pending" as const, collapsed: false }
+      : s,
+  );
+
+  const plain = plainSettingsForIpc(props.settings);
+  let item: DictionaryLookupResultItem | null = null;
+  try {
+    item = await lookupOne(word, plain, providerId);
+  } catch {
+    item = null;
+  }
+  if (slotNavSeq.get(providerId) !== seq) return;
+
+  if (item?.content?.trim()) {
+    slots.value = slots.value.map((s) =>
+      s.providerId === providerId
+        ? {
+            ...s,
+            status: "ready" as const,
+            result: item!,
+            navStack: [...prevStack, word],
+            collapsed: false,
+          }
+        : s,
+    );
+    await scrollSlotToTop(providerId);
+    return;
+  }
+
+  // 本词典无此词条：恢复原文，不拆掉整张卡
+  slots.value = slots.value.map((s) =>
+    s.providerId === providerId
+      ? {
+          ...s,
+          status: "ready" as const,
+          result: prevResult,
+          navStack: prevStack,
+        }
+      : s,
+  );
+}
+
+async function goBackInSlot(providerId: string) {
+  const slot = slots.value.find((s) => s.providerId === providerId);
+  if (!slot || slot.navStack.length <= 1) return;
+  const nextStack = slot.navStack.slice(0, -1);
+  const prevWord = nextStack[nextStack.length - 1];
+  if (!prevWord) return;
+
+  const seq = (slotNavSeq.get(providerId) ?? 0) + 1;
+  slotNavSeq.set(providerId, seq);
+  slots.value = slots.value.map((s) =>
+    s.providerId === providerId
+      ? { ...s, status: "pending" as const, collapsed: false }
+      : s,
+  );
+
+  const plain = plainSettingsForIpc(props.settings);
+  let item: DictionaryLookupResultItem | null = null;
+  try {
+    item = await lookupOne(prevWord, plain, providerId);
+  } catch {
+    item = null;
+  }
+  if (slotNavSeq.get(providerId) !== seq) return;
+
+  if (item?.content?.trim()) {
+    slots.value = slots.value.map((s) =>
+      s.providerId === providerId
+        ? {
+            ...s,
+            status: "ready" as const,
+            result: item!,
+            navStack: nextStack,
+            collapsed: false,
+          }
+        : s,
+    );
+    await scrollSlotToTop(providerId);
+    return;
+  }
+
+  slots.value = slots.value.map((s) =>
+    s.providerId === providerId
+      ? { ...s, status: "ready" as const, navStack: nextStack }
+      : s,
+  );
+  await scrollSlotToTop(providerId);
 }
 
 function sanitizeHtml(html: string): string {
@@ -74,6 +246,24 @@ function sanitizeHtml(html: string): string {
       .replace(/javascript:/gi, "");
   } while (result !== previous);
   return removeHtmlComments(result);
+}
+
+/** 应用自己拼的 HTML（Wiki / Wiktionary），暗色下跟主题色，不用浅底板 */
+function isAppThemedDictHtml(html: string): boolean {
+  return /\b(?:dictWikiTitle|dictZhWord|dictWtPos)\b/.test(html);
+}
+
+/** 词库写死浅底配色 / 依赖自带 CSS 时才套浅底板 */
+function needsLegacyLightPad(html: string): boolean {
+  if (!html || isAppThemedDictHtml(html)) return false;
+  return (
+    /<!--colortxt-legacy-css-->/.test(html) ||
+    /<font\b/i.test(html) ||
+    /\bcolor\s*=/i.test(html) ||
+    /style\s*=\s*["'][^"']*color\s*:/i.test(html) ||
+    /<style[\s\S]*?<\/style>/i.test(html) ||
+    /<link\b[^>]*\bstylesheet\b/i.test(html)
+  );
 }
 
 function splitProviderIds(settings: DictionarySettings): {
@@ -131,6 +321,7 @@ async function lookupOne(
 async function runLookup(wordOverride?: string) {
   const word = (wordOverride ?? queryWord.value).trim();
   queryWord.value = word;
+  slotNavSeq.clear();
   if (popupBodyRef.value) popupBodyRef.value.scrollTop = 0;
   if (!word) {
     slots.value = [];
@@ -159,6 +350,7 @@ async function runLookup(wordOverride?: string) {
     title: dictionaryDisplayName(plain, id),
     status: "pending" as const,
     collapsed: false,
+    navStack: [word],
   }));
 
   try {
@@ -223,13 +415,8 @@ function onDocPointerDown(ev: PointerEvent) {
   const t = ev.target;
   if (!(t instanceof Node)) return;
   if (popupPanelRef.value?.contains(t)) return;
-  // 词典管理等 AppModal 在浮层之上，点它们不关查词面板
-  if (
-    t instanceof Element &&
-    t.closest(".appModalBackdrop, .appModalPanel")
-  ) {
-    return;
-  }
+  // 仅忽略叠在查词浮层之上的 AppModal（如词典管理）；找书阅读器等下层不阻拦关闭
+  if (isPointerOnAppModalAbove(t, panelZIndex.value)) return;
   emit("close");
 }
 
@@ -261,13 +448,16 @@ watch(
       modalUnregister = reg.unregister;
       bindOutsideClose();
       await nextTick();
-      queryInputRef.value?.focus();
+      // 勿滚动页面：fixed 浮层里 focus 默认可能 scrollIntoView 带动整页跳动
+      queryInputRef.value?.focus({ preventScroll: true });
       queryInputRef.value?.select();
       void runLookup(queryWord.value);
     } else {
       modalUnregister?.();
       modalUnregister = null;
       unbindOutsideClose();
+      stopDictSound();
+      slotNavSeq.clear();
       lookupSeq += 1;
       lookupDone.value = true;
     }
@@ -286,6 +476,7 @@ watch(
 );
 
 onBeforeUnmount(() => {
+  stopDictSound();
   modalUnregister?.();
   unbindOutsideClose();
 });
@@ -351,6 +542,7 @@ onBeforeUnmount(() => {
           v-for="slot in slots"
           :key="slot.providerId"
           class="dictCard"
+          :data-provider-id="slot.providerId"
         >
           <button
             type="button"
@@ -368,17 +560,37 @@ onBeforeUnmount(() => {
           </button>
           <div v-show="!slot.collapsed" class="dictCardBody">
             <div
+              v-if="slotCanGoBack(slot)"
+              class="dictCardNav"
+            >
+              <button
+                type="button"
+                class="dictCardNavBack"
+                aria-label="返回上一词条"
+                title="返回"
+                @click="goBackInSlot(slot.providerId)"
+              >
+                <span aria-hidden="true" v-html="icons.back"></span>
+                <span>返回</span>
+              </button>
+              <span class="dictCardNavWord" :title="slotNavLabel(slot)">{{
+                slotNavLabel(slot)
+              }}</span>
+            </div>
+            <div
               v-if="slot.status === 'pending'"
               class="dictCardPending"
             >
               查询中<LoadingDotsBounce />
             </div>
             <template v-else-if="slot.result">
-              <div
+              <DictHtmlFrame
                 v-if="slot.result.contentFormat === 'html'"
-                class="dictCardContent dictCardContent--html"
-                v-html="sanitizeHtml(slot.result.content)"
-              ></div>
+                :html="sanitizeHtml(slot.result.content)"
+                :legacy-pad="needsLegacyLightPad(slot.result.content)"
+                @navigate="onDictHtmlNavigate(slot.providerId, $event)"
+                @play-sound="onDictHtmlPlaySound"
+              />
               <pre
                 v-else
                 class="dictCardContent dictCardContent--text"
@@ -511,7 +723,8 @@ onBeforeUnmount(() => {
   flex: 1;
   min-height: 0;
   overflow: auto;
-  padding: 10px 12px 12px;
+  padding: 12px 12px 12px;
+  scroll-padding-top: 8px;
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -603,6 +816,54 @@ onBeforeUnmount(() => {
   gap: 6px;
 }
 
+.dictCardNav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 2px 0 4px;
+  border-bottom: 1px solid var(--border);
+}
+
+.dictCardNavBack {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+  padding: 2px 6px 2px 2px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--accent, #3b82f6);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.dictCardNavBack:hover {
+  background: color-mix(in srgb, var(--accent, #3b82f6) 12%, transparent);
+}
+
+.dictCardNavBack :deep(svg) {
+  width: 14px;
+  height: 14px;
+  display: block;
+}
+
+.dictCardNavBack :deep(svg path) {
+  fill: currentColor;
+}
+
+.dictCardNavWord {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--muted-fg, color-mix(in srgb, var(--fg) 62%, transparent));
+}
+
 .dictCardPending {
   display: inline-flex;
   align-items: center;
@@ -618,90 +879,6 @@ onBeforeUnmount(() => {
   color: var(--fg);
   white-space: pre-wrap;
   word-break: break-word;
-}
-
-.dictCardContent--html {
-  white-space: normal;
-}
-
-.dictCardContent--html :deep(a) {
-  color: var(--accent, #3b82f6);
-}
-
-.dictCardContent--html :deep(img) {
-  max-width: 100%;
-  height: auto;
-}
-
-.dictCardContent--html :deep(.dictZhWord) {
-  margin: 0;
-  font-size: 15px;
-  font-weight: 700;
-}
-
-.dictCardContent--html :deep(.dictZhPinyin) {
-  margin: 2px 0 0;
-  font-size: 13px;
-  font-style: italic;
-  color: var(--muted-fg, color-mix(in srgb, var(--fg) 70%, transparent));
-}
-
-.dictCardContent--html :deep(.dictZhLang) {
-  margin: 2px 0 8px;
-  font-size: 12px;
-  font-style: italic;
-  color: var(--muted-fg, color-mix(in srgb, var(--fg) 62%, transparent));
-}
-
-.dictCardContent--html :deep(.dictWtPos) {
-  margin: 0 0 4px;
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.dictCardContent--html :deep(.dictZhDefs) {
-  margin: 0 0 10px;
-  padding-left: 1.25em;
-}
-
-.dictCardContent--html :deep(.dictZhDefs:last-child) {
-  margin-bottom: 0;
-}
-
-.dictCardContent--html :deep(.dictZhDefs li) {
-  margin: 0.2em 0;
-}
-
-.dictCardContent--html :deep(.dictWikiTitle) {
-  margin: 0 0 10px;
-  padding: 10px 12px;
-  border-radius: 6px;
-  color: #fff;
-  font-size: 15px;
-  font-weight: 700;
-  background: color-mix(in srgb, #000 45%, var(--fg) 12%);
-  min-height: 48px;
-}
-
-.dictCardContent--html :deep(.dictWikiDesc) {
-  margin: 6px 0 0;
-  font-size: 12px;
-  font-weight: 400;
-  opacity: 0.9;
-}
-
-.dictCardContent--html :deep(.dictWikiExtract) {
-  font-size: 13px;
-  line-height: 1.45;
-}
-
-.dictCardContent--html :deep(.dictWikiExtract p) {
-  margin: 0;
-}
-
-.dictCardContent--html :deep(.dictWikiExtract b),
-.dictCardContent--html :deep(.dictWikiExtract strong) {
-  font-weight: 700;
 }
 
 .dictCardContent--text {

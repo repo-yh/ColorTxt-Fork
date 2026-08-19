@@ -111,6 +111,15 @@ function monacoLineSpacingPlugin() {
         if (!patched.includes(afterNeedle)) return null;
         patched = patched.replace(afterNeedle, afterNext);
 
+        // ViewZone / whitespace 绝对 top：须与 getLinesViewportData 一致（行后先段间距再 zone），
+        // 否则插图会叠在上方正文上，下方却留出 zone 高度空隙。
+        const wsOffsetNeedle =
+          "return previousLinesHeight + previousWhitespacesHeight + this._paddingTop;\n    }\n    getWhitespaceIndexAtOrAfterVerticallOffset(verticalOffset) {";
+        const wsOffsetNext =
+          "return previousLinesHeight + previousWhitespacesHeight + this._paddingTop + lineSpacingGapsBeforeViewLine(this, afterLineNumber) + lineSpacingGapAfterViewLine(this, afterLineNumber, this._lineCount);\n    }\n    getWhitespaceIndexAtOrAfterVerticallOffset(verticalOffset) {";
+        if (!patched.includes(wsOffsetNeedle)) return null;
+        patched = patched.replace(wsOffsetNeedle, wsOffsetNext);
+
         const viewportNeedle =
           "            // Count current line height in the vertical offsets\n            currentVerticalOffset += lineHeight;\n            linesOffsets[lineNumber - startLineNumber] = currentLineRelativeOffset;\n            // Next line starts immediately after this one\n            currentLineRelativeOffset += lineHeight;\n            while (currentWhitespaceAfterLineNumber === lineNumber) {";
         const viewportNext =
@@ -285,6 +294,9 @@ export default defineConfig({
           "electron-updater",
           "better-sqlite3",
           "mdict-js",
+          "@caitun/speex",
+          "@caitun/speex/wasm/speex-wasm.js",
+          "@caitun/speex/wasm/speex-wasm.wasm",
           "sqlite-vec",
           "ws",
           "@node-rs/jieba",

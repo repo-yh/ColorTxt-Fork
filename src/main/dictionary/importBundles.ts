@@ -17,6 +17,24 @@ import { readMdxHeaderEncrypted } from "./mdictReader";
 import { probeSlobCompression } from "./slobReader";
 import { readFile } from "node:fs/promises";
 
+/** Decode common XML/HTML entities in MDX Title. */
+function decodeMdxEntities(s: string): string {
+  return s
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&apos;/gi, "'")
+    .replace(/&#(\d+);/g, (_, n: string) => {
+      const code = Number(n);
+      return Number.isFinite(code) ? String.fromCodePoint(code) : _;
+    })
+    .replace(/&#x([0-9a-fA-F]+);/gi, (_, h: string) => {
+      const code = parseInt(h, 16);
+      return Number.isFinite(code) ? String.fromCodePoint(code) : _;
+    })
+    .replace(/&amp;/gi, "&");
+}
+
 export type ClassifiedSourceFile = {
   /** 绝对路径 */
   absPath: string;
@@ -278,7 +296,7 @@ async function importOne(
         path.join(destDir, files.mdx!),
       );
       // MDict 制作工具未填书名时会留下英文占位；回退到文件名 stem
-      const title = header.title?.trim() ?? "";
+      const title = decodeMdxEntities(header.title?.trim() ?? "");
       if (
         title &&
         !/^Title\s*\(No HTML code allowed\)$/i.test(title) &&

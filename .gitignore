@@ -12,3 +12,7 @@ release
 .npmrc
 .tmp-electron-*/
 tmp-*.json
+tmp-*.mjs
+tmp-*.wav
+tmp-*.spx
+tmp-*.png

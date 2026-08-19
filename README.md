@@ -15,7 +15,7 @@
 </p>
 
 <p align="center">
-还有章节识别、简繁互转、划线标注、记笔记、多角色语音朗读、AI 阅读助手、书源找书等功能。
+还有章节识别、简繁互转、划线标注、记笔记、词典、翻译、多角色语音朗读、AI 阅读助手、书源找书等功能。
 </p>
 <p align="center">
   <img src="./images/章节列表.jpg" width="600">
@@ -48,6 +48,7 @@
 | <img src="./src/renderer/src/assets/findBook.svg" width="18" height="18" alt=""> | 书源找书 | 可多源搜索，支持在线阅读或整书下载（入口：「更多 → 找书」） |
 | <img src="./src/renderer/src/assets/WebDAV.svg" width="18" height="18" alt=""> | **WebDAV** | 用于跨设备同步应用配置、书包 |
 | <img src="./src/renderer/src/assets/dictionary.svg" width="18" height="18" alt=""> | 词典 | 查询词语释义，支持导入本地词库 |
+| <img src="./src/renderer/src/assets/translate.svg" width="18" height="18" alt=""> | 翻译 | 翻译选中文本，支持 AI 翻译和多种翻译服务 |
 | <img src="./src/renderer/src/assets/compress.svg" width="18" height="18" alt=""> | 空行压缩 | 压缩多余空行 |
 | <img src="./src/renderer/src/assets/indent.svg" width="18" height="18" alt=""> | 行首缩进 | 在行首添加全角缩进 |
 | <img src="./src/renderer/src/assets/ebook.svg" width="18" height="18" alt=""> | 文件列表 | 拖放添加文件 / 目录（会递归读取子目录），支持分类 / 排序 / 过滤；可切换列表 / 树状 |
@@ -100,6 +101,46 @@
 > [!WARNING]
 > 已知问题：启用「高级换行策略」会有很大的内存开销，且这个占用难以被释放，见 [#5311](https://github.com/microsoft/monaco-editor/issues/5311)。
 
+### 关于「词典」
+
+内置 `Wiktionary`、`Wikipedia` 网络词典，支持导入本地词典 `StarDict` / `MDict` / `DICT` / `Slob` / `BGL`。
+
+<details>
+<summary>词典下载</summary>
+
+> 实用建议：优先 `StarDict` 和 `MDict`；要离线维基/维基词典可用 `Slob`；要开源多语对译可用 `FreeDict`。
+
+- **StarDict**（`.ifo` / `.idx` / `.dict.dz`）
+  - http://download.huzheng.org/zh_CN/ — 胡正旧站，中文区常用
+  - https://tuxor1337.frama.io/firedict/dictionaries.html — 开源许可的 StarDict 汇总
+- **MDict**（`.mdx` / `.mdd`）
+  - https://downloads.freemdict.com/ — FreeMdict 下载站
+  - https://mdx.mdict.org/ — 常用镜像目录
+- **Slob**（`.slob`，Aard2）
+  - https://github.com/itkach/slob/wiki/Dictionaries — 官方词典索引
+- **DICT**（dictd，常为 `.index` + `.dict.dz`）
+- **BGL**（Babylon）
+- https://freedict.org/downloads/ — FreeDict，多语双向，提供 `StarDict` / `Slob` / `Dictd` 词典下载
+
+</details>
+
+### 关于「翻译」
+
+支持以下翻译服务：
+
+| 服务商 | 说明 |
+| --- | --- |
+| **AI 翻译** | OpenAI 兼容接口，根据 AI 服务商配置相应 API 密钥 |
+| 微软翻译 | Edge 免费通道，无需配置 |
+| Google 翻译 | 免费网页接口，无需配置 |
+| Yandex 翻译 | 免费通道，无需配置 |
+| DeepL | 官方 API / DeepLX，需要 API Key |
+| 百度翻译 | 官方开放平台，需要 APP ID 与密钥 |
+| 有道翻译 | 官方开放平台，需要应用 ID 与密钥 |
+| 腾讯翻译 | 腾讯云机器翻译，需要 SecretId / SecretKey |
+| 火山翻译 | 火山引擎机器翻译，需要 Access Key |
+| 阿里翻译 | 阿里云机器翻译，需要 AccessKey |
+
 ### 关于「语音朗读」
 
 支持的 TTS：
@@ -119,7 +160,7 @@
 
 ### 关于「AI」功能
 
-|   <p align="center"><strong>分析剧情</strong></p> ![](./images/AI阅读助手_剧情分析.jpg)   | <p align="center"><strong>生成章节匹配规则</strong></p> ![](./images/AI阅读助手_匹配规则.jpg) |
+|   <p align="center"><strong>分析剧情</strong></p> ![](./images/AI阅读助手_剧情分析.jpg)   | <p align="center"><strong>生成章节匹配规则</strong></p> ![](./images/AI阅读助手_生成章节匹配规则.jpg) |
 | :---------------------------------------------------------------------------------------: | :-------------------------------------------------------------------------------------------: |
 | <p align="center"><strong>生成思维导图</strong></p> ![](./images/AI阅读助手_思维导图.jpg) |     <p align="center"><strong>生成词云图</strong></p> ![](./images/AI阅读助手_词云图.jpg)     |
 |          <p align="center"><strong>角色卡</strong></p> ![](./images/角色卡.jpg)           |     <p align="center"><strong>生成角色立绘</strong></p> ![](./images/角色卡_立绘生成.jpg)     |
@@ -280,3 +321,7 @@ ColorTxt/
 - 基于 [OpenCC](https://github.com/byvoid/opencc) 实现简繁互转
 - 划线/笔记功能的交互，参考了 [微信读书网页版](https://weread.qq.com/)
 - 书源解析逻辑参考：[legado-E（阅读Sigma）](https://github.com/Luoyacheng/legado-E)
+
+## 其他
+
+- [LINUX DO](https://linux.do/)

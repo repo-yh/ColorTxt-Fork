@@ -29,7 +29,11 @@ import ReplaceRulePanel from "../bookSource/components/ReplaceRulePanel.vue";
 import type { ReplaceRule } from "@shared/bookSource/replaceRule";
 import SettingsPanel, { type SettingsApplyPayload } from "./SettingsPanel.vue";
 import DictionaryManageModal from "./DictionaryManageModal.vue";
+import WebSearchManageModal from "./WebSearchManageModal.vue";
+import TranslateManageModal from "./TranslateManageModal.vue";
 import type { DictionarySettings } from "@shared/dictionaryTypes";
+import type { WebSearchSettings } from "@shared/webSearchTypes";
+import type { TranslationSettings } from "@shared/translationTypes";
 import ShortcutPanel from "./ShortcutPanel.vue";
 import DragDropChoiceModal from "./DragDropChoiceModal.vue";
 import type { ShortcutBindingMap } from "../services/shortcutRegistry";
@@ -74,6 +78,8 @@ const props = defineProps<{
   pomodoroSettings: PomodoroSettings;
   selectionToolbarButtons: import("../constants/selectionToolbar").SelectionToolbarButtons;
   dictionarySettings: DictionarySettings;
+  webSearchSettings: WebSearchSettings;
+  translationSettings: import("@shared/translationTypes").TranslationSettings;
   chapterRules: ChapterMatchRule[];
   chapterRuleErrorText: string;
   /** 编辑态打开文本替换时面板主按钮为「应用」 */
@@ -146,7 +152,11 @@ const emit = defineEmits<{
   removeMissingReadingDataFiles: [];
   openReadingDataPath: [path: string];
   openDictionaryManage: [];
+  openWebSearchManage: [];
+  openTranslateManage: [];
   "update:dictionarySettings": [v: DictionarySettings];
+  "update:webSearchSettings": [v: WebSearchSettings];
+  "update:translationSettings": [v: TranslationSettings];
 }>();
 
 const showAboutPanel = defineModel<boolean>("showAboutPanel", {
@@ -166,6 +176,18 @@ const showReadingDataPanel = defineModel<boolean>("showReadingDataPanel", {
 });
 const showDictionaryManagePanel = defineModel<boolean>(
   "showDictionaryManagePanel",
+  {
+    default: false,
+  },
+);
+const showWebSearchManagePanel = defineModel<boolean>(
+  "showWebSearchManagePanel",
+  {
+    default: false,
+  },
+);
+const showTranslateManagePanel = defineModel<boolean>(
+  "showTranslateManagePanel",
   {
     default: false,
   },
@@ -327,11 +349,23 @@ onBeforeUnmount(() => {
     @apply="emit('applySettings', $event)"
     @open-reading-data="emit('openReadingData')"
     @open-dictionary-manage="emit('openDictionaryManage')"
+    @open-web-search-manage="emit('openWebSearchManage')"
+    @open-translate-manage="emit('openTranslateManage')"
   />
   <DictionaryManageModal
     v-model="showDictionaryManagePanel"
     :settings="dictionarySettings"
     @update:settings="emit('update:dictionarySettings', $event)"
+  />
+  <WebSearchManageModal
+    v-model="showWebSearchManagePanel"
+    :settings="webSearchSettings"
+    @update:settings="emit('update:webSearchSettings', $event)"
+  />
+  <TranslateManageModal
+    v-model="showTranslateManagePanel"
+    :settings="translationSettings"
+    @update:settings="emit('update:translationSettings', $event)"
   />
   <ReadingDataPanel
     v-model="showReadingDataPanel"

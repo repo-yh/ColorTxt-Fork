@@ -45,7 +45,10 @@ import { appToast } from "../services/appToast";
 import {
   findHighlightColorIndexInMap,
 } from "../utils/highlightWords";
-import type { SelectionToolbarButtons } from "../constants/selectionToolbar";
+import {
+  hasVisibleSelectionToolbarActions,
+  type SelectionToolbarButtons,
+} from "../constants/selectionToolbar";
 
 export function useReaderAnnotations(opts: {
   editor: { value: monaco.editor.IStandaloneCodeEditor | null };
@@ -54,6 +57,11 @@ export function useReaderAnnotations(opts: {
   lineationLastColors: () => LineationLastColorPrefs;
   readerFilePath: () => string | null | undefined;
   readerEditMode: () => boolean;
+  /**
+   * 是否提供高亮词 / 划线 / 笔记入口。
+   * 找书阅读器为 false：无文件路径也可出选区工具条，但不含标注类按钮。
+   */
+  showSelectionAnnotationTools?: () => boolean;
   monacoCustomHighlight: () => boolean;
   aiFeaturesEnabled: () => boolean;
   selectionToolbarButtons: () => SelectionToolbarButtons;
@@ -87,6 +95,29 @@ export function useReaderAnnotations(opts: {
 }) {
   const toolbarVisible = ref(false);
   const colorPickerMode = ref<null | "highlight" | "lineation">(null);
+
+  function showSelectionAnnotationTools(): boolean {
+    return opts.showSelectionAnnotationTools?.() !== false;
+  }
+
+  /** 只读且（主窗有打开文件，或找书等无标注模式）时可弹出选区工具条 */
+  function canShowSelectionToolbar(): boolean {
+    if (opts.readerEditMode()) return false;
+    if (!showSelectionAnnotationTools()) return true;
+    return Boolean(opts.readerFilePath());
+  }
+
+  function canUseSelectionAnnotationTools(): boolean {
+    return showSelectionAnnotationTools() && Boolean(opts.readerFilePath());
+  }
+
+  function selectionToolbarHasVisibleActions(): boolean {
+    return hasVisibleSelectionToolbarActions({
+      buttons: opts.selectionToolbarButtons(),
+      showAnnotationTools: showSelectionAnnotationTools(),
+      aiFeaturesEnabled: opts.aiFeaturesEnabled(),
+    });
+  }
   const lineationPickerType = ref<ReaderLineationType | null>(null);
   const floatCenterX = ref(0);
   const floatRootTop = ref(0);
@@ -110,7 +141,14 @@ export function useReaderAnnotations(opts: {
   /** 按阅读区可用空间钳制，避免贴顶/贴底被截断 */
   const dictionaryPopupMaxHeight = ref(420);
   const dictionaryPopupRootRef = ref<HTMLElement | null>(null);
-  let dictionaryPopupResizeObserver: ResizeObserver | null = null;
+  const translatePopupOpen = ref(false);
+  const translatePopupText = ref("");
+  const translatePopupCenterX = ref(0);
+  const translatePopupTop = ref(0);
+  const translatePopupOpenDownward = ref(false);
+  const translatePopupMaxHeight = ref(420);
+  const translatePopupRootRef = ref<HTMLElement | null>(null);
+  let translatePopupResizeObserver: ResizeObserver | null = null;
 
   let annotationViewportSyncTimer: ReturnType<typeof setTimeout> | null = null;
   let annotationViewportDecorLastKey = "";
@@ -150,7 +188,7 @@ export function useReaderAnnotations(opts: {
     if (!selectionPointerActive) return;
     selectionPointerActive = false;
     clearSelectionPointerUpListener();
-    if (opts.readerEditMode() || !opts.readerFilePath()) return;
+    if (!canShowSelectionToolbar()) return;
     if (Date.now() < suppressToolbarUntilMs) return;
     void nextTick(() => {
       const ed = opts.editor.value;
@@ -159,9 +197,13 @@ export function useReaderAnnotations(opts: {
         showToolbarFromSelectionIfAny();
         return;
       }
-      if (!tryShowToolbarFromAnnotationPoint(clientX, clientY)) {
-        closeToolbarUi();
+      if (
+        canUseSelectionAnnotationTools() &&
+        tryShowToolbarFromAnnotationPoint(clientX, clientY)
+      ) {
+        return;
       }
+      closeToolbarUi();
     });
   }
 
@@ -443,26 +485,16 @@ export function useReaderAnnotations(opts: {
   const DICT_POPUP_W = 360;
   const DICT_POPUP_MAX_H = 420;
   const DICT_POPUP_MIN_H = 140;
-  const DICT_POPUP_ESTIMATE_H = 280;
 
-  function disconnectDictionaryPopupResizeObserver() {
-    dictionaryPopupResizeObserver?.disconnect();
-    dictionaryPopupResizeObserver = null;
-  }
-
-  function applyDictionaryPopupPlacement(measuredHeight?: number) {
+  /**
+   * 打开时按「最大可用高度」定一次位置与 maxHeight，之后不再随内容伸缩重算。
+   * 否则查词/内部跳转导致高度变化时会改 top / 上下翻转，带动阅读区视觉抖动。
+   */
+  function applyDictionaryPopupPlacement() {
     const anchor = getAnchor();
     const editorClip = getEditorClipRect();
     const floatWidth = DICT_POPUP_W;
-
-    let floatHeight =
-      measuredHeight && measuredHeight > 0
-        ? measuredHeight
-        : DICT_POPUP_ESTIMATE_H;
-    floatHeight = Math.min(
-      DICT_POPUP_MAX_H,
-      Math.max(DICT_POPUP_MIN_H, floatHeight),
-    );
+    const floatHeight = DICT_POPUP_MAX_H;
 
     if (anchor) {
       const spaceAbove = Math.max(
@@ -474,13 +506,13 @@ export function useReaderAnnotations(opts: {
         editorClip.bottom - FLOAT_MARGIN - (anchor.lineBottom + FLOAT_GAP),
       );
       const maxAvail = Math.max(spaceAbove, spaceBelow, DICT_POPUP_MIN_H);
-      floatHeight = Math.min(floatHeight, maxAvail);
+      const placeHeight = Math.min(floatHeight, maxAvail);
 
       const base = {
         selectionCenterX: anchor.selectionCenterX,
         anchorTop: anchor.anchorTop,
         lineBottom: anchor.lineBottom,
-        floatHeight,
+        floatHeight: placeHeight,
         floatWidth,
         gap: FLOAT_GAP,
         margin: FLOAT_MARGIN,
@@ -501,24 +533,17 @@ export function useReaderAnnotations(opts: {
         });
       }
 
-      if (Math.abs(dictionaryPopupCenterX.value - placed.centerX) > 0.5) {
-        dictionaryPopupCenterX.value = placed.centerX;
-      }
-      if (Math.abs(dictionaryPopupTop.value - placed.rootTop) > 0.5) {
-        dictionaryPopupTop.value = placed.rootTop;
-      }
+      dictionaryPopupCenterX.value = placed.centerX;
+      dictionaryPopupTop.value = placed.rootTop;
       dictionaryPopupOpenDownward.value = placed.openDownward;
 
       const avail = placed.openDownward
         ? editorClip.bottom - FLOAT_MARGIN - placed.rootTop
         : placed.rootTop - (editorClip.top + FLOAT_MARGIN);
-      const nextMax = Math.min(
+      dictionaryPopupMaxHeight.value = Math.min(
         DICT_POPUP_MAX_H,
         Math.max(DICT_POPUP_MIN_H, avail),
       );
-      if (Math.abs(dictionaryPopupMaxHeight.value - nextMax) > 0.5) {
-        dictionaryPopupMaxHeight.value = nextMax;
-      }
       return;
     }
 
@@ -535,18 +560,6 @@ export function useReaderAnnotations(opts: {
     );
   }
 
-  function observeDictionaryPopupSize() {
-    disconnectDictionaryPopupResizeObserver();
-    const el = dictionaryPopupRootRef.value?.querySelector(".dictPopup");
-    if (!(el instanceof HTMLElement)) return;
-    dictionaryPopupResizeObserver = new ResizeObserver(() => {
-      if (!dictionaryPopupOpen.value) return;
-      const h = el.getBoundingClientRect().height;
-      if (h > 0) applyDictionaryPopupPlacement(h);
-    });
-    dictionaryPopupResizeObserver.observe(el);
-  }
-
   function openDictionaryPopupFromToolbar() {
     const text = draftText.value.trim();
     if (!text) {
@@ -559,20 +572,121 @@ export function useReaderAnnotations(opts: {
     dictionaryPopupOpen.value = true;
     closeToolbarUi();
     suppressToolbarUntilMs = Date.now() + 300;
+  }
+
+  function closeDictionaryPopup() {
+    dictionaryPopupOpen.value = false;
+    dictionaryPopupWord.value = "";
+  }
+
+  const TRANSLATE_POPUP_W = 380;
+  const TRANSLATE_POPUP_MAX_H = 420;
+  const TRANSLATE_POPUP_MIN_H = 140;
+  const TRANSLATE_POPUP_ESTIMATE_H = 260;
+
+  function disconnectTranslatePopupResizeObserver() {
+    translatePopupResizeObserver?.disconnect();
+    translatePopupResizeObserver = null;
+  }
+
+  function applyTranslatePopupPlacement(measuredHeight?: number) {
+    const anchor = getAnchor();
+    const editorClip = getEditorClipRect();
+    const floatWidth = TRANSLATE_POPUP_W;
+    let floatHeight =
+      measuredHeight && measuredHeight > 0
+        ? measuredHeight
+        : TRANSLATE_POPUP_ESTIMATE_H;
+    floatHeight = Math.min(
+      TRANSLATE_POPUP_MAX_H,
+      Math.max(TRANSLATE_POPUP_MIN_H, floatHeight),
+    );
+
+    if (anchor && editorClip) {
+      const base = {
+        selectionCenterX: anchor.selectionCenterX,
+        anchorTop: anchor.anchorTop,
+        lineBottom: anchor.lineBottom,
+        floatHeight,
+        floatWidth,
+        gap: FLOAT_GAP,
+        margin: FLOAT_MARGIN,
+      };
+      let placed = computeFloatPlacement({ ...base, clip: editorClip });
+      const rightEdge = placed.centerX + floatWidth / 2;
+      const windowRightLimit = window.innerWidth - FLOAT_MARGIN;
+      if (rightEdge > windowRightLimit + 0.5) {
+        placed = computeFloatPlacement({
+          ...base,
+          clip: {
+            top: editorClip.top,
+            bottom: editorClip.bottom,
+            left: 0,
+            right: window.innerWidth,
+          },
+        });
+      }
+      translatePopupCenterX.value = placed.centerX;
+      translatePopupTop.value = placed.rootTop;
+      translatePopupOpenDownward.value = placed.openDownward;
+      const avail = placed.openDownward
+        ? editorClip.bottom - FLOAT_MARGIN - placed.rootTop
+        : placed.rootTop - (editorClip.top + FLOAT_MARGIN);
+      translatePopupMaxHeight.value = Math.min(
+        TRANSLATE_POPUP_MAX_H,
+        Math.max(TRANSLATE_POPUP_MIN_H, avail),
+      );
+      return;
+    }
+    translatePopupCenterX.value = floatCenterX.value;
+    translatePopupTop.value = floatRootTop.value;
+    translatePopupOpenDownward.value = floatOpenDownward.value;
+    const fallbackAvail = floatOpenDownward.value
+      ? window.innerHeight - FLOAT_MARGIN - floatRootTop.value
+      : floatRootTop.value - FLOAT_MARGIN;
+    translatePopupMaxHeight.value = Math.min(
+      TRANSLATE_POPUP_MAX_H,
+      Math.max(TRANSLATE_POPUP_MIN_H, fallbackAvail),
+    );
+  }
+
+  function observeTranslatePopupSize() {
+    disconnectTranslatePopupResizeObserver();
+    const el = translatePopupRootRef.value?.querySelector(".trPopup");
+    if (!(el instanceof HTMLElement)) return;
+    translatePopupResizeObserver = new ResizeObserver(() => {
+      if (!translatePopupOpen.value) return;
+      const h = el.getBoundingClientRect().height;
+      if (h > 0) applyTranslatePopupPlacement(h);
+    });
+    translatePopupResizeObserver.observe(el);
+  }
+
+  function openTranslatePopupFromToolbar() {
+    const text = draftText.value.trim();
+    if (!text) bindDraftFromSelection();
+    // 保留行首缩进；仅用 trim 判断是否有可译内容
+    const quote = draftText.value;
+    if (!quote.trim()) return;
+    translatePopupText.value = quote;
+    applyTranslatePopupPlacement();
+    translatePopupOpen.value = true;
+    closeToolbarUi();
+    suppressToolbarUntilMs = Date.now() + 300;
     void nextTick(() => {
-      observeDictionaryPopupSize();
-      const el = dictionaryPopupRootRef.value?.querySelector(".dictPopup");
+      observeTranslatePopupSize();
+      const el = translatePopupRootRef.value?.querySelector(".trPopup");
       if (el instanceof HTMLElement) {
         const h = el.getBoundingClientRect().height;
-        if (h > 0) applyDictionaryPopupPlacement(h);
+        if (h > 0) applyTranslatePopupPlacement(h);
       }
     });
   }
 
-  function closeDictionaryPopup() {
-    disconnectDictionaryPopupResizeObserver();
-    dictionaryPopupOpen.value = false;
-    dictionaryPopupWord.value = "";
+  function closeTranslatePopup() {
+    disconnectTranslatePopupResizeObserver();
+    translatePopupOpen.value = false;
+    translatePopupText.value = "";
   }
 
   function ensureNotePanelAnnotationRecord(): ReaderAnnotationRecord | null {
@@ -718,6 +832,7 @@ export function useReaderAnnotations(opts: {
     if (opts.monacoCustomHighlight()) actions += 1;
     if (buttons.find) actions += 1;
     if (buttons.dictionary) actions += 1;
+    if (buttons.translate) actions += 1;
     if (opts.aiFeaturesEnabled() && buttons.askAi) actions += 1;
     return actions * FLOAT_ACTION_W + FLOAT_TOOLBAR_PAD_X;
   }
@@ -787,8 +902,11 @@ export function useReaderAnnotations(opts: {
     if (!e || !m) return false;
     const sel = e.getSelection();
     if (!sel || sel.isEmpty()) return false;
-    const text = m.getValueInRange(sel).trim();
-    if (!text) return false;
+
+    // 严格按选区取文；勿 trim、勿自动补行首缩进（未选中的空白不算选区）
+    const text = m.getValueInRange(sel);
+    if (!text.trim()) return false;
+
     const phys = monacoRangeToPhysicalRange(
       sel,
       displayToPhysical,
@@ -818,7 +936,11 @@ export function useReaderAnnotations(opts: {
   }
 
   function showToolbarFromSelectionIfAny() {
-    if (opts.readerEditMode() || !opts.readerFilePath()) {
+    if (!canShowSelectionToolbar()) {
+      closeToolbarUi();
+      return;
+    }
+    if (!selectionToolbarHasVisibleActions()) {
       closeToolbarUi();
       return;
     }
@@ -843,11 +965,16 @@ export function useReaderAnnotations(opts: {
     applyFloatPlacement(anchor);
     toolbarScrollHidden = false;
     toolbarVisible.value = true;
-    syncPickerFromSelection(true);
+    if (canUseSelectionAnnotationTools()) {
+      syncPickerFromSelection(true);
+    } else {
+      colorPickerMode.value = null;
+      lineationPickerType.value = null;
+    }
   }
 
   function onSelectionChangedDuringInteraction() {
-    if (opts.readerEditMode() || !opts.readerFilePath()) return;
+    if (!canShowSelectionToolbar()) return;
     if (selectionPointerActive) return;
     const sel = opts.editor.value?.getSelection();
     if (!sel || sel.isEmpty()) {
@@ -856,7 +983,9 @@ export function useReaderAnnotations(opts: {
     }
     if (!toolbarVisible.value) return;
     if (bindDraftFromSelection()) {
-      syncPickerFromSelection(true);
+      if (canUseSelectionAnnotationTools()) {
+        syncPickerFromSelection(true);
+      }
     }
   }
 
@@ -899,7 +1028,7 @@ export function useReaderAnnotations(opts: {
 
   /** 点击标注区域：弹出工具条并绑定该标注，但不改变编辑器选区 */
   function showToolbarForAnnotationClick(ann: ReaderAnnotationRecord) {
-    if (opts.readerEditMode() || !opts.readerFilePath()) return false;
+    if (!canUseSelectionAnnotationTools() || opts.readerEditMode()) return false;
     const ed = opts.editor.value;
     const m = opts.model.value;
     if (!ed || !m || ann.stale) return false;
@@ -1186,8 +1315,19 @@ export function useReaderAnnotations(opts: {
       | "note"
       | "find"
       | "dictionary"
+      | "translate"
       | "askAi",
   ) {
+    if (
+      !canUseSelectionAnnotationTools() &&
+      (action === "note" ||
+        action === "highlight" ||
+        action === "marker" ||
+        action === "wavy" ||
+        action === "straight")
+    ) {
+      return;
+    }
     if (action === "note") {
       openNotePanelFromToolbar();
       return;
@@ -1212,6 +1352,10 @@ export function useReaderAnnotations(opts: {
     }
     if (action === "dictionary") {
       openDictionaryPopupFromToolbar();
+      return;
+    }
+    if (action === "translate") {
+      openTranslatePopupFromToolbar();
       return;
     }
     if (action === "askAi") {
@@ -1323,6 +1467,7 @@ export function useReaderAnnotations(opts: {
       if (floatRootRef.value?.contains(ev.target as Node)) return;
       if (notePanelRootRef.value?.contains(ev.target as Node)) return;
       if (dictionaryPopupRootRef.value?.contains(ev.target as Node)) return;
+      if (translatePopupRootRef.value?.contains(ev.target as Node)) return;
       const editorDom = opts.editor.value?.getDomNode();
       if (!editorDom?.contains(ev.target as Node)) return;
       closeToolbarUi();
@@ -1359,6 +1504,14 @@ export function useReaderAnnotations(opts: {
     dictionaryPopupMaxHeight,
     dictionaryPopupRootRef,
     closeDictionaryPopup,
+    translatePopupOpen,
+    translatePopupText,
+    translatePopupCenterX,
+    translatePopupTop,
+    translatePopupOpenDownward,
+    translatePopupMaxHeight,
+    translatePopupRootRef,
+    closeTranslatePopup,
     closeToolbarUi,
     showToolbarFromSelectionIfAny,
     syncToolbarOnScroll,

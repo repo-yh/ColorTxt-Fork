@@ -17,27 +17,38 @@ type ToolbarAction =
   | "note"
   | "find"
   | "dictionary"
+  | "translate"
   | "askAi";
 
-const props = defineProps<{
-  toolbarVisible: boolean;
-  colorPickerMode: null | "highlight" | "lineation";
-  lineationPickerType: ReaderLineationType | null;
-  floatCenterX: number;
-  floatRootTop: number;
-  openDownward: boolean;
-  highlightColors: readonly string[];
-  lineationColors: readonly string[];
-  showHighlightRemoveRow: boolean;
-  existingHighlightColorIndex: number | null;
-  activeLineation?: ReaderAnnotationRecord["lineation"];
-  lineationPickerSelectedIndex: number;
-  monacoCustomHighlight: boolean;
-  aiFeaturesEnabled: boolean;
-  selectionToolbarButtons: SelectionToolbarButtons;
-  hasLineation: boolean;
-  hasNote: boolean;
-}>();
+const props = withDefaults(
+  defineProps<{
+    toolbarVisible: boolean;
+    colorPickerMode: null | "highlight" | "lineation";
+    lineationPickerType: ReaderLineationType | null;
+    floatCenterX: number;
+    floatRootTop: number;
+    openDownward: boolean;
+    highlightColors: readonly string[];
+    lineationColors: readonly string[];
+    showHighlightRemoveRow: boolean;
+    existingHighlightColorIndex: number | null;
+    activeLineation?: ReaderAnnotationRecord["lineation"];
+    lineationPickerSelectedIndex: number;
+    monacoCustomHighlight: boolean;
+    /**
+     * 是否展示高亮词 / 划线 / 笔记按钮。
+     * 找书阅读器为 false。
+     */
+    showSelectionAnnotationTools?: boolean;
+    aiFeaturesEnabled: boolean;
+    selectionToolbarButtons: SelectionToolbarButtons;
+    hasLineation: boolean;
+    hasNote: boolean;
+  }>(),
+  {
+    showSelectionAnnotationTools: true,
+  },
+);
 
 const emit = defineEmits<{
   action: [action: ToolbarAction];
@@ -201,7 +212,7 @@ function isPickerSwatchSelected(index: number): boolean {
         <span class="selActionLabel">复制</span>
       </button>
       <button
-        v-if="monacoCustomHighlight"
+        v-if="showSelectionAnnotationTools && monacoCustomHighlight"
         type="button"
         class="selAction selAction--colorIcon"
         :class="{ 'selAction--highlightActive': isHighlightActive() }"
@@ -215,101 +226,103 @@ function isPickerSwatchSelected(index: number): boolean {
         ></span>
         <span class="selActionLabel">高亮词</span>
       </button>
-      <button
-        v-for="item in lineationActions"
-        :key="item.id"
-        type="button"
-        class="selAction"
-        :class="{ 'selAction--lineationActive': isLineationActive(item.type) }"
-        :style="
-          isLineationActive(item.type)
-            ? ({ '--lineation-accent': lineationAccent(item.type) } as Record<
-                string,
-                string
-              >)
-            : undefined
-        "
-        :aria-label="item.label"
-        @pointerdown.prevent="onLineationAction(item.type)"
-      >
-        <span
-          class="selActionIcon selLineationIcon"
-          :class="{
-            'selLineationIcon--active': isLineationActive(item.type),
-            'selLineationIcon--marker': item.type === 'marker',
-            'selLineationIcon--wavy': item.type === 'wavy',
-            'selLineationIcon--straight': item.type === 'straight',
-          }"
-          aria-hidden="true"
+      <template v-if="showSelectionAnnotationTools">
+        <button
+          v-for="item in lineationActions"
+          :key="item.id"
+          type="button"
+          class="selAction"
+          :class="{ 'selAction--lineationActive': isLineationActive(item.type) }"
+          :style="
+            isLineationActive(item.type)
+              ? ({ '--lineation-accent': lineationAccent(item.type) } as Record<
+                  string,
+                  string
+                >)
+              : undefined
+          "
+          :aria-label="item.label"
+          @pointerdown.prevent="onLineationAction(item.type)"
         >
           <span
-            v-if="item.type === 'marker'"
-            class="selLineationMarkerBg"
-          ></span>
-          <span
-            v-if="item.type === 'wavy' || item.type === 'straight'"
-            class="selLineationGlyphWrap"
+            class="selActionIcon selLineationIcon"
+            :class="{
+              'selLineationIcon--active': isLineationActive(item.type),
+              'selLineationIcon--marker': item.type === 'marker',
+              'selLineationIcon--wavy': item.type === 'wavy',
+              'selLineationIcon--straight': item.type === 'straight',
+            }"
+            aria-hidden="true"
           >
-            <span class="selLineationGlyph" v-html="icons.fontFamily"></span>
-            <svg
-              v-if="item.type === 'wavy'"
-              class="selLineationDeco selLineationDeco--wavy"
-              viewBox="0 0 18 4"
-              width="18"
-              height="3"
-              aria-hidden="true"
+            <span
+              v-if="item.type === 'marker'"
+              class="selLineationMarkerBg"
+            ></span>
+            <span
+              v-if="item.type === 'wavy' || item.type === 'straight'"
+              class="selLineationGlyphWrap"
             >
-              <path
-                d="M0 3Q1.8 1 3.6 3T7.2 3T10.8 3T14.4 3T18 3"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.2"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-              />
-            </svg>
-            <svg
-              v-if="item.type === 'straight'"
-              class="selLineationDeco selLineationDeco--straight"
-              viewBox="0 0 16 2"
-              width="16"
-              height="2"
-              aria-hidden="true"
-            >
-              <line
-                x1="0"
-                y1="1"
-                x2="16"
-                y2="1"
-                stroke="currentColor"
-                stroke-width="1.2"
-                stroke-linecap="round"
-              />
-            </svg>
+              <span class="selLineationGlyph" v-html="icons.fontFamily"></span>
+              <svg
+                v-if="item.type === 'wavy'"
+                class="selLineationDeco selLineationDeco--wavy"
+                viewBox="0 0 18 4"
+                width="18"
+                height="3"
+                aria-hidden="true"
+              >
+                <path
+                  d="M0 3Q1.8 1 3.6 3T7.2 3T10.8 3T14.4 3T18 3"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </svg>
+              <svg
+                v-if="item.type === 'straight'"
+                class="selLineationDeco selLineationDeco--straight"
+                viewBox="0 0 16 2"
+                width="16"
+                height="2"
+                aria-hidden="true"
+              >
+                <line
+                  x1="0"
+                  y1="1"
+                  x2="16"
+                  y2="1"
+                  stroke="currentColor"
+                  stroke-width="1.2"
+                  stroke-linecap="round"
+                />
+              </svg>
+            </span>
+            <span
+              v-else
+              class="selLineationGlyph"
+              v-html="icons.fontFamily"
+            ></span>
           </span>
+          <span class="selActionLabel">{{ item.label }}</span>
+        </button>
+        <button
+          type="button"
+          class="selAction"
+          :class="{ 'selAction--noteActive': hasNote }"
+          aria-label="记笔记"
+          @pointerdown.prevent="emit('action', 'note')"
+        >
           <span
-            v-else
-            class="selLineationGlyph"
-            v-html="icons.fontFamily"
+            class="selActionIcon"
+            :style="noteIconAccentStyle()"
+            aria-hidden="true"
+            v-html="icons.note"
           ></span>
-        </span>
-        <span class="selActionLabel">{{ item.label }}</span>
-      </button>
-      <button
-        type="button"
-        class="selAction"
-        :class="{ 'selAction--noteActive': hasNote }"
-        aria-label="记笔记"
-        @pointerdown.prevent="emit('action', 'note')"
-      >
-        <span
-          class="selActionIcon"
-          :style="noteIconAccentStyle()"
-          aria-hidden="true"
-          v-html="icons.note"
-        ></span>
-        <span class="selActionLabel">记笔记</span>
-      </button>
+          <span class="selActionLabel">记笔记</span>
+        </button>
+      </template>
       <button
         v-if="selectionToolbarButtons.find"
         type="button"
@@ -337,6 +350,20 @@ function isPickerSwatchSelected(index: number): boolean {
           v-html="icons.dictionary"
         ></span>
         <span class="selActionLabel">词典</span>
+      </button>
+      <button
+        v-if="selectionToolbarButtons.translate"
+        type="button"
+        class="selAction"
+        aria-label="翻译"
+        @pointerdown.prevent="emit('action', 'translate')"
+      >
+        <span
+          class="selActionIcon"
+          aria-hidden="true"
+          v-html="icons.translate"
+        ></span>
+        <span class="selActionLabel">翻译</span>
       </button>
       <button
         v-if="aiFeaturesEnabled && selectionToolbarButtons.askAi"

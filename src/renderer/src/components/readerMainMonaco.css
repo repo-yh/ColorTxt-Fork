@@ -62,9 +62,10 @@
   align-items: center;
   justify-content: center;
   width: 100%;
-  height: 100%;
+  /* 高度由 readerImageViewZones 按内容高写入；底部 padding 留给段间距 */
   box-sizing: border-box;
   pointer-events: none !important;
+  overflow: hidden;
 }
 .monaco-editor .readerImageViewZone img {
   display: block !important;

@@ -22,7 +22,16 @@ import FindBookReaderFooter from "./FindBookReaderFooter.vue";
 import FindBookReaderHeader from "./FindBookReaderHeader.vue";
 import FindBookReaderChapterSidebar from "./FindBookReaderChapterSidebar.vue";
 import DictionaryManageModal from "../../components/DictionaryManageModal.vue";
+import WebSearchManageModal from "../../components/WebSearchManageModal.vue";
+import TranslateManageModal from "../../components/TranslateManageModal.vue";
 import { mergeDictionarySettings } from "../../constants/dictionarySettings";
+import { mergeWebSearchSettings } from "../../constants/webSearchSettings";
+import type { WebSearchSettings } from "@shared/webSearchTypes";
+import {
+  mergeTranslationSettings,
+  resolveTranslationSecretsWritePayload,
+} from "../../constants/translationSettings";
+import type { TranslationSettings } from "@shared/translationTypes";
 import type { DictionarySettings } from "@shared/dictionaryTypes";
 import {
   countCharsForLine,
@@ -224,6 +233,8 @@ const {
   chapterNavToolbarEnabled,
   selectionToolbarButtons,
   dictionarySettings,
+  webSearchSettings,
+  translationSettings,
   readerEditShowLineNumbers,
   readerEditMinimap,
   fullscreenReaderWidthPercent,
@@ -257,9 +268,39 @@ const {
 } = useBookSourceDownload();
 
 const showDictionaryManagePanel = ref(false);
+const showWebSearchManagePanel = ref(false);
+const showTranslateManagePanel = ref(false);
+
+function openTranslateManagePanel() {
+  showTranslateManagePanel.value = true;
+}
 
 function onDictionarySettingsUpdate(v: DictionarySettings) {
   dictionarySettings.value = mergeDictionarySettings(v);
+  persistReaderUiPrefs();
+}
+
+function onWebSearchSettingsUpdate(v: WebSearchSettings) {
+  webSearchSettings.value = mergeWebSearchSettings(v);
+  persistReaderUiPrefs();
+}
+
+async function onTranslationSettingsUpdate(v: TranslationSettings) {
+  translationSettings.value = mergeTranslationSettings(v);
+  try {
+    const payload = await resolveTranslationSecretsWritePayload(
+      translationSettings.value,
+      async () => {
+        const res = await window.colorTxt.secrets.getTranslationProviderKeys();
+        return res.keys ?? "";
+      },
+    );
+    if (payload) {
+      await window.colorTxt.secrets.setTranslationSecrets(payload);
+    }
+  } catch {
+    /* ignore */
+  }
   persistReaderUiPrefs();
 }
 const { isInBookshelf, toggle: toggleBookshelf, updateReadProgress } =
@@ -2049,7 +2090,12 @@ const modalRef = ref<InstanceType<typeof AppModal> | null>(null);
             :sticky-chapter-title-enabled="stickyChapterTitleEnabled"
             :selection-toolbar-buttons="selectionToolbarButtons"
             :dictionary-settings="dictionarySettings"
+            :web-search-settings="webSearchSettings"
+            :translation-settings="translationSettings"
             @open-dictionary-manage="showDictionaryManagePanel = true"
+            @open-web-search-manage="showWebSearchManagePanel = true"
+            @open-translate-manage="openTranslateManagePanel"
+            @update:translation-settings="onTranslationSettingsUpdate"
             :reader-surface-light="effectiveReaderSurfaceLight"
             :reader-surface-dark="effectiveReaderSurfaceDark"
             :reader-palette-color-enabled="readerPaletteColorEnabledForReader"
@@ -2058,6 +2104,9 @@ const modalRef = ref<InstanceType<typeof AppModal> | null>(null);
             :highlight-words-by-index="highlightWordsByIndexGlobal"
             :reader-fullscreen="isFullscreenView"
             :reader-edit-mode="readerEditMode"
+            :show-selection-annotation-tools="false"
+            :show-select-chapter-menu-item="false"
+            :ai-features-enabled="false"
             :reader-edit-show-line-numbers="readerEditShowLineNumbers"
             :reader-edit-minimap="readerEditMinimap"
             :ebook-display-line-to-physical="viewportDisplayLineToPhysicalLine"
@@ -2173,6 +2222,16 @@ const modalRef = ref<InstanceType<typeof AppModal> | null>(null);
       v-model="showDictionaryManagePanel"
       :settings="dictionarySettings"
       @update:settings="onDictionarySettingsUpdate"
+    />
+    <WebSearchManageModal
+      v-model="showWebSearchManagePanel"
+      :settings="webSearchSettings"
+      @update:settings="onWebSearchSettingsUpdate"
+    />
+    <TranslateManageModal
+      v-model="showTranslateManagePanel"
+      :settings="translationSettings"
+      @update:settings="onTranslationSettingsUpdate"
     />
   </AppModal>
 </template>

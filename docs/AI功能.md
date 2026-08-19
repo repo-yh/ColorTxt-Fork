@@ -324,6 +324,7 @@ cardShellWrap（悬停抬高 z-index）
 | **`ai.chatProfileKeys`** | 对话方案密钥 JSON：`{ [profileId]: apiKey }` |
 | **`ai.txt2imgProfileKeys`** | 文生图方案密钥 JSON：`{ [profileId]: apiKey }` |
 | **`voiceRead.profileKeys`** | 朗读方案密钥 JSON：`{ [profileId]: { dashscopeApiKey?, minimaxApiKey?, mimoApiKey? } }` |
+| **`translation.providerKeys`** | 选区翻译服务凭证 JSON（DeepL / 百度 / 有道 / 腾讯 / 火山 / 阿里等密钥与签名用标识；AI 翻译为 **`aiProfileKeys`** 按方案映射；见 [基础功能.md](./基础功能.md) →「选区翻译」） |
 
 **已废弃 slot**（仅启动迁移时 **`getDeprecatedSecret`** 读一次，迁入 profile 映射后 **`purgeDeprecatedSecretSlots`** 删除，不再写入）：
 
@@ -339,7 +340,8 @@ cardShellWrap（悬停抬高 z-index）
 | ---- | -------- |
 | AI 对话 / 文生图 / 嵌入 | 设置 **确定** → **`ai:config:set`** → **`saveAiConfig`**（合并 `*ProfileKeys`，**`mergeProfileKeyMapsForSave`**） |
 | 语音朗读 | 设置 **确定** → **`App.vue` `applySettings`** → **`persistVoiceReadSecretsToVault`**（**`secrets:setVoiceReadSecrets`**）；启动时 **`migrateVoiceReadSecretsToVaultIfNeeded`** 补迁 |
-| 启动灌回 | **`hydrateApiKeysFromVault`**（AI）、**`hydrateVoiceReadSecretsFromVault`**（语音）；若 profile id 与映射不对齐，**`reconcileOrphanProfileKeys`** 将孤儿密钥挂回当前活跃方案 |
+| 选区翻译 | 翻译设置变更 / 设置 **确定** → **`persistTranslationSecretsToVault`**（**`secrets:setTranslationSecrets`**）；启动 **`hydrateTranslationSecretsFromVault`** |
+| 启动灌回 | **`hydrateApiKeysFromVault`**（AI）、**`hydrateVoiceReadSecretsFromVault`**（语音）、**`hydrateTranslationSecretsFromVault`**（翻译）；若 profile id 与映射不对齐，**`reconcileOrphanProfileKeys`** 将孤儿密钥挂回当前活跃方案 |
 
 **localStorage**：**`colorTxt.ui.settings`** 中 **`voiceRead`** 及各方案 **`engineConfig`** **不含**密钥明文；根级 **`engineConfig`** 亦经 **`stripVoiceReadSettingsApiKeysForDisk`** 剥除。运行时内存中保留密钥供合成/对话使用。
 

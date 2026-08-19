@@ -27,6 +27,7 @@ import { useReaderInlineSearch } from "../composables/useReaderInlineSearch";
 import {
   replaceImgAnchorLinesWithViewZones,
   removeViewZonesById,
+  syncReaderImageViewZonesLineSpacing,
   type ReplaceImgAnchorsResult,
 } from "../monaco/readerImageViewZones";
 import { collectBlockMarkdownImageLines } from "../markdown/markdownImages";
@@ -64,6 +65,8 @@ import {
   chapterTitleForDisplay,
   leadingWhitespaceColumnCount,
 } from "../chapter";
+import { pickActiveChapterIdx } from "../reader/chapterIndex";
+import { ensureSearchAnchorCursorInViewport } from "../reader/ensureSearchAnchorCursorInViewport";
 import {
   compressBlankLinesInText,
   leadIndentFullWidthInText,
@@ -101,8 +104,16 @@ import AppContextMenu from "./AppContextMenu.vue";
 import ReaderSelectionToolbar from "./ReaderSelectionToolbar.vue";
 import ReaderNoteInputPanel from "./ReaderNoteInputPanel.vue";
 import ReaderDictionaryPopup from "./ReaderDictionaryPopup.vue";
+import ReaderTranslatePopup from "./ReaderTranslatePopup.vue";
 import type { DictionarySettings } from "@shared/dictionaryTypes";
 import { mergeDictionarySettings } from "../constants/dictionarySettings";
+import type { WebSearchSettings } from "@shared/webSearchTypes";
+import {
+  buildWebSearchUrl,
+  mergeWebSearchSettings,
+} from "../constants/webSearchSettings";
+import type { TranslationSettings } from "@shared/translationTypes";
+import { mergeTranslationSettings } from "../constants/translationSettings";
 import ReaderImageLightbox from "./ReaderImageLightbox.vue";
 import ReaderPartialEditPanel from "./ReaderPartialEditPanel.vue";
 import VoiceReadResumeGuide from "./VoiceReadResumeGuide.vue";
@@ -190,6 +201,8 @@ const editorEditContextMenuOpen = ref(false);
 const editorEditContextMenuX = ref(0);
 const editorEditContextMenuY = ref(0);
 const editorEditContextMenuHasSelection = ref(false);
+/** 打开右键菜单时的章节锚点行（点击处 / 选区 / 探针），供「选中本章」判断 */
+const editorEditContextMenuAnchorLine = ref(1);
 
 const partialEditOpen = ref(false);
 const partialEditDraft = ref("");
@@ -229,27 +242,63 @@ const diffReviewContextMenuItems = computed(() => {
 });
 
 const editorEditContextMenuItems = computed(() => {
+  const engines = props.webSearchSettings?.engines ?? [];
+  const hasSelection = editorEditContextMenuHasSelection.value;
+  const webSearchItem = {
+    id: "web-search",
+    label: "网络搜索",
+    iconHtml: icons.browser,
+    disabled: !hasSelection,
+    children: [
+      ...engines.map((e) => ({
+        id: `web-search:${e.id}`,
+        label: e.name,
+      })),
+      ...(engines.length
+        ? [{ id: "sep-web-search-manage", separator: true as const }]
+        : []),
+      {
+        id: "web-search-manage",
+        label: "搜索管理",
+      },
+    ],
+  };
   const items: Array<{
     id: string;
     label?: string;
     separator?: boolean;
     disabled?: boolean;
     iconHtml?: string;
+    children?: Array<{
+      id: string;
+      label?: string;
+      disabled?: boolean;
+      separator?: boolean;
+    }>;
   }> = [];
   if (!props.readerEditMode) {
     items.push({
       id: "copy",
       label: "复制",
-      disabled: !editorEditContextMenuHasSelection.value,
+      disabled: !hasSelection,
     });
     items.push({ id: "sep-select-all", separator: true });
+    if (props.showSelectChapterMenuItem !== false) {
+      items.push({
+        id: "select-chapter",
+        label: "选中本章",
+        disabled: !canSelectCurrentChapter(editorEditContextMenuAnchorLine.value),
+      });
+    }
     items.push({ id: "selectAll", label: "全选" });
+    items.push({ id: "sep-web-search", separator: true });
+    items.push(webSearchItem);
     items.push({ id: "sep-edit", separator: true });
     items.push({
       id: "edit-selection",
       label: "编辑选中文本",
       iconHtml: icons.edit,
-      disabled: !editorEditContextMenuHasSelection.value,
+      disabled: !hasSelection,
     });
     return items;
   }
@@ -259,7 +308,16 @@ const editorEditContextMenuItems = computed(() => {
     { id: "paste", label: "粘贴" },
   );
   items.push({ id: "sep-select-all", separator: true });
+  if (props.showSelectChapterMenuItem !== false) {
+    items.push({
+      id: "select-chapter",
+      label: "选中本章",
+      disabled: !canSelectCurrentChapter(editorEditContextMenuAnchorLine.value),
+    });
+  }
   items.push({ id: "selectAll", label: "全选" });
+  items.push({ id: "sep-web-search", separator: true });
+  items.push(webSearchItem);
   if (
     props.aiFeaturesEnabled &&
     props.canUseAiSmartFormat &&
@@ -270,7 +328,7 @@ const editorEditContextMenuItems = computed(() => {
       id: "ai-format-selection",
       label: "AI 智能排版：选中文本",
       iconHtml: icons.aiCompose,
-      disabled: !editorEditContextMenuHasSelection.value,
+      disabled: !hasSelection,
     });
   }
   return items;
@@ -416,8 +474,15 @@ const props = withDefaults(
     /** 本书阅读器划线 / 笔记 */
     readerAnnotations?: ReaderAnnotationRecord[];
     lineationLastColors?: LineationLastColorPrefs;
-    /** 已打开文件路径；为空时不显示选区高亮入口 */
+    /** 已打开文件路径；主窗无路径时不显示选区工具条（找书可关标注工具后仍显示） */
     readerFilePath?: string | null;
+    /**
+     * 选区工具条是否含高亮词 / 划线 / 笔记。
+     * 找书阅读器传 false。
+     */
+    showSelectionAnnotationTools?: boolean;
+    /** 右键是否含「选中本章」；找书按章渲染，传 false */
+    showSelectChapterMenuItem?: boolean;
     /** 电子书 MD 锚点/内链：物理行号 → Monaco 显示行（与流式滤空一致） */
     ebookAnchorPhysicalToDisplay?: (physicalLine: number) => number;
     /**
@@ -453,6 +518,10 @@ const props = withDefaults(
     selectionToolbarButtons?: SelectionToolbarButtons;
     /** 词典设置（查词浮层） */
     dictionarySettings?: DictionarySettings;
+    /** 网络搜索引擎（右键子菜单） */
+    webSearchSettings?: WebSearchSettings;
+    /** 翻译设置（选区翻译浮层） */
+    translationSettings?: TranslationSettings;
     /** 至少一项智能排版任务已开启（设置 → 编辑） */
     canUseAiSmartFormat?: boolean;
     /** 智能排版 Diff 预览（非 null 时在编辑器区域展示左右对比） */
@@ -481,6 +550,8 @@ const props = withDefaults(
     stickyChapterTitleEnabled: defaultStickyChapterTitleEnabled,
     selectionToolbarButtons: () => ({ ...defaultSelectionToolbarButtons }),
     dictionarySettings: () => mergeDictionarySettings(undefined),
+    webSearchSettings: () => mergeWebSearchSettings(undefined),
+    translationSettings: () => mergeTranslationSettings(undefined),
     readerEditShowLineNumbers: defaultReaderEditShowLineNumbers,
     readerEditMinimap: defaultReaderEditMinimap,
     streamLoading: false,
@@ -494,6 +565,8 @@ const props = withDefaults(
     readerAnnotations: () => [],
     lineationLastColors: () => ({ ...DEFAULT_LINEATION_LAST_COLORS }),
     readerFilePath: null,
+    showSelectionAnnotationTools: true,
+    showSelectChapterMenuItem: true,
     ebookAnchorPhysicalToDisplay: undefined,
     ebookDisplayLineToPhysical: undefined,
     beforeRevealFindWidget: undefined,
@@ -550,6 +623,9 @@ const emit = defineEmits<{
   smartFormatReviewDiscard: [];
   annotationQuotesChanged: [];
   openDictionaryManage: [];
+  openWebSearchManage: [];
+  openTranslateManage: [];
+  "update:translationSettings": [v: TranslationSettings];
 }>();
 
 const smartFormatRunning = ref(false);
@@ -660,6 +736,7 @@ const readerAnn = useReaderAnnotations({
   lineationLastColors: () => props.lineationLastColors ?? DEFAULT_LINEATION_LAST_COLORS,
   readerFilePath: () => props.readerFilePath,
   readerEditMode: () => props.readerEditMode === true,
+  showSelectionAnnotationTools: () => props.showSelectionAnnotationTools !== false,
   monacoCustomHighlight: () => props.monacoCustomHighlight === true,
   aiFeaturesEnabled: () => props.aiFeaturesEnabled === true,
   selectionToolbarButtons: () =>
@@ -719,6 +796,14 @@ const {
   dictionaryPopupMaxHeight,
   dictionaryPopupRootRef,
   closeDictionaryPopup,
+  translatePopupOpen,
+  translatePopupText,
+  translatePopupCenterX,
+  translatePopupTop,
+  translatePopupOpenDownward,
+  translatePopupMaxHeight,
+  translatePopupRootRef,
+  closeTranslatePopup,
   onToolbarAction,
   onHighlightPickConfirm,
   onHighlightPickRemove,
@@ -2004,6 +2089,11 @@ async function setLineSpacingPx(px: number): Promise<void> {
   if (next === getLineSpacingPx()) return;
   await applyWrappingLayoutChange(() => {
     applyMonacoLineSpacingPx(next);
+    const e = editor.value;
+    if (e && imageViewZoneIds.value.length > 0) {
+      // 独占行插图已删物理行，段间距改动时同步 ViewZone 底部空隙
+      syncReaderImageViewZonesLineSpacing(e, imageViewZoneIds.value);
+    }
   });
 }
 
@@ -2488,6 +2578,25 @@ function onDiffReviewContextMenuSelect(id: string) {
 function onEditorEditContextMenuSelect(id: string) {
   closeEditorEditContextMenu();
   if (smartFormatReviewActive.value) return;
+  if (id === "web-search-manage") {
+    emit("openWebSearchManage");
+    return;
+  }
+  if (id.startsWith("web-search:")) {
+    const engineId = id.slice("web-search:".length);
+    const engine = props.webSearchSettings?.engines?.find(
+      (e) => e.id === engineId,
+    );
+    const query = getSelectedText();
+    if (!engine || !query) return;
+    const url = buildWebSearchUrl(engine.urlTemplate, query);
+    if (!url) {
+      appToast("搜索链接无效，请检查 URL 模板是否包含 %s。", { kind: "danger" });
+      return;
+    }
+    void window.colorTxt.openExternal(url);
+    return;
+  }
   const e = editor.value;
   if (!e) return;
   if (id === "copy") {
@@ -2498,6 +2607,10 @@ function onEditorEditContextMenuSelect(id: string) {
   if (id === "selectAll") {
     e.focus();
     e.trigger("keyboard", "editor.action.selectAll", null);
+    return;
+  }
+  if (id === "select-chapter") {
+    selectCurrentChapter();
     return;
   }
   if (!props.readerEditMode) {
@@ -2627,6 +2740,7 @@ function toggleFindWidget() {
     /** Ctrl+F 打开：清除并禁用内联搜索装饰器，避免颜色共存冲突 */
     inlineSearch.clearInlineSearchDecorations();
     props.beforeRevealFindWidget?.();
+    ensureSearchAnchorCursorInViewport(e);
     e.getAction("actions.find")?.run();
   }
 }
@@ -2700,6 +2814,7 @@ async function openFindWithSearchStringAsync(raw: string, isRegex?: boolean, dir
   if (!e || !term) return;
 
   const useRegex = isRegex === true;
+  ensureSearchAnchorCursorInViewport(e);
 
   const findOpt = e.getOption(monaco.editor.EditorOption.find);
   const ctrl = e.getContribution(FIND_CONTROLLER_ID) as {
@@ -2976,6 +3091,66 @@ function getProbeLine(): number {
   if (!r) return fallbackLine;
   const span = Math.max(0, r.endLineNumber - r.startLineNumber);
   return r.startLineNumber + Math.floor(span * 0.75);
+}
+
+/** 右键「选中本章」锚点行：优先菜单打开时记录的点击行，否则选区起点 / 探针行 */
+function getContextChapterAnchorLine(): number {
+  return editorEditContextMenuAnchorLine.value;
+}
+
+/**
+ * 指定展示行所属章节在展示层上的起止行（含标题行，至下一章标题前一行）。
+ * 无章节或未落入任何章时返回 null。
+ */
+function resolveCurrentChapterDisplayRange(
+  anchorLine?: number,
+): {
+  startLine: number;
+  endLine: number;
+} | null {
+  const m = model.value;
+  if (!m || chaptersSnapshot.length === 0) return null;
+  const line = anchorLine ?? getContextChapterAnchorLine();
+  const idx = pickActiveChapterIdx(
+    chaptersSnapshot as unknown as import("../chapter").Chapter[],
+    line,
+  );
+  if (idx < 0) return null;
+  const startLine = chaptersSnapshot[idx]!.lineNumber;
+  let endLine = m.getLineCount();
+  for (const ch of chaptersSnapshot) {
+    if (ch.lineNumber > startLine && ch.lineNumber - 1 < endLine) {
+      endLine = ch.lineNumber - 1;
+    }
+  }
+  if (endLine < startLine) return null;
+  return { startLine, endLine };
+}
+
+function canSelectCurrentChapter(anchorLine?: number): boolean {
+  return resolveCurrentChapterDisplayRange(anchorLine) != null;
+}
+
+function selectCurrentChapter() {
+  const e = editor.value;
+  const m = model.value;
+  const range = resolveCurrentChapterDisplayRange();
+  if (!e || !m || !range) return;
+  e.focus();
+  e.setSelection(
+    new monaco.Selection(
+      range.startLine,
+      1,
+      range.endLine,
+      m.getLineMaxColumn(range.endLine),
+    ),
+  );
+  // 程序化设选区不会走划词 pointerup，需主动弹出选区工具条
+  if (!props.readerEditMode) {
+    void nextTick(() => {
+      readerAnn.showToolbarFromSelectionIfAny();
+    });
+  }
 }
 
 /** 与 `emitProbeLine` 内 `endLine` 一致：当前视口末行（Monaco 显示行号） */
@@ -3607,27 +3782,28 @@ onMounted(() => {
       shouldInterceptReadOnlyKeys: () =>
         !props.readerEditMode && !props.voiceReadScrollLocked,
     });
-    const d4 = e.onContextMenu((mouseEv) => {
-      const m = model.value;
-      if (!m) return;
-      if (smartFormatReviewActive.value) {
-        mouseEv.event.preventDefault();
-        mouseEv.event.stopPropagation();
-        return;
-      }
-      if (props.readerEditMode && smartFormatRunning.value) {
-        mouseEv.event.preventDefault();
-        mouseEv.event.stopPropagation();
-        return;
-      }
-      mouseEv.event.preventDefault();
-      mouseEv.event.stopPropagation();
+    function openEditorEditContextMenu(clientX: number, clientY: number) {
+      if (smartFormatReviewActive.value) return;
+      if (props.readerEditMode && smartFormatRunning.value) return;
       const sel = e.getSelection();
       editorEditContextMenuHasSelection.value = Boolean(sel && !sel.isEmpty());
-      editorEditContextMenuX.value = mouseEv.event.browserEvent.clientX;
-      editorEditContextMenuY.value = mouseEv.event.browserEvent.clientY;
+      // 无选区时勿依赖光标（滚动阅读时常停在文首）；用右键落点行，再退回探针行
+      let anchorLine: number | null = null;
+      if (sel && !sel.isEmpty()) {
+        anchorLine = Math.min(
+          sel.selectionStartLineNumber,
+          sel.positionLineNumber,
+        );
+      } else {
+        const target = e.getTargetAtClientPoint(clientX, clientY);
+        anchorLine = target?.position?.lineNumber ?? null;
+      }
+      editorEditContextMenuAnchorLine.value =
+        anchorLine ?? getProbeLine();
+      editorEditContextMenuX.value = clientX;
+      editorEditContextMenuY.value = clientY;
       editorEditContextMenuOpen.value = true;
-    });
+    }
     saveCommandDisposable = e.addAction({
       id: "colortxt.readerEdit.save",
       label: "保存",
@@ -3639,9 +3815,15 @@ onMounted(() => {
     /**
      * Monaco 内部命中测试在部分 DOM 路径下会先得到 UNKNOWN 并短路；`.view-lines` 在 `.view-zones` 之后插入会盖住 zone。
      * CSS 抬高 `.view-zones`；在 `editorHost` 上 **捕获** pointerdown：先处理电子书内链（须早于 Monaco 默认 mousedown），再处理插图灯箱。
+     * 右键在捕获阶段截断，不交给 Monaco（否则会把光标移到点击处并清空选区）；菜单改由原生 contextmenu 打开。
      */
     const editorHost = editorEl.value;
     const onReaderPointerDownCapture = (ev: PointerEvent) => {
+      if (ev.button === 2) {
+        // 只截断冒泡到 Monaco，勿 preventDefault（否则可能不再触发 contextmenu）
+        ev.stopImmediatePropagation();
+        return;
+      }
       if (ev.button !== 0) return;
       if (
         ebookInternalLinkHitCount.value > 0 &&
@@ -3677,17 +3859,56 @@ onMounted(() => {
       imageLightboxSrc.value = url;
       readerAnn.cancelSelectionPointerInteraction();
     };
+    const onReaderMouseDownCapture = (ev: MouseEvent) => {
+      if (ev.button !== 2) return;
+      ev.stopImmediatePropagation();
+    };
+    const onReaderContextMenuCapture = (ev: MouseEvent) => {
+      ev.preventDefault();
+      ev.stopImmediatePropagation();
+      openEditorEditContextMenu(ev.clientX, ev.clientY);
+    };
     editorHost?.addEventListener(
       "pointerdown",
       onReaderPointerDownCapture,
       true,
     );
+    editorHost?.addEventListener("mousedown", onReaderMouseDownCapture, true);
+    editorHost?.addEventListener(
+      "contextmenu",
+      onReaderContextMenuCapture,
+      true,
+    );
+    /** 查找栏下一处/上一处：先把视口外光标挪到视口首行，再让 Monaco 从该锚点搜 */
+    const onFindNavigateAnchorCapture = (ev: Event) => {
+      const t = ev.target;
+      if (!(t instanceof Element)) return;
+      if (
+        !t.closest(
+          ".find-widget .codicon-find-next-match, .find-widget .codicon-find-previous-match, .find-widget .button[aria-label*='下一个'], .find-widget .button[aria-label*='上一个'], .find-widget .button[title*='下一个'], .find-widget .button[title*='上一个'], .find-widget .button[aria-label*='Next'], .find-widget .button[aria-label*='Previous'], .find-widget .button[title*='Next'], .find-widget .button[title*='Previous']",
+        )
+      ) {
+        return;
+      }
+      ensureSearchAnchorCursorInViewport(e);
+    };
+    const onFindNavigateKeyCapture = (ev: KeyboardEvent) => {
+      if (!isFindWidgetRevealed()) return;
+      const isF3 = ev.key === "F3";
+      const isEnterInFind =
+        ev.key === "Enter" &&
+        ev.target instanceof Element &&
+        Boolean(ev.target.closest(".find-widget"));
+      if (!isF3 && !isEnterInFind) return;
+      ensureSearchAnchorCursorInViewport(e);
+    };
+    editorHost?.addEventListener("click", onFindNavigateAnchorCapture, true);
+    window.addEventListener("keydown", onFindNavigateKeyCapture, true);
     onBeforeUnmount(() => {
       d1.dispose();
       d2.dispose();
       dSel.dispose();
       d3.dispose();
-      d4.dispose();
       saveCommandDisposable?.dispose();
       saveCommandDisposable = null;
       editorHost?.removeEventListener(
@@ -3695,6 +3916,18 @@ onMounted(() => {
         onReaderPointerDownCapture,
         true,
       );
+      editorHost?.removeEventListener(
+        "mousedown",
+        onReaderMouseDownCapture,
+        true,
+      );
+      editorHost?.removeEventListener(
+        "contextmenu",
+        onReaderContextMenuCapture,
+        true,
+      );
+      editorHost?.removeEventListener("click", onFindNavigateAnchorCapture, true);
+      window.removeEventListener("keydown", onFindNavigateKeyCapture, true);
       readerAnn.cancelSelectionPointerInteraction();
     });
 
@@ -3920,6 +4153,20 @@ watch(smartFormatReviewActive, (active) => {
           @open-dictionary-manage="emit('openDictionaryManage')"
         />
       </div>
+      <div ref="translatePopupRootRef">
+        <ReaderTranslatePopup
+          :open="translatePopupOpen"
+          :text="translatePopupText"
+          :settings="translationSettings"
+          :float-center-x="translatePopupCenterX"
+          :float-root-top="translatePopupTop"
+          :open-downward="translatePopupOpenDownward"
+          :max-height="translatePopupMaxHeight"
+          @close="closeTranslatePopup"
+          @open-translate-manage="emit('openTranslateManage')"
+          @update:settings="emit('update:translationSettings', $event)"
+        />
+      </div>
     </div>
     <div
       v-if="toolbarVisible || colorPickerMode"
@@ -3942,6 +4189,7 @@ watch(smartFormatReviewActive, (active) => {
         :active-lineation="activeLineation"
         :lineation-picker-selected-index="lineationPickerSelectedIndex"
         :monaco-custom-highlight="monacoCustomHighlight"
+        :show-selection-annotation-tools="showSelectionAnnotationTools"
         :ai-features-enabled="aiFeaturesEnabled"
         :selection-toolbar-buttons="selectionToolbarButtons"
         :has-lineation="toolbarHasLineation"

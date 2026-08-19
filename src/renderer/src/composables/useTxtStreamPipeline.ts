@@ -29,7 +29,7 @@ import type {
   TextConvertZhMode,
 } from "@shared/textConvertTypes";
 import {
-  applyReplaceRulesToText,
+  applyReplaceRulesToDisplayText,
   filterEnabledReplaceRules,
 } from "@shared/bookSource/replaceRuleApply";
 import type { ReplaceRule } from "@shared/bookSource/replaceRule";
@@ -316,15 +316,30 @@ export function useTxtStreamPipeline(deps: {
 
     let displayText = formatted.text;
     if (!deps.readerEditMode.value) {
+      const bookName = deps.replaceRuleBookName.value;
       const contentRules = filterEnabledReplaceRules(
         deps.replaceRules.value,
-        deps.replaceRuleBookName.value,
+        bookName,
         "",
         "content",
       );
-      if (contentRules.length > 0) {
-        // 不走 applyContentReplaceWithRules 的按行 trim：否则会抵消已完成的行首缩进
-        displayText = applyReplaceRulesToText(displayText, contentRules);
+      const titleRules = filterEnabledReplaceRules(
+        deps.replaceRules.value,
+        bookName,
+        "",
+        "title",
+      );
+      if (contentRules.length > 0 || titleRules.length > 0) {
+        // 正文规则套全文；标题行只套「作用于标题」（不走按行 trim，以免抵消行首缩进）
+        const titleDisplayLines = new Set(
+          formatted.chapterTitleDisplayLineByPhysical.values(),
+        );
+        displayText = applyReplaceRulesToDisplayText(
+          displayText,
+          contentRules,
+          titleRules,
+          titleDisplayLines,
+        );
       }
     }
     displayText = await applyTextDisplayConverts(displayText, {

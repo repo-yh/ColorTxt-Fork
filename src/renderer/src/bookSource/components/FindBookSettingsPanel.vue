@@ -1,11 +1,20 @@
 <script setup lang="ts">
-import { nextTick, ref, useTemplateRef, watch } from "vue";
+import { computed, nextTick, ref, useTemplateRef, watch } from "vue";
 import AppModal from "../../components/AppModal.vue";
 import SettingsReadingPanel from "../../components/SettingsReadingPanel.vue";
 import DictionaryManageModal from "../../components/DictionaryManageModal.vue";
+import WebSearchManageModal from "../../components/WebSearchManageModal.vue";
+import TranslateManageModal from "../../components/TranslateManageModal.vue";
 import SettingsEditPanel from "../../components/SettingsEditPanel.vue";
 import { mergeDictionarySettings } from "../../constants/dictionarySettings";
+import { mergeWebSearchSettings } from "../../constants/webSearchSettings";
+import {
+  mergeTranslationSettings,
+  resolveTranslationSecretsWritePayload,
+} from "../../constants/translationSettings";
 import type { DictionarySettings } from "@shared/dictionaryTypes";
+import type { WebSearchSettings } from "@shared/webSearchTypes";
+import type { TranslationSettings } from "@shared/translationTypes";
 import SettingsVoiceReadPanel from "../../components/SettingsVoiceReadPanel.vue";
 import FindBookSettingsTabBar, {
   type FindBookSettingsTabId,
@@ -179,6 +188,32 @@ const draftSelectionToolbarButtons = ref<SelectionToolbarButtons>(
   mergeSelectionToolbarButtons(undefined),
 );
 const showDictionaryManagePanel = ref(false);
+const showWebSearchManagePanel = ref(false);
+const showTranslateManagePanel = ref(false);
+
+function openTranslateManageFromSettings() {
+  showTranslateManagePanel.value = true;
+}
+
+async function onTranslationSettingsUpdate(v: TranslationSettings) {
+  fb.translationSettings.value = mergeTranslationSettings(v);
+  try {
+    const payload = await resolveTranslationSecretsWritePayload(
+      fb.translationSettings.value,
+      async () => {
+        const res = await window.colorTxt.secrets.getTranslationProviderKeys();
+        return res.keys ?? "";
+      },
+    );
+    if (payload) {
+      await window.colorTxt.secrets.setTranslationSecrets(payload);
+    }
+  } catch {
+    /* ignore */
+  }
+  fb.persistReaderUiPrefs();
+}
+
 const draftVoiceRead = ref<VoiceReadSettings>(mergeVoiceReadSettings(undefined));
 const draftVoiceReadProfiles = ref<VoiceReadProfile[]>([]);
 const draftActiveVoiceReadProfileId = ref("");
@@ -662,8 +697,12 @@ watch(draftFontSize, (size) => {
                 draftSelectionToolbarButtons
               "
               :show-find-target-option="false"
+              :show-annotation-tools="false"
+              :show-ask-ai="false"
               :monaco-custom-highlight="fb.monacoCustomHighlight.value"
               @open-dictionary-manage="showDictionaryManagePanel = true"
+              @open-web-search-manage="showWebSearchManagePanel = true"
+              @open-translate-manage="openTranslateManageFromSettings"
             />
 
             <SettingsEditPanel
@@ -747,6 +786,21 @@ watch(draftFontSize, (size) => {
         fb.persistReaderUiPrefs();
       }
     "
+  />
+  <WebSearchManageModal
+    v-model="showWebSearchManagePanel"
+    :settings="fb.webSearchSettings.value"
+    @update:settings="
+      (v: WebSearchSettings) => {
+        fb.webSearchSettings.value = mergeWebSearchSettings(v);
+        fb.persistReaderUiPrefs();
+      }
+    "
+  />
+  <TranslateManageModal
+    v-model="showTranslateManagePanel"
+    :settings="fb.translationSettings.value"
+    @update:settings="onTranslationSettingsUpdate"
   />
 </template>
 

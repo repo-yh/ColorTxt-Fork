@@ -243,6 +243,8 @@ const emit = defineEmits<{
   apply: [payload: SettingsApplyPayload];
   openReadingData: [];
   openDictionaryManage: [];
+  openWebSearchManage: [];
+  openTranslateManage: [];
 }>();
 
 const activeTab = ref<SettingsTabId>("general");
@@ -1122,6 +1124,8 @@ async function onImportConfig(): Promise<void> {
               "
               :monaco-custom-highlight="monacoCustomHighlight"
               @open-dictionary-manage="emit('openDictionaryManage')"
+              @open-web-search-manage="emit('openWebSearchManage')"
+              @open-translate-manage="emit('openTranslateManage')"
             />
 
             <SettingsEditPanel

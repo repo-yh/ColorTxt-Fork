@@ -1,7 +1,8 @@
 /**
  * Monaco 布局层「段间距」（UI 文案；代码键仍为 lineSpacingPx）：
  * 每个物理行（model line）结束后增加常数像素空隙。
- * 软换行产生的中间 view 行不加距。由 Vite transform 注入 LinesLayout 读取。
+ * 软换行产生的中间 view 行不加距。由 Vite transform 注入 LinesLayout 读取
+ *（含 getVerticalOffsetForLineNumber / After / WhitespaceIndex 与视口累加）。
  *
  * 默认间距为模块级（阅读器设置）；个别 LinesLayout 可通过 override 固定为 0
  *（如智能排版 Diff 左右侧），互不影响。

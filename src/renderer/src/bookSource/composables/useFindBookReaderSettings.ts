@@ -49,6 +49,11 @@ import {
   normalizeVoiceReadProfilesForSave,
 } from "../../services/voiceRead/voiceReadProfileState";
 import { hydrateVoiceReadProfilesWithSecrets } from "../../services/voiceRead/voiceReadSecretsHydration";
+import {
+  applyTranslationSecrets,
+  mergeTranslationSettings,
+  parseTranslationSecretsBlob,
+} from "../../constants/translationSettings";
 import { ref } from "vue";
 import { useFindBookSettings } from "./useFindBookSettings";
 
@@ -219,6 +224,19 @@ function createFindBookReaderSettingsStore() {
     mainData.voiceRead as Parameters<typeof migrateVoiceReadFromPersisted>[0],
   );
 
+  void (async () => {
+    try {
+      const res = await window.colorTxt.secrets.getTranslationProviderKeys();
+      const secrets = parseTranslationSecretsBlob(res.keys ?? "");
+      fb.translationSettings.value = applyTranslationSecrets(
+        mergeTranslationSettings(fb.translationSettings.value),
+        secrets,
+      );
+    } catch {
+      /* ignore */
+    }
+  })();
+
   const highlightColorsForReader = computed(() =>
     currentTheme.value === "vs"
       ? highlightColorsLight.value
@@ -367,6 +385,8 @@ function createFindBookReaderSettingsStore() {
     chapterNavToolbarEnabled: fb.chapterNavToolbarEnabled,
     selectionToolbarButtons: fb.selectionToolbarButtons,
     dictionarySettings: fb.dictionarySettings,
+    webSearchSettings: fb.webSearchSettings,
+    translationSettings: fb.translationSettings,
     readerEditShowLineNumbers: fb.readerEditShowLineNumbers,
     readerEditMinimap: fb.readerEditMinimap,
     fullscreenReaderWidthPercent: fb.fullscreenReaderWidthPercent,

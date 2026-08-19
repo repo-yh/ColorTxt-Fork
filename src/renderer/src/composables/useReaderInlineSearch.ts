@@ -1,7 +1,14 @@
 import type { ShallowRef } from "vue";
 import * as monaco from "monaco-editor";
+import { ensureSearchAnchorCursorInViewport } from "../reader/ensureSearchAnchorCursorInViewport";
 
 type MatchShape = { lineNumber: number; startColumn: number; endColumn: number };
+
+/**
+ * 与 Monaco FindModel.MATCHES_LIMIT 对齐。
+ * `findMatches` 默认仅 999 条：高亮词组全文匹配常超限，导致后文无装饰、且「下一处」回绕到文首。
+ */
+const INLINE_SEARCH_MATCHES_LIMIT = 19999;
 
 export function useReaderInlineSearch(deps: {
   editor: ShallowRef<monaco.editor.IStandaloneCodeEditor | null>;
@@ -33,6 +40,16 @@ export function useReaderInlineSearch(deps: {
     return leftOk && rightOk;
   }
 
+  function matchPassesWholeWord(it: monaco.editor.FindMatch): boolean {
+    if (!inlineSearchWholeWord) return true;
+    const m = deps.model.value;
+    if (!m) return false;
+    const lineText = m.getLineContent(it.range.startLineNumber);
+    const start = Math.max(0, it.range.startColumn - 1);
+    const end = Math.max(start, it.range.endColumn - 1);
+    return isWholeWordRange(lineText, start, end);
+  }
+
   function sameInlineSearchMatch(a: MatchShape, b: monaco.Range) {
     return (
       a.lineNumber === b.startLineNumber &&
@@ -51,14 +68,10 @@ export function useReaderInlineSearch(deps: {
       inlineSearchCaseSensitive,
       null,
       false,
+      INLINE_SEARCH_MATCHES_LIMIT,
     );
     if (inlineSearchWholeWord) {
-      matches = matches.filter((it) => {
-        const lineText = m.getLineContent(it.range.startLineNumber);
-        const start = Math.max(0, it.range.startColumn - 1);
-        const end = Math.max(start, it.range.endColumn - 1);
-        return isWholeWordRange(lineText, start, end);
-      });
+      matches = matches.filter(matchPassesWholeWord);
     }
     return matches;
   }
@@ -216,7 +229,8 @@ export function useReaderInlineSearch(deps: {
     },
   ): boolean {
     const e = deps.editor.value;
-    if (!e) return false;
+    const m = deps.model.value;
+    if (!e || !m) return false;
     const q = query.trim();
     if (!q) {
       clearInlineSearchState();
@@ -224,10 +238,14 @@ export function useReaderInlineSearch(deps: {
     }
     /** 启用内联搜索装饰器（用户主动点击高亮词） */
     inlineSearchDecorationsDisabled = false;
+    /** 视口外光标先挪到视口首行，便于从当前阅读位置继续查找 */
+    ensureSearchAnchorCursorInViewport(e);
+
     inlineSearchQuery = q;
     inlineSearchCaseSensitive = options?.caseSensitive === true;
     inlineSearchWholeWord = options?.wholeWord === true;
     inlineSearchUseRegex = options?.useRegex === true;
+
     const matches = findInlineSearchMatches(q);
     if (matches.length === 0) {
       clearInlineSearchState();

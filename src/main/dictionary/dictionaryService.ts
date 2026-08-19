@@ -245,7 +245,13 @@ async function lookupLocal(
   if (dict.kind === "mdict") {
     const mdx = bundleFile(dict, dict.files.mdx, root);
     if (!mdx) return null;
-    const hit = await lookupMdict(mdx, word);
+    const mddPaths = (dict.files.mdd ?? [])
+      .map((rel) => bundleFile(dict, rel, root))
+      .filter((p): p is string => !!p);
+    const cssPaths = (dict.files.css ?? [])
+      .map((rel) => bundleFile(dict, rel, root))
+      .filter((p): p is string => !!p);
+    const hit = await lookupMdict(mdx, word, { mddPaths, cssPaths });
     if (!hit?.definition.trim()) return null;
     return {
       providerId: dict.id,

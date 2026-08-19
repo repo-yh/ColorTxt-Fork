@@ -5,6 +5,7 @@ import {
   isDeprecatedSecretSlot,
   SECRET_SLOT_VOICE_READ_PROFILE_KEYS,
   SECRET_SLOT_WEBDAV_PASSWORD,
+  SECRET_SLOT_TRANSLATION_PROVIDER_KEYS,
   type SecretSlotId,
 } from "@shared/secretSlots";
 import {
@@ -20,7 +21,8 @@ import {
 function isRendererReadableSecretSlot(slot: unknown): slot is SecretSlotId {
   return (
     slot === SECRET_SLOT_VOICE_READ_PROFILE_KEYS ||
-    slot === SECRET_SLOT_WEBDAV_PASSWORD
+    slot === SECRET_SLOT_WEBDAV_PASSWORD ||
+    slot === SECRET_SLOT_TRANSLATION_PROVIDER_KEYS
   );
 }
 
@@ -85,6 +87,22 @@ export function registerSecretsIpcHandlers(): void {
     await setSecret(SECRET_SLOT_WEBDAV_PASSWORD, value);
     return { ok: true as const };
   });
+
+  ipcMain.handle(
+    "secrets:setTranslationSecrets",
+    async (_evt, payload: unknown) => {
+      if (!payload || typeof payload !== "object") {
+        return { ok: false as const, error: "无效参数" };
+      }
+      const o = payload as { providerKeys?: unknown };
+      const providerKeys =
+        typeof o.providerKeys === "string" ? o.providerKeys.trim() : "";
+      await setSecretsBatch({
+        [SECRET_SLOT_TRANSLATION_PROVIDER_KEYS]: providerKeys,
+      });
+      return { ok: true as const };
+    },
+  );
 
   ipcMain.handle("secrets:purgeDeprecated", async () => {
     await purgeDeprecatedSecretSlots(DEPRECATED_SECRET_SLOTS);

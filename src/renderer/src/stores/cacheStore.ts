@@ -62,6 +62,13 @@ import {
 } from "../constants/selectionToolbar";
 import { mergeDictionarySettings } from "../constants/dictionarySettings";
 import type { DictionarySettings } from "@shared/dictionaryTypes";
+import { mergeWebSearchSettings } from "../constants/webSearchSettings";
+import type { WebSearchSettings } from "@shared/webSearchTypes";
+import {
+  mergeTranslationSettings,
+  stripTranslationSecretsForDisk,
+} from "../constants/translationSettings";
+import type { TranslationSettings } from "@shared/translationTypes";
 import { normalizeCharacterCardTextureEffect } from "@shared/characterCardTextureEffects";
 import { parseWordcloudAngleMode } from "../constants/wordcloudUi";
 import { parseWordcloudPaletteId } from "../constants/wordcloudPalettes";
@@ -147,6 +154,10 @@ export type PersistedSettingsData = {
   selectionToolbarButtons?: Partial<SelectionToolbarButtons>;
   /** 词典（启用顺序、本地导入元数据、自定义网络） */
   dictionarySettings?: Partial<DictionarySettings>;
+  /** 网络搜索引擎（右键菜单） */
+  webSearchSettings?: Partial<WebSearchSettings>;
+  /** 选区翻译（服务、目标语言等；不含密钥明文） */
+  translationSettings?: Partial<TranslationSettings>;
   /** 用户自定义快捷键（动作ID -> accelerator） */
   shortcutBindings?: Partial<Record<ShortcutActionId, string>>;
   /** 阅读器表面色用户覆盖（亮色侧） */
@@ -484,6 +495,18 @@ export function loadPersistedSettingsData(
   if (obj.dictionarySettings && typeof obj.dictionarySettings === "object") {
     data.dictionarySettings = mergeDictionarySettings(
       obj.dictionarySettings as Partial<DictionarySettings>,
+    );
+  }
+  if (obj.webSearchSettings && typeof obj.webSearchSettings === "object") {
+    data.webSearchSettings = mergeWebSearchSettings(
+      obj.webSearchSettings as Partial<WebSearchSettings>,
+    );
+  }
+  if (obj.translationSettings && typeof obj.translationSettings === "object") {
+    data.translationSettings = stripTranslationSecretsForDisk(
+      mergeTranslationSettings(
+        obj.translationSettings as Partial<TranslationSettings>,
+      ),
     );
   }
   if (obj.shortcutBindings && typeof obj.shortcutBindings === "object") {

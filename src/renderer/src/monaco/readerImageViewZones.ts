@@ -2,12 +2,22 @@ import type * as monaco from "monaco-editor";
 import { yieldToUi } from "../ebook/yieldToUi";
 import type { BlockMarkdownImageLine } from "../markdown/markdownImages";
 import { omitLinesAtLineNumbers } from "../markdown/markdownImages";
+import { getLineSpacingPx } from "./lineSpacing";
 
 /** `replaceImgAnchorLinesWithViewZones` 返回：插图 View Zone id，以及删行前 Monaco 行号（降序，便于与滤空映射同步 splice） */
 export type ReplaceImgAnchorsResult = {
   zoneIds: string[];
   deletedOriginalLineNumbersDesc: number[];
 };
+
+type ActiveImageZone = {
+  zone: monaco.editor.IViewZone;
+  contentHeightPx: number;
+  frame: HTMLElement;
+};
+
+/** 供段间距变更时 `layoutZone` 更新高度（delegate.heightInPx 可变） */
+const activeImageZones = new Map<string, ActiveImageZone>();
 
 function isRemoteImgPath(path: string): boolean {
   return /^https?:\/\//i.test(path.trim());
@@ -24,6 +34,25 @@ function syncReaderImageViewZoneBox(
 ): void {
   const { contentWidth } = editor.getLayoutInfo();
   dom.style.width = `${Math.max(0, contentWidth - 14)}px`; // 14px 为 Monaco 滚动条宽度
+}
+
+/** 独占行插图：内容高度 + 底部段间距（对齐正文物理行后的空隙） */
+function applyImageZoneBoxHeights(
+  dom: HTMLElement,
+  frame: HTMLElement,
+  contentHeightPx: number,
+  gapPx: number,
+): number {
+  const gap = Math.max(0, Math.floor(gapPx));
+  const content = Math.max(1, Math.floor(contentHeightPx));
+  const total = content + gap;
+  dom.style.boxSizing = "border-box";
+  dom.style.height = `${total}px`;
+  dom.style.paddingBottom = gap > 0 ? `${gap}px` : "";
+  frame.style.boxSizing = "border-box";
+  frame.style.height = `${content}px`;
+  frame.style.maxHeight = `${content}px`;
+  return total;
 }
 
 /**
@@ -97,6 +126,8 @@ export async function replaceImgAnchorLinesWithViewZones(
     })),
   );
 
+  const contentHeightPx = options.zoneHeightPx;
+  const gapPx = getLineSpacingPx();
   const zoneIds: string[] = [];
   let zoneOrdinal = 0;
   editor.changeViewZones((accessor) => {
@@ -110,8 +141,6 @@ export async function replaceImgAnchorLinesWithViewZones(
       const dom = document.createElement("div");
       dom.className = "readerImageViewZone";
       dom.dataset.colortxtImgUrl = z.url;
-      dom.style.boxSizing = "border-box";
-      dom.style.height = `${options.zoneHeightPx}px`;
       dom.style.display = "block";
       dom.style.overflow = "hidden";
       dom.style.pointerEvents = "none";
@@ -127,21 +156,54 @@ export async function replaceImgAnchorLinesWithViewZones(
       img.src = z.url;
       frame.appendChild(img);
       dom.appendChild(frame);
-      const id = accessor.addZone({
+      const heightInPx = applyImageZoneBoxHeights(
+        dom,
+        frame,
+        contentHeightPx,
+        gapPx,
+      );
+      const zone: monaco.editor.IViewZone = {
         afterLineNumber,
         afterColumn,
         ordinal: zoneOrdinal++,
-        heightInPx: options.zoneHeightPx,
+        heightInPx,
         domNode: dom,
         onDomNodeTop: () => {
           syncReaderImageViewZoneBox(editor, dom);
         },
-      });
+      };
+      const id = accessor.addZone(zone);
+      activeImageZones.set(id, { zone, contentHeightPx, frame });
       zoneIds.push(id);
     }
   });
   options.onZonesChange?.(zoneIds);
   return { zoneIds, deletedOriginalLineNumbersDesc };
+}
+
+/**
+ * 段间距变更后：刷新已挂载插图 ViewZone 的总高度（内容高不变，底部空隙跟 `lineSpacingPx`）。
+ */
+export function syncReaderImageViewZonesLineSpacing(
+  editor: monaco.editor.IStandaloneCodeEditor,
+  zoneIds: readonly string[],
+): void {
+  if (zoneIds.length === 0) return;
+  const gapPx = getLineSpacingPx();
+  editor.changeViewZones((accessor) => {
+    for (const id of zoneIds) {
+      const rec = activeImageZones.get(id);
+      if (!rec?.zone.domNode) continue;
+      const heightInPx = applyImageZoneBoxHeights(
+        rec.zone.domNode,
+        rec.frame,
+        rec.contentHeightPx,
+        gapPx,
+      );
+      rec.zone.heightInPx = heightInPx;
+      accessor.layoutZone(id);
+    }
+  });
 }
 
 export function removeViewZonesById(
@@ -152,6 +214,7 @@ export function removeViewZonesById(
   editor.changeViewZones((accessor) => {
     for (const id of zoneIds) {
       accessor.removeZone(id);
+      activeImageZones.delete(id);
     }
   });
 }

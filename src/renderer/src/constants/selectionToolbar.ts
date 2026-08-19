@@ -6,8 +6,10 @@ export type SelectionToolbarButtons = {
   copy: boolean;
   find: boolean;
   askAi: boolean;
-  /** 词典查词（默认不显示） */
+  /** 词典查词（默认显示） */
   dictionary: boolean;
+  /** 选区翻译（默认显示） */
+  translate: boolean;
   /** 「查找」按钮：打开 Monaco 查找栏，或填入侧栏全文搜索 */
   findTarget: SelectionToolbarFindTarget;
 };
@@ -25,9 +27,10 @@ export const defaultSelectionToolbarFindTarget: SelectionToolbarFindTarget =
 
 export const defaultSelectionToolbarButtons: SelectionToolbarButtons = {
   copy: true,
-  find: false,
+  find: true,
   askAi: true,
-  dictionary: false,
+  dictionary: true,
+  translate: true,
   findTarget: defaultSelectionToolbarFindTarget,
 };
 
@@ -57,8 +60,31 @@ export function mergeSelectionToolbarButtons(
       typeof partial?.dictionary === "boolean"
         ? partial.dictionary
         : defaultSelectionToolbarButtons.dictionary,
+    translate:
+      typeof partial?.translate === "boolean"
+        ? partial.translate
+        : defaultSelectionToolbarButtons.translate,
     findTarget: isSelectionToolbarFindTarget(partial?.findTarget)
       ? partial.findTarget
       : defaultSelectionToolbarButtons.findTarget,
   };
+}
+
+/**
+ * 当前配置下选区工具条是否至少有一个按钮会渲染。
+ * 可配置项全关且无高亮词/划线/笔记时不应弹出空白工具条。
+ */
+export function hasVisibleSelectionToolbarActions(opts: {
+  buttons: SelectionToolbarButtons;
+  showAnnotationTools: boolean;
+  aiFeaturesEnabled: boolean;
+}): boolean {
+  const b = opts.buttons;
+  if (b.copy || b.find || b.dictionary || b.translate) return true;
+  if (opts.aiFeaturesEnabled && b.askAi) return true;
+  if (opts.showAnnotationTools) {
+    // 划线三种 + 记笔记固定展示；高亮词另受自定义高亮开关控制
+    return true;
+  }
+  return false;
 }

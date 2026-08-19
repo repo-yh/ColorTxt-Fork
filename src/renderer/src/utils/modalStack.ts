@@ -181,8 +181,25 @@ export function registerModal(opts: {
     unregister: () => {
       const idx = stack.findIndex((e) => e.instanceId === instanceId)
       if (idx >= 0) stack.splice(idx, 1)
+      reassignStackZIndices()
       removeEscListenerIfIdle()
       emitModalStackChange()
     },
   }
+}
+
+/**
+ * 点击是否落在 z-index **高于** `belowZ` 的 AppModal 上。
+ * 查词/翻译浮层点外部关闭时：忽略叠在其上的「词典管理 / 翻译设置」，
+ * 但不把找书阅读器等**下层** AppModal 误判为「上层」。
+ */
+export function isPointerOnAppModalAbove(
+  target: EventTarget | null,
+  belowZ: number,
+): boolean {
+  if (!(target instanceof Element)) return false
+  const backdrop = target.closest(".appModalBackdrop")
+  if (!(backdrop instanceof HTMLElement)) return false
+  const z = Number.parseInt(getComputedStyle(backdrop).zIndex, 10)
+  return Number.isFinite(z) && z > belowZ
 }

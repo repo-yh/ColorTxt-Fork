@@ -1,9 +1,16 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import {
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  watch,
+} from "vue";
 
 defineOptions({ inheritAttrs: false });
 
-type ContextMenuItem = {
+export type ContextMenuItem = {
   id: string;
   label?: string;
   type?: "primary" | "success" | "warning" | "danger";
@@ -11,6 +18,8 @@ type ContextMenuItem = {
   disabled?: boolean;
   /** 与 `icons.*` 一致，渲染在标签左侧 */
   iconHtml?: string;
+  /** 子菜单项；有 children 时父项不触发 select */
+  children?: readonly ContextMenuItem[];
 };
 
 const props = withDefaults(
@@ -51,6 +60,9 @@ const emit = defineEmits<{
 const menuRef = ref<HTMLElement | null>(null);
 const posX = ref(0);
 const posY = ref(0);
+const openSubId = ref<string | null>(null);
+const flyoutSide = ref<"right" | "left">("right");
+const flyoutElById = new Map<string, HTMLElement>();
 
 const zIndexStyle = computed(() => props.zIndex ?? 12000);
 
@@ -60,9 +72,55 @@ function itemClass(item: ContextMenuItem) {
   return c.join(" ");
 }
 
-function onMenuItemClick(item: ContextMenuItem) {
+function hasChildren(item: ContextMenuItem): boolean {
+  return Array.isArray(item.children);
+}
+
+function onLeafClick(item: ContextMenuItem) {
   if (item.disabled) return;
   emit("select", item.id);
+}
+
+function openSubmenu(item: ContextMenuItem) {
+  if (item.disabled || !hasChildren(item)) return;
+  openSubId.value = item.id;
+  void nextTick(() => layoutFlyout(item.id));
+}
+
+function closeSubmenu() {
+  openSubId.value = null;
+}
+
+function setFlyoutEl(id: string, el: unknown) {
+  if (el instanceof HTMLElement) {
+    flyoutElById.set(id, el);
+  } else {
+    flyoutElById.delete(id);
+  }
+}
+
+function layoutFlyout(id: string) {
+  const flyout = flyoutElById.get(id);
+  const menu = menuRef.value;
+  if (!flyout || !menu) return;
+  const menuRect = menu.getBoundingClientRect();
+  const margin = 8;
+  const preferRight = menuRect.right + 8 + flyout.offsetWidth <= window.innerWidth - margin;
+  flyoutSide.value = preferRight ? "right" : "left";
+  flyout.style.transform = "";
+  void nextTick(() => {
+    const r = flyout.getBoundingClientRect();
+    let dy = 0;
+    if (r.bottom > window.innerHeight - margin) {
+      dy = window.innerHeight - margin - r.bottom;
+    }
+    if (r.top + dy < margin) {
+      dy = margin - r.top;
+    }
+    if (dy !== 0) {
+      flyout.style.transform = `translateY(${dy}px)`;
+    }
+  });
 }
 
 function clampPosition() {
@@ -107,7 +165,11 @@ watch(
       props.pointerXPx,
     ] as const,
   async ([open]) => {
-    if (!open) return;
+    if (!open) {
+      closeSubmenu();
+      return;
+    }
+    closeSubmenu();
     if (props.placement === "point") {
       posX.value = props.x;
       posY.value = props.y;
@@ -169,13 +231,70 @@ onBeforeUnmount(() => {
     >
       <template v-for="item in items" :key="item.id">
         <div v-if="item.separator" class="appShellMenuDivider" role="separator" />
+        <div
+          v-else-if="hasChildren(item)"
+          class="appShellMenuSubWrap"
+          @mouseenter="openSubmenu(item)"
+          @mouseleave="closeSubmenu"
+        >
+          <button
+            type="button"
+            :class="itemClass(item)"
+            role="menuitem"
+            aria-haspopup="menu"
+            :aria-expanded="openSubId === item.id"
+            :disabled="item.disabled"
+            @click="openSubmenu(item)"
+          >
+            <span
+              v-if="item.iconHtml"
+              class="appShellMenuItemPrefix"
+              aria-hidden="true"
+              v-html="item.iconHtml"
+            />
+            {{ item.label }}
+            <span class="appShellMenuSubChevron" aria-hidden="true">›</span>
+          </button>
+          <div
+            v-show="openSubId === item.id && !item.disabled"
+            :ref="(el) => setFlyoutEl(item.id, el)"
+            class="appShellMenuFlyout"
+            :class="
+              flyoutSide === 'left'
+                ? 'appShellMenuFlyout--left'
+                : 'appShellMenuFlyout--right'
+            "
+            role="menu"
+            @click.stop
+          >
+            <div class="appShellMenuFlyoutList">
+              <template v-for="child in item.children" :key="child.id">
+                <div
+                  v-if="child.separator"
+                  class="appShellMenuFlyoutDivider"
+                  role="separator"
+                />
+                <button
+                  v-else
+                  type="button"
+                  class="appShellMenuFlyoutItem"
+                  role="menuitem"
+                  :disabled="child.disabled"
+                  @click="onLeafClick(child)"
+                >
+                  <span class="appShellMenuFlyoutLabel">{{ child.label }}</span>
+                </button>
+              </template>
+            </div>
+          </div>
+        </div>
         <button
           v-else
           type="button"
           :class="itemClass(item)"
           role="menuitem"
           :disabled="item.disabled"
-          @click="onMenuItemClick(item)"
+          @click="onLeafClick(item)"
         >
           <span
             v-if="item.iconHtml"

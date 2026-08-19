@@ -4,11 +4,24 @@ import { icons } from "../icons";
 import type { SelectionToolbarButtons } from "../constants/selectionToolbar";
 import type { ReaderLineationType } from "../stores/fileMetaStore";
 
-const props = defineProps<{
-  modelValue: SelectionToolbarButtons;
-  /** 设置预览是否展示「高亮词」（与阅读器自定义高亮开关一致） */
-  showHighlight: boolean;
-}>();
+const props = withDefaults(
+  defineProps<{
+    modelValue: SelectionToolbarButtons;
+    /** 设置预览是否展示「高亮词」（与阅读器自定义高亮开关一致） */
+    showHighlight: boolean;
+    /**
+     * 是否展示高亮词 / 划线 / 记笔记（找书设置预览为 false）。
+     * 为 false 时忽略 showHighlight。
+     */
+    showAnnotationTools?: boolean;
+    /** 是否展示「问 AI」（找书无 AI 阅读助手时为 false） */
+    showAskAi?: boolean;
+  }>(),
+  {
+    showAnnotationTools: true,
+    showAskAi: true,
+  },
+);
 
 const emit = defineEmits<{
   "update:modelValue": [v: SelectionToolbarButtons];
@@ -55,7 +68,10 @@ function toggleButton(key: keyof SelectionToolbarButtons) {
         <span class="stbActionLabel">复制</span>
       </div>
 
-      <div v-if="showHighlight" class="stbAction stbAction--colorIcon">
+      <div
+        v-if="showAnnotationTools && showHighlight"
+        class="stbAction stbAction--colorIcon"
+      >
         <span
           class="stbActionIcon"
           aria-hidden="true"
@@ -64,78 +80,80 @@ function toggleButton(key: keyof SelectionToolbarButtons) {
         <span class="stbActionLabel">高亮词</span>
       </div>
 
-      <div
-        v-for="item in lineationActions"
-        :key="item.id"
-        class="stbAction"
-      >
-        <span
-          class="stbActionIcon stbLineationIcon"
-          :class="{
-            'stbLineationIcon--marker': item.type === 'marker',
-            'stbLineationIcon--wavy': item.type === 'wavy',
-            'stbLineationIcon--straight': item.type === 'straight',
-          }"
-          aria-hidden="true"
+      <template v-if="showAnnotationTools">
+        <div
+          v-for="item in lineationActions"
+          :key="item.id"
+          class="stbAction"
         >
           <span
-            v-if="item.type === 'marker'"
-            class="stbLineationMarkerBg"
-          />
-          <span
-            v-if="item.type === 'wavy' || item.type === 'straight'"
-            class="stbLineationGlyphWrap"
+            class="stbActionIcon stbLineationIcon"
+            :class="{
+              'stbLineationIcon--marker': item.type === 'marker',
+              'stbLineationIcon--wavy': item.type === 'wavy',
+              'stbLineationIcon--straight': item.type === 'straight',
+            }"
+            aria-hidden="true"
           >
-            <span class="stbLineationGlyph" v-html="icons.fontFamily" />
-            <svg
-              v-if="item.type === 'wavy'"
-              class="stbLineationDeco stbLineationDeco--wavy"
-              viewBox="0 0 18 4"
-              width="18"
-              height="3"
-              aria-hidden="true"
+            <span
+              v-if="item.type === 'marker'"
+              class="stbLineationMarkerBg"
+            />
+            <span
+              v-if="item.type === 'wavy' || item.type === 'straight'"
+              class="stbLineationGlyphWrap"
             >
-              <path
-                d="M0 3Q1.8 1 3.6 3T7.2 3T10.8 3T14.4 3T18 3"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.2"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-              />
-            </svg>
-            <svg
-              v-if="item.type === 'straight'"
-              class="stbLineationDeco stbLineationDeco--straight"
-              viewBox="0 0 16 2"
-              width="16"
-              height="2"
-              aria-hidden="true"
-            >
-              <line
-                x1="0"
-                y1="1"
-                x2="16"
-                y2="1"
-                stroke="currentColor"
-                stroke-width="1.2"
-                stroke-linecap="round"
-              />
-            </svg>
+              <span class="stbLineationGlyph" v-html="icons.fontFamily" />
+              <svg
+                v-if="item.type === 'wavy'"
+                class="stbLineationDeco stbLineationDeco--wavy"
+                viewBox="0 0 18 4"
+                width="18"
+                height="3"
+                aria-hidden="true"
+              >
+                <path
+                  d="M0 3Q1.8 1 3.6 3T7.2 3T10.8 3T14.4 3T18 3"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </svg>
+              <svg
+                v-if="item.type === 'straight'"
+                class="stbLineationDeco stbLineationDeco--straight"
+                viewBox="0 0 16 2"
+                width="16"
+                height="2"
+                aria-hidden="true"
+              >
+                <line
+                  x1="0"
+                  y1="1"
+                  x2="16"
+                  y2="1"
+                  stroke="currentColor"
+                  stroke-width="1.2"
+                  stroke-linecap="round"
+                />
+              </svg>
+            </span>
+            <span
+              v-else
+              class="stbLineationGlyph"
+              v-html="icons.fontFamily"
+            />
           </span>
-          <span
-            v-else
-            class="stbLineationGlyph"
-            v-html="icons.fontFamily"
-          />
-        </span>
-        <span class="stbActionLabel">{{ item.label }}</span>
-      </div>
+          <span class="stbActionLabel">{{ item.label }}</span>
+        </div>
 
-      <div class="stbAction">
-        <span class="stbActionIcon" aria-hidden="true" v-html="icons.note" />
-        <span class="stbActionLabel">记笔记</span>
-      </div>
+        <div class="stbAction">
+          <span class="stbActionIcon" aria-hidden="true" v-html="icons.note" />
+          <span class="stbActionLabel">记笔记</span>
+        </div>
+      </template>
 
       <div
         class="stbAction stbAction--checkable"
@@ -180,6 +198,30 @@ function toggleButton(key: keyof SelectionToolbarButtons) {
       </div>
 
       <div
+        class="stbAction stbAction--checkable"
+        role="checkbox"
+        :aria-checked="modelValue.translate"
+        tabindex="0"
+        @click="toggleButton('translate')"
+        @keydown.space.prevent="toggleButton('translate')"
+        @keydown.enter.prevent="toggleButton('translate')"
+      >
+        <AppCheckbox
+          class="stbCheck"
+          passive
+          :model-value="modelValue.translate"
+          aria-label="工具条显示翻译"
+        />
+        <span
+          class="stbActionIcon"
+          aria-hidden="true"
+          v-html="icons.translate"
+        />
+        <span class="stbActionLabel">翻译</span>
+      </div>
+
+      <div
+        v-if="showAskAi"
         class="stbAction stbAction--checkable"
         role="checkbox"
         :aria-checked="modelValue.askAi"

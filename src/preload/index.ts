@@ -67,6 +67,12 @@ import type {
 } from "@shared/voiceReadSpeakerIpc";
 import { SECRET_SLOT_VOICE_READ_PROFILE_KEYS } from "@shared/secretSlots";
 import { SECRET_SLOT_WEBDAV_PASSWORD } from "@shared/secretSlots";
+import { SECRET_SLOT_TRANSLATION_PROVIDER_KEYS } from "@shared/secretSlots";
+import {
+  TRANSLATION_IPC,
+  type TranslationRequest,
+  type TranslationResponse,
+} from "@shared/translationTypes";
 import { BOOK_SOURCE_IPC } from "@shared/bookSource/ipc";
 import type { BookSourceIpcApi } from "@shared/bookSource/ipc";
 import { WEBDAV_IPC } from "@shared/webDavIpc";
@@ -309,6 +315,21 @@ const api = {
         "secrets:setWebDavPassword",
         password,
       ) as Promise<{ ok: true }>,
+    getTranslationProviderKeys: () =>
+      ipcRenderer
+        .invoke("secrets:get", SECRET_SLOT_TRANSLATION_PROVIDER_KEYS)
+        .then(
+          (res: { ok: boolean; value?: string }) =>
+            ({
+              ok: true as const,
+              keys: res.ok ? (res.value ?? "") : "",
+            }) as const,
+        ),
+    setTranslationSecrets: (payload: { providerKeys: string }) =>
+      ipcRenderer.invoke(
+        "secrets:setTranslationSecrets",
+        payload,
+      ) as Promise<{ ok: true } | { ok: false; error: string }>,
   },
   webdav: {
     test: (auth: WebDavAuthPayload) =>
@@ -1403,6 +1424,11 @@ const api = {
       DICTIONARY_IPC.remove,
       payload,
     ) as Promise<DictionaryRemoveResponse>,
+  translate: (payload: TranslationRequest) =>
+    ipcRenderer.invoke(
+      TRANSLATION_IPC.translate,
+      payload,
+    ) as Promise<TranslationResponse>,
 };
 
 contextBridge.exposeInMainWorld("colorTxt", api);

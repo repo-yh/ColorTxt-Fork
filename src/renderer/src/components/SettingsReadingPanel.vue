@@ -78,8 +78,19 @@ const props = withDefaults(
     monacoCustomHighlight: boolean;
     /** 主界面显示「查找」应用目标；找书窗口无全文搜索侧栏，不展示该项 */
     showFindTargetOption?: boolean;
+    /**
+     * 工具条预览是否展示高亮词 / 划线 / 记笔记。
+     * 找书窗口为 false。
+     */
+    showAnnotationTools?: boolean;
+    /** 工具条预览是否展示「问 AI」；找书窗口为 false */
+    showAskAi?: boolean;
   }>(),
-  { showFindTargetOption: true },
+  {
+    showFindTargetOption: true,
+    showAnnotationTools: true,
+    showAskAi: true,
+  },
 );
 
 defineEmits<{
@@ -108,6 +119,8 @@ defineEmits<{
   "update:draftTimedScrollIntervalMs": [v: number];
   "update:draftSelectionToolbarButtons": [v: SelectionToolbarButtons];
   openDictionaryManage: [];
+  openWebSearchManage: [];
+  openTranslateManage: [];
 }>();
 
 const draftMaxLineHeightMultiple = computed(() =>
@@ -541,6 +554,8 @@ const selectListsEmpty: CustomSelectItem[] = [];
       <SettingsSelectionToolbarPreview
         :model-value="draftSelectionToolbarButtons"
         :show-highlight="monacoCustomHighlight"
+        :show-annotation-tools="showAnnotationTools"
+        :show-ask-ai="showAskAi"
         @update:model-value="
           $emit('update:draftSelectionToolbarButtons', $event)
         "
@@ -577,6 +592,44 @@ const selectListsEmpty: CustomSelectItem[] = [];
             @click="$emit('openDictionaryManage')"
           >
             词典管理
+          </button>
+        </div>
+      </div>
+      <div class="settingsRow">
+        <div class="settingsRowMain">
+          <span class="settingsLabel">
+            「<span class="settingsIcon" v-html="icons.translate" />
+            翻译」
+          </span>
+          <button
+            class="btn"
+            type="button"
+            size="large"
+            @click="$emit('openTranslateManage')"
+          >
+            翻译设置
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div class="settingsBody settingsBody--webSearch">
+      <h3 class="settingsSectionTitle settingsSectionTitle--webSearch">
+        右键菜单
+      </h3>
+      <div class="settingsRow">
+        <div class="settingsRowMain">
+          <span class="settingsLabel">
+            「<span class="settingsIcon" v-html="icons.browser" />
+            网络搜索」
+          </span>
+          <button
+            class="btn"
+            type="button"
+            size="large"
+            @click="$emit('openWebSearchManage')"
+          >
+            搜索管理
           </button>
         </div>
       </div>
@@ -694,7 +747,8 @@ const selectListsEmpty: CustomSelectItem[] = [];
 .settingsBody--fullscreen,
 .settingsBody--pomodoro,
 .settingsBody--timedScroll,
-.settingsBody--toolbar {
+.settingsBody--toolbar,
+.settingsBody--webSearch {
   gap: 10px;
 }
 
