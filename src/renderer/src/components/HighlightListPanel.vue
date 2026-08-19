@@ -55,7 +55,7 @@ const props = withDefaults(
 
 const emit = defineEmits<{
   findHighlightTerm: [payload: { query: string; useRegex: boolean; color: string }];
-  findHighlightTermPrev: [payload: { query: string; useRegex: boolean }];
+  findHighlightTermPrev: [payload: { query: string; useRegex: boolean; color: string }];
   removeHighlightTerm: [
     payload: { storedTerms: string[]; scope: "global" | "book" },
   ];
@@ -292,7 +292,7 @@ function onHighlightItemContextMenu(item: HighlightListRow) {
     item.storedWords ?? item.terms.map((t) => ({ text: t, isRegex: false })),
   );
   if (!query) return;
-  emit("findHighlightTermPrev", { query, useRegex });
+  emit("findHighlightTermPrev", { query, useRegex, color: item.color });
 }
 
 function onTermClick(
@@ -320,7 +320,7 @@ function onTermContextMenu(
   const term = item.terms[termIndex]?.trim();
   if (!term) return;
   const useRegex = item.storedWords?.[termIndex]?.isRegex === true;
-  emit("findHighlightTermPrev", { query: term, useRegex });
+  emit("findHighlightTermPrev", { query: term, useRegex, color: item.color });
 }
 
 function onEditCommit(payload: HighlightTermEditCommit) {

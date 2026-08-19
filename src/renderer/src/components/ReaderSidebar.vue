@@ -268,7 +268,7 @@ const emit = defineEmits<{
   openSettings: [];
   refreshChaptersFromReader: [];
   findHighlightTerm: [payload: { query: string; useRegex: boolean; color: string }];
-  findHighlightTermPrev: [payload: { query: string; useRegex: boolean }];
+  findHighlightTermPrev: [payload: { query: string; useRegex: boolean; color: string }];
   colorAllHighlights: [
     payload: { groups: { query: string; useRegex: boolean; color: string }[] },
   ];

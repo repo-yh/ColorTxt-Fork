@@ -2802,56 +2802,38 @@ type FindControllerStartOpts = {
   loop: boolean;
 };
 
-/** 顶栏高亮词：先经书钉回调，再打开查找并填入高亮词，并跳到匹配处 */
-function openFindWithSearchString(raw: string, isRegex?: boolean, direction?: 'prev') {
-  void openFindWithSearchStringAsync(raw, isRegex, direction);
+/** 顶栏高亮词：先经书钉回调，再打开查找并填入高亮词（字面量），并跳到下一处匹配 */
+function openFindWithSearchString(raw: string) {
+  void openFindWithSearchStringAsync(raw);
 }
 
-async function openFindWithSearchStringAsync(raw: string, isRegex?: boolean, direction?: 'prev') {
+async function openFindWithSearchStringAsync(raw: string) {
   if (props.voiceReadBlocksFind) return;
   const e = getFindTargetEditor();
   const term = raw.trim();
   if (!e || !term) return;
 
-  const useRegex = isRegex === true;
+  props.beforeRevealFindWidget?.();
   ensureSearchAnchorCursorInViewport(e);
 
   const findOpt = e.getOption(monaco.editor.EditorOption.find);
   const ctrl = e.getContribution(FIND_CONTROLLER_ID) as {
-    getState?: () => {
-      isRevealed: boolean;
-      searchString: string;
-      isRegex: boolean;
-    };
     start?: (
       opts: FindControllerStartOpts,
       newState?: Record<string, unknown>,
     ) => Promise<void>;
     moveToNextMatch?: () => boolean;
-    moveToPrevMatch?: () => boolean;
   } | null;
 
-  const state = ctrl?.getState?.();
-  // 搜索框已打开且搜索词/正则模式相同：仅导航，不重新填充
-  if (state?.isRevealed && state.searchString === term && state.isRegex === useRegex) {
-    e.focus();
-    if (direction === 'prev') {
-      ctrl?.moveToPrevMatch?.();
-    } else {
-      ctrl?.moveToNextMatch?.();
-    }
-    return;
-  }
-
-  props.beforeRevealFindWidget?.();
-
+  /** 打开查找框：清除并禁用内联搜索装饰器，避免颜色共存冲突（与 Ctrl+F 一致） */
+  inlineSearch.clearInlineSearchDecorations();
   e.focus();
 
   if (!ctrl?.start) {
     e.getAction("actions.find")?.run();
     e.trigger("colortxt", "editor.actions.findWithArgs", {
       searchString: term,
-      isRegex: useRegex,
+      isRegex: false,
       matchWholeWord: false,
       isCaseSensitive: false,
       preserveCase: false,
@@ -2874,17 +2856,13 @@ async function openFindWithSearchStringAsync(raw: string, isRegex?: boolean, dir
     {
       searchString: term,
       isReplaceRevealed: false,
-      isRegex: useRegex,
+      isRegex: false,
       wholeWord: false,
       matchCase: false,
       preserveCase: false,
     },
   );
-  if (direction === 'prev') {
-    ctrl.moveToPrevMatch?.();
-  } else {
-    ctrl.moveToNextMatch?.();
-  }
+  ctrl.moveToNextMatch?.();
 }
 
 function focusEditor() {

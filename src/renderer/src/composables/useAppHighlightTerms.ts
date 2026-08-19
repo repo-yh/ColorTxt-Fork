@@ -664,7 +664,6 @@ export function useAppHighlightTerms(deps: {
     if (deps.isVoiceReadNavigationBlocked.value) return;
     const q = payload.query.trim();
     if (!q) return;
-    deps.ensurePinBeforeRevealFindWidget();
     const found = deps.readerRef.value?.jumpToNextInlineSearchMatch?.(q, {
       caseSensitive: false,
       wholeWord: false,
@@ -678,6 +677,7 @@ export function useAppHighlightTerms(deps: {
   function onFindHighlightTermPrevFromSidebar(payload: {
     query: string;
     useRegex: boolean;
+    color: string;
   }) {
     if (
       !deps.currentFile.value ||
@@ -688,12 +688,15 @@ export function useAppHighlightTerms(deps: {
     if (deps.isVoiceReadNavigationBlocked.value) return;
     const q = payload.query.trim();
     if (!q) return;
-    deps.ensurePinBeforeRevealFindWidget();
-    deps.readerRef.value?.openFindWithSearchString?.(
-      q,
-      payload.useRegex,
-      "prev",
-    );
+    const found = deps.readerRef.value?.jumpToNextInlineSearchMatch?.(q, {
+      caseSensitive: false,
+      wholeWord: false,
+      useRegex: payload.useRegex,
+      smooth: true,
+      direction: "prev",
+      color: payload.color,
+    });
+    hasInlineSearchHighlight.value = found === true;
   }
 
   function onColorAllHighlights(payload: {
