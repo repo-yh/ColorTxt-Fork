@@ -236,6 +236,13 @@ function focusInput() {
           @dragend="onTagDragEnd"
         >
           <span class="hlTagText">{{ term.text }}</span>
+          <span
+            v-if="term.isRegex"
+            class="hlTagRegexBadge"
+            title="正则表达式"
+            aria-label="正则表达式"
+            >.*</span
+          >
           <button
             type="button"
             class="hlTagRemove"
@@ -408,6 +415,22 @@ function focusInput() {
   opacity: 0.88;
   box-shadow: 0 4px 12px color-mix(in srgb, #000 18%, transparent);
   cursor: grabbing;
+}
+
+.hlTagRegexBadge {
+  flex-shrink: 0;
+  align-self: flex-end;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 12px;
+  padding: 0 2px;
+  border-radius: 3px;
+  font-size: 9px;
+  line-height: 1;
+  color: var(--accent, var(--primary));
+  background: color-mix(in srgb, var(--accent, var(--primary)) 14%, transparent);
+  user-select: none;
 }
 
 .hlTagText {
