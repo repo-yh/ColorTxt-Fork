@@ -81,10 +81,10 @@ export type HighlightListTerm = {
 
 ```
 HighlightListPanel 点击词/整组
-  → emit("findHighlightTerm", { query, useRegex })
+  → emit("findHighlightTerm", { query, useRegex, color: item.color })
   → ReaderSidebar 透传 → App.vue → useAppHighlightTerms.onFindHighlightTermFromSidebar
-  → readerRef.jumpToNextInlineSearchMatch(q, { useRegex })
-  → useReaderInlineSearch：findNextMatch 逐条查找（突破 19999 上限）+ 内联搜索染色 + 跳转居中
+  → readerRef.jumpToNextInlineSearchMatch(q, { useRegex, color })
+  → useReaderInlineSearch：findNextMatch 逐条查找（突破 19999 上限）+ 颜色组循环染色（用词色）+ 跳转居中
 ```
 
 要点：
@@ -179,15 +179,16 @@ header「一键染色」按钮（ReaderSidebar）
 
 - `InlineSearchGroup = { query, useRegex, color }`；`inlineSearchGroups: InlineSearchGroup[]`。
 - `setInlineSearchGroups(groups)`：`disabled=false` → 存 groups → `clear + onClearAllDecorations` → `applyInlineSearchDecorations`。
-- `applyInlineSearchDecorations`：`inlineSearchGroups` 非空走 `applyGroupedInlineSearchDecorations`（循环每组 findMatches，`overviewRuler.color` 用组色），否则走原单组逻辑。
-- **交互语义（重要）**：点击单个词（`jumpToNextInlineSearchMatch`）/ 搜索（`setInlineSearchState`）会清空 `inlineSearchGroups` 切回单组染色 —— 即「清除分组染色，重新只染单个词/搜索词」是期望行为。
+- **染色统一为颜色组循环**：`applyInlineSearchDecorations` 只做一个 `for` 循环遍历 `inlineSearchGroups`（单组=循环一次，多组=循环多次，不区分组数），每组 findMatches 后 `overviewRuler.color` 用组色。
+- **单组查询也塞进 groups**：`setInlineSearchState`（搜索）设 `inlineSearchGroups = [单元素]`；`jumpToNextInlineSearchMatch`（点击单个词）设 `inlineSearchGroups = [{ query, useRegex, color }]`，color 由 `onFindHighlightTermFromSidebar` 从 `item.color` 传入。
+- **当前匹配高亮只看 `inlineSearchCurrentMatch != null`**，与组数无关；无 currentMatch 时所有匹配普通色（不再 fallback 第一个为当前）。
 
 ### 清除机制（保证可被其它动作清除）
 
-- 分组染色走**同一套 decorations collection**，`setInlineSearchGroups` 循环前先清旧染色。
+- 染色走**同一套 decorations collection**，设置前先清旧染色。
 - Ctrl+F 打开 → `clearInlineSearchDecorations`（disabled + clear）清除。
-- 搜索清空 → `clearInlineSearchState` 清除（含 `inlineSearchGroups = []`）。
-- 点击单个词/搜索 → 清空 groups，切回单组。
+- 搜索清空 → `clearInlineSearchState` 清除（`inlineSearchGroups = []`）。
+- 点击单个词/搜索 → 覆盖 `inlineSearchGroups` 为新单组（替换旧染色）。
 
 ---
 
@@ -236,7 +237,7 @@ highlightWordsByIndexGlobal.value = ...
 4. **匹配数**：依赖 `loading` 状态重新统计，编辑模式用 epoch 计数器触发。
 5. **isRegex 传递**：新增/编辑/收藏/取消收藏全链路保留 `isRegex`，收藏取消收藏要跨 global/book 两作用域查找。
 6. **组合/拆分**：全部走 `HighlightWord[][]`，拖放合并/拆分不丢 isRegex。
-7. **一键染色**：header 直出按钮 → 按 colorIndex 分组 → `setInlineSearchGroups` 多组染色；点击词/搜索清空分组切回单组。
+7. **一键染色**：header 直出按钮 → 按 colorIndex 分组 → `setInlineSearchGroups` 多组染色；染色统一为颜色组循环（单组=一组元素），点击单个词用词色 `color` 染色。
 
 ---
 
