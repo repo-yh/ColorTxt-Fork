@@ -90,7 +90,9 @@ const emit = defineEmits<{
   importBookHighlightsJson: [];
   exportFavoriteHighlightsJson: [];
   importFavoriteHighlightsJson: [];
-  colorAllHighlights: [payload: { query: string; useRegex: boolean }];
+  colorAllHighlights: [
+    payload: { groups: { query: string; useRegex: boolean; color: string }[] },
+  ];
 }>();
 
 const moreBtnRef = ref<HTMLButtonElement | null>(null);
@@ -669,24 +671,39 @@ function onItemDrop(item: HighlightListRow, ev: DragEvent) {
 }
 
 function onColorAllHighlights() {
-  const seen = new Set<string>();
-  const allWords: HighlightWord[] = [];
+  const groups = new Map<
+    number,
+    { color: string; seen: Set<string>; words: HighlightWord[] }
+  >();
   for (const item of props.highlightTerms) {
     const words =
       item.storedWords ??
       item.terms.map((t) => ({ text: t, isRegex: false }));
+    let g = groups.get(item.colorIndex);
+    if (!g) {
+      g = { color: item.color, seen: new Set(), words: [] };
+      groups.set(item.colorIndex, g);
+    }
     for (const w of words) {
       const text = w.text.trim();
       if (!text) continue;
       const key = `${text}\0${w.isRegex === true ? "1" : "0"}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      allWords.push({ text, isRegex: w.isRegex === true });
+      if (g.seen.has(key)) continue;
+      g.seen.add(key);
+      g.words.push({ text, isRegex: w.isRegex === true });
     }
   }
-  const { query, useRegex } = buildHighlightFindQuery(allWords);
-  if (!query) return;
-  emit("colorAllHighlights", { query, useRegex });
+  const payload = [...groups.values()]
+    .map((g) => {
+      const { query, useRegex } = buildHighlightFindQuery(g.words);
+      return query ? { query, useRegex, color: g.color } : null;
+    })
+    .filter(
+      (x): x is { query: string; useRegex: boolean; color: string } =>
+        x != null,
+    );
+  if (payload.length === 0) return;
+  emit("colorAllHighlights", { groups: payload });
 }
 
 </script>

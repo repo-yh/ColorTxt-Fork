@@ -695,8 +695,7 @@ export function useAppHighlightTerms(deps: {
   }
 
   function onColorAllHighlights(payload: {
-    query: string;
-    useRegex: boolean;
+    groups: { query: string; useRegex: boolean; color: string }[];
   }) {
     if (
       !deps.currentFile.value ||
@@ -705,13 +704,9 @@ export function useAppHighlightTerms(deps: {
     )
       return;
     if (deps.isVoiceReadNavigationBlocked.value) return;
-    const q = payload.query.trim();
-    if (!q) return;
-    deps.readerRef.value?.setInlineSearchState?.(q, null, {
-      caseSensitive: false,
-      wholeWord: false,
-      useRegex: payload.useRegex,
-    });
+    const groups = payload.groups.filter((g) => g.query.trim());
+    if (groups.length === 0) return;
+    deps.readerRef.value?.setInlineSearchGroups?.(groups);
   }
 
   return {

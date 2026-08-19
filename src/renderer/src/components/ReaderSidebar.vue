@@ -269,7 +269,9 @@ const emit = defineEmits<{
   refreshChaptersFromReader: [];
   findHighlightTerm: [payload: { query: string; useRegex: boolean }];
   findHighlightTermPrev: [payload: { query: string; useRegex: boolean }];
-  colorAllHighlights: [payload: { query: string; useRegex: boolean }];
+  colorAllHighlights: [
+    payload: { groups: { query: string; useRegex: boolean; color: string }[] },
+  ];
   removeHighlightTerm: [
     payload: { storedTerms: string[]; scope: "global" | "book" },
   ];

@@ -4,6 +4,9 @@ import { ensureSearchAnchorCursorInViewport } from "../reader/ensureSearchAnchor
 
 type MatchShape = { lineNumber: number; startColumn: number; endColumn: number };
 
+/** 一键染色分组：每组同色高亮词合并成一个查询，用该组色值给滚动条指示条染色 */
+type InlineSearchGroup = { query: string; useRegex: boolean; color: string };
+
 /**
  * 与 Monaco FindModel.MATCHES_LIMIT 对齐。
  * `findMatches` 默认仅 999 条：高亮词组全文匹配常超限，导致后文无装饰、且「下一处」回绕到文首。
@@ -27,6 +30,8 @@ export function useReaderInlineSearch(deps: {
   let inlineSearchCurrentMatch: MatchShape | null = null;
   /** Ctrl+F 打开时关闭内联搜索装饰器，需要时才恢复 */
   let inlineSearchDecorationsDisabled = false;
+  /** 一键染色多组状态；非空时 applyInlineSearchDecorations 走分组染色 */
+  let inlineSearchGroups: InlineSearchGroup[] = [];
 
   function isWordChar(ch: string): boolean {
     return /[0-9A-Za-z_]/.test(ch);
@@ -121,11 +126,49 @@ export function useReaderInlineSearch(deps: {
     return null;
   }
 
+  /** 一键染色：循环每个颜色组，用该组色值给滚动条指示条染色 */
+  function applyGroupedInlineSearchDecorations() {
+    const m = deps.model.value;
+    const collection = deps.inlineSearchDecorationsCollection.value;
+    if (!m || !collection) return;
+    const decorations: monaco.editor.IModelDeltaDecoration[] = [];
+    for (const group of inlineSearchGroups) {
+      const query = group.query.trim();
+      if (!query) continue;
+      const matches = m.findMatches(
+        query,
+        false,
+        group.useRegex,
+        false,
+        null,
+        false,
+        INLINE_SEARCH_MATCHES_LIMIT,
+      );
+      for (const it of matches) {
+        decorations.push({
+          range: it.range,
+          options: {
+            inlineClassName: "readerInlineSearchMatch",
+            overviewRuler: {
+              color: group.color,
+              position: monaco.editor.OverviewRulerLane.Center,
+            },
+          },
+        });
+      }
+    }
+    collection.set(decorations);
+  }
+
   function applyInlineSearchDecorations() {
     const m = deps.model.value;
     const collection = deps.inlineSearchDecorationsCollection.value;
     if (!m || !collection) return;
     if (inlineSearchDecorationsDisabled) return;
+    if (inlineSearchGroups.length > 0) {
+      applyGroupedInlineSearchDecorations();
+      return;
+    }
     const query = inlineSearchQuery.trim();
     if (!query) {
       collection.clear();
@@ -187,6 +230,7 @@ export function useReaderInlineSearch(deps: {
   ) {
     /** 用户主动设置染色状态时恢复内联搜索装饰器 */
     inlineSearchDecorationsDisabled = false;
+    inlineSearchGroups = [];
     inlineSearchQuery = query.trim();
     inlineSearchCaseSensitive = options?.caseSensitive === true;
     inlineSearchWholeWord = options?.wholeWord === true;
@@ -214,12 +258,22 @@ export function useReaderInlineSearch(deps: {
     applyInlineSearchDecorations();
   }
 
+  /** 一键染色：按颜色分组染色；循环前先清理旧染色，走同一装饰器集合可被其它动作清除 */
+  function setInlineSearchGroups(groups: InlineSearchGroup[]) {
+    inlineSearchDecorationsDisabled = false;
+    inlineSearchGroups = groups;
+    deps.inlineSearchDecorationsCollection.value?.clear();
+    deps.onClearAllDecorations?.();
+    applyInlineSearchDecorations();
+  }
+
   function clearInlineSearchState() {
     inlineSearchQuery = "";
     inlineSearchCaseSensitive = false;
     inlineSearchWholeWord = false;
     inlineSearchUseRegex = false;
     inlineSearchCurrentMatch = null;
+    inlineSearchGroups = [];
     deps.inlineSearchDecorationsCollection.value?.clear();
   }
 
@@ -288,6 +342,7 @@ export function useReaderInlineSearch(deps: {
     }
     /** 启用内联搜索装饰器（用户主动点击高亮词） */
     inlineSearchDecorationsDisabled = false;
+    inlineSearchGroups = [];
     /** 视口外光标先挪到视口首行，便于从当前阅读位置继续查找 */
     ensureSearchAnchorCursorInViewport(e);
 
@@ -336,6 +391,7 @@ export function useReaderInlineSearch(deps: {
   return {
     applyInlineSearchDecorations,
     setInlineSearchState,
+    setInlineSearchGroups,
     clearInlineSearchState,
     clearInlineSearchDecorations,
     jumpToSearchMatchCentered,

@@ -3510,6 +3510,7 @@ defineExpose({
   captureViewportRestoreAnchor,
   restoreViewportToRestoreAnchor,
   setInlineSearchState: inlineSearch.setInlineSearchState,
+  setInlineSearchGroups: inlineSearch.setInlineSearchGroups,
   clearInlineSearchState: inlineSearch.clearInlineSearchState,
   emitProbeLine,
   getProbeLine,
