@@ -15,6 +15,7 @@ import {
 import { buildLookupCandidates } from "./lookupCandidates";
 import { StarDictReader } from "./stardictReader";
 import { DictReader } from "./dictReader";
+import { TabfileReader, resolveTabfileCss } from "./tabfileReader";
 import { SlobReader } from "./slobReader";
 import { BglReader } from "./bglReader";
 import { lookupMdict, clearMdictCache } from "./mdictReader";
@@ -79,6 +80,7 @@ function bundleFile(
 
 const stardictCache = new Map<string, StarDictReader>();
 const dictCache = new Map<string, DictReader>();
+const tabfileCache = new Map<string, TabfileReader>();
 const slobCache = new Map<string, SlobReader>();
 const bglCache = new Map<string, BglReader>();
 
@@ -120,6 +122,20 @@ async function getDict(
   return reader;
 }
 
+async function getTabfile(
+  dict: ImportedDictionary,
+  root: string,
+): Promise<TabfileReader> {
+  const cached = tabfileCache.get(dict.id);
+  if (cached) return cached;
+  const reader = new TabfileReader();
+  const file = bundleFile(dict, dict.files.tabfile, root);
+  if (!file) throw new Error("Tabfile file missing");
+  await reader.load(file);
+  tabfileCache.set(dict.id, reader);
+  return reader;
+}
+
 async function getSlob(
   dict: ImportedDictionary,
   root: string,
@@ -152,11 +168,13 @@ export function dropDictionaryCaches(id?: string): void {
   if (id) {
     stardictCache.delete(id);
     dictCache.delete(id);
+    tabfileCache.delete(id);
     slobCache.delete(id);
     bglCache.delete(id);
   } else {
     stardictCache.clear();
     dictCache.clear();
+    tabfileCache.clear();
     slobCache.clear();
     bglCache.clear();
   }
@@ -197,6 +215,26 @@ async function lookupLocal(
       if (!entry) continue;
       const content = await reader.readText(entry);
       if (!content.trim()) continue;
+      return {
+        providerId: dict.id,
+        title,
+        content,
+        contentFormat: contentFormatOf(content),
+        sourceKind: "local",
+      };
+    }
+    return null;
+  }
+
+  if (dict.kind === "tabfile") {
+    const reader = await getTabfile(dict, root);
+    const cssPaths = (dict.files.css ?? [])
+      .map((rel) => bundleFile(dict, rel, root))
+      .filter((p): p is string => !!p);
+    for (const c of candidates) {
+      const raw = reader.lookup(c);
+      if (!raw?.trim()) continue;
+      const content = await resolveTabfileCss(raw, cssPaths);
       return {
         providerId: dict.id,
         title,

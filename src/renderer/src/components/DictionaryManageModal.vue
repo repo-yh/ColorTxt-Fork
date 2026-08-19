@@ -109,6 +109,8 @@ function localKindLabel(d: ImportedDictionary): string {
       return "Slob";
     case "bgl":
       return "BGL";
+    case "tabfile":
+      return "Tabfile";
     default:
       return d.kind;
   }
@@ -236,6 +238,10 @@ async function onImportLocal() {
           "slob",
           "bgl",
           "css",
+          "txt",
+          "tab",
+          "tsv",
+          "dic",
         ],
       },
       { name: "所有文件", extensions: ["*"] },

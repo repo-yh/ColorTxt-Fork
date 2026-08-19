@@ -15,6 +15,7 @@ import {
 } from "./stardictReader";
 import { readMdxHeaderEncrypted } from "./mdictReader";
 import { probeSlobCompression } from "./slobReader";
+import { parseTabfileMeta } from "./tabfileReader";
 import { readFile } from "node:fs/promises";
 
 /** Decode common XML/HTML entities in MDX Title. */
@@ -82,12 +83,20 @@ export type BglGroup = {
   bgl: ClassifiedSourceFile;
 };
 
+export type TabfileGroup = {
+  kind: "tabfile";
+  stem: string;
+  file: ClassifiedSourceFile;
+  css: ClassifiedSourceFile[];
+};
+
 export type DictionaryBundle =
   | StarDictGroup
   | DictGroup
   | MDictGroup
   | SlobGroup
-  | BglGroup;
+  | BglGroup
+  | TabfileGroup;
 
 export function classifyFile(absPath: string): ClassifiedSourceFile {
   const name = path.basename(absPath);
@@ -140,6 +149,10 @@ export function groupBundlesByStem(filePaths: string[]): {
     const mdd = group.filter((f) => f.ext === "mdd");
     const slob = group.find((f) => f.ext === "slob");
     const bgl = group.find((f) => f.ext === "bgl");
+    const tabfile = group.find(
+      (f) =>
+        f.ext === "txt" || f.ext === "tab" || f.ext === "tsv" || f.ext === "dic",
+    );
 
     if (ifo && idx && dict) {
       bundles.push({ kind: "stardict", stem, ifo, idx, dict, syn });
@@ -151,6 +164,8 @@ export function groupBundlesByStem(filePaths: string[]): {
       bundles.push({ kind: "slob", stem, slob });
     } else if (bgl) {
       bundles.push({ kind: "bgl", stem, bgl });
+    } else if (tabfile) {
+      bundles.push({ kind: "tabfile", stem, file: tabfile, css: [] });
     } else {
       orphans.push(...group);
     }
@@ -173,11 +188,13 @@ export function groupBundlesByStem(filePaths: string[]): {
     orphans.push(...still);
   }
 
-  const mdictBundles = bundles.filter(
-    (b): b is MDictGroup => b.kind === "mdict",
+  // 全局分配：所有 css 分配给所有 tabfile 和 mdict（对齐 mdict 原有行为，不按 stem 匹配）
+  const cssConsumers = bundles.filter(
+    (b): b is MDictGroup | TabfileGroup =>
+      b.kind === "mdict" || b.kind === "tabfile",
   );
-  if (mdictBundles.length > 0) {
-    for (const b of mdictBundles) b.css = cssFiles;
+  if (cssConsumers.length > 0) {
+    for (const b of cssConsumers) b.css = [...cssFiles];
   } else {
     orphans.push(...cssFiles);
   }
@@ -357,6 +374,27 @@ async function importOne(
       addedAt,
       unsupported: unsupported || undefined,
       unsupportedReason,
+    };
+  }
+
+  if (bundle.kind === "tabfile") {
+    const files: ImportedDictionaryFiles = {
+      tabfile: await copyInto(destDir, bundle.file),
+      css: [],
+    };
+    for (const c of bundle.css) {
+      files.css!.push(await copyInto(destDir, c));
+    }
+    const text = await readFile(path.join(destDir, files.tabfile!), "utf8");
+    const meta = parseTabfileMeta(text);
+    const name = meta.name?.trim() || bundle.stem;
+    return {
+      id,
+      kind: "tabfile",
+      name,
+      bundleDir,
+      files,
+      addedAt,
     };
   }
 

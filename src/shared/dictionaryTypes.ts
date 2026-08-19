@@ -21,7 +21,8 @@ export type ImportedDictionaryKind =
   | "mdict"
   | "dict"
   | "slob"
-  | "bgl";
+  | "bgl"
+  | "tabfile";
 
 export type ImportedDictionaryFiles = {
   ifo?: string;
@@ -36,6 +37,7 @@ export type ImportedDictionaryFiles = {
   index?: string;
   slob?: string;
   bgl?: string;
+  tabfile?: string;
 };
 
 export type ImportedDictionary = {
