@@ -75,7 +75,7 @@ export type HighlightListTerm = {
 
 ---
 
-## 3. 正反查找（上一个/下一个）— 两条不同路径，勿混
+## 3. 正反查找（上一个/下一个）— 均走内联搜索
 
 ### 3.1 查找下一个（左键点击单个词/词组）
 
@@ -96,15 +96,16 @@ HighlightListPanel 点击词/整组
 
 ```
 HighlightListPanel 右键
-  → emit("findHighlightTermPrev", { query, useRegex })
-  → App.vue → useAppHighlightTerms.onFindHighlightTermPrevFromSidebar
-  → readerRef.openFindWithSearchString(q, useRegex, "prev")
-  → Monaco 原生查找框 moveToPrevMatch
+  → emit("findHighlightTermPrev", { query, useRegex, color: item.color })
+  → ReaderSidebar 透传 → App.vue → useAppHighlightTerms.onFindHighlightTermPrevFromSidebar
+  → readerRef.jumpToNextInlineSearchMatch(q, { useRegex, color, direction: "prev" })
+  → useReaderInlineSearch：findPreviousMatch 逐条查找 + 颜色组循环染色（用词色）+ 跳转居中
 ```
 
 要点：
-- 「上一个」走 **Monaco 原生查找框**，不是内联搜索。历史原因：内联搜索的 prev 方向一直不稳定，最终复用 `openFindWithSearchString`。
-- 重写时若内联 prev 已修好，可考虑统一，但当前行为是「next 内联、prev 原生查找框」。
+- 「上一个」也走**内联搜索**（`direction: "prev"`），用 `findPreviousMatch`（无 `limitResultCount` 参数）逐条往前找，自带回绕到文末。
+- 与「下一个」对称，统一走颜色组循环染色，用词色。
+- 历史：曾因内联 prev 方向不稳定而改用 Monaco 原生查找框（`openFindWithSearchString(..., "prev")`），统一化重构后 prev 逻辑完善，已改回内联。
 
 ---
 
@@ -233,7 +234,7 @@ highlightWordsByIndexGlobal.value = ...
 
 1. **先对齐数据结构**：确认 `HighlightWord = {text, isRegex}` 与 `HighlightWordsByIndex = Record<string, HighlightWord[][]>` 是否还在；若上游改回 `string[]`/`string[][]` 或 `regex:` 前缀，先补 normalize 兼容层。
 2. **再对齐查询**：`buildHighlightFindQuery` 的字面量转义 + isRegex 语义（单词 isRegex、多词恒正则）。
-3. **正反查找**：next 走 `jumpToNextInlineSearchMatch`（findNextMatch 突破上限），prev 走 `openFindWithSearchString(..., "prev")`。不要试图让 prev 也走内联（历史已验证不稳定）。
+3. **正反查找**：next/prev 都走 `jumpToNextInlineSearchMatch`（`findNextMatch`/`findPreviousMatch` 突破上限，`direction` 区分），统一颜色组循环染色用词色。
 4. **匹配数**：依赖 `loading` 状态重新统计，编辑模式用 epoch 计数器触发。
 5. **isRegex 传递**：新增/编辑/收藏/取消收藏全链路保留 `isRegex`，收藏取消收藏要跨 global/book 两作用域查找。
 6. **组合/拆分**：全部走 `HighlightWord[][]`，拖放合并/拆分不丢 isRegex。
