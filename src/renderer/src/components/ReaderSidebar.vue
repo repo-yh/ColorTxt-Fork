@@ -292,7 +292,11 @@ const emit = defineEmits<{
   ];
   mergeHighlightGroups: [
     payload: {
-      source: { storedTerms: string[]; scope: "global" | "book" };
+      source: {
+        storedTerms: string[];
+        scope: "global" | "book";
+        moveTerm?: string;
+      };
       target: {
         storedTerms: string[];
         scope: "global" | "book";

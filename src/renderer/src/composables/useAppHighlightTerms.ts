@@ -372,7 +372,12 @@ export function useAppHighlightTerms(deps: {
    * `source.storedTerms` 可为整组或单个词。
    */
   function onMergeHighlightGroups(payload: {
-    source: { storedTerms: string[]; scope: "global" | "book" };
+    source: {
+      storedTerms: string[];
+      scope: "global" | "book";
+      /** 从多词组拖出单词语：指定被移动的词；缺省则整组合并 */
+      moveTerm?: string;
+    };
     target: {
       storedTerms: string[];
       scope: "global" | "book";
@@ -386,6 +391,70 @@ export function useAppHighlightTerms(deps: {
       )
     )
       return;
+
+    const moveTerm = payload.source.moveTerm?.trim() || "";
+
+    // 单词语从（多词）组拖到另一组：移动该词，源组保留其余词
+    if (moveTerm) {
+      if (payload.source.scope === payload.target.scope) {
+        const scopeMap = mapForScope(payload.source.scope);
+        const sloc = scopeMap
+          ? findGroupLocation(scopeMap, payload.source.storedTerms)
+          : null;
+        const tloc = scopeMap
+          ? findGroupLocation(scopeMap, payload.target.storedTerms)
+          : null;
+        if (!sloc || !tloc) return;
+        const sourceGroup = scopeMap![sloc.key]![sloc.index]!;
+        const targetGroup = scopeMap![tloc.key]![tloc.index]!;
+        const moving = sourceGroup.find((w) => w.text === moveTerm);
+        if (!moving) return;
+        if (targetGroup.some((w) => w.text === moveTerm)) return;
+        let next = removeHighlightTermFromMap(scopeMap, moveTerm);
+        const merged = normalizeHighlightGroup([...targetGroup, moving]);
+        if (!merged) return;
+        next = upsertHighlightGroupInMap(
+          next,
+          payload.target.colorIndex,
+          merged,
+          { replaceStoredTerms: payload.target.storedTerms },
+        );
+        persistScopeMap(payload.target.scope, next);
+        return;
+      }
+
+      // 跨 scope：源/目标分属不同 map
+      const sourceMap = mapForScope(payload.source.scope);
+      const targetMap = mapForScope(payload.target.scope);
+      const sloc = sourceMap
+        ? findGroupLocation(sourceMap, payload.source.storedTerms)
+        : null;
+      const tloc = targetMap
+        ? findGroupLocation(targetMap, payload.target.storedTerms)
+        : null;
+      if (!sloc || !tloc) return;
+      const sourceGroup = sourceMap![sloc.key]![sloc.index]!;
+      const targetGroup = targetMap![tloc.key]![tloc.index]!;
+      const moving = sourceGroup.find((w) => w.text === moveTerm);
+      if (!moving) return;
+      if (targetGroup.some((w) => w.text === moveTerm)) return;
+      persistScopeMap(
+        payload.source.scope,
+        removeHighlightTermFromMap(sourceMap, moveTerm),
+      );
+      const merged = normalizeHighlightGroup([...targetGroup, moving]);
+      if (!merged) return;
+      persistScopeMap(
+        payload.target.scope,
+        upsertHighlightGroupInMap(
+          targetMap,
+          payload.target.colorIndex,
+          merged,
+          { replaceStoredTerms: payload.target.storedTerms },
+        ),
+      );
+      return;
+    }
 
     if (payload.source.scope === payload.target.scope) {
       const scopeMap = mapForScope(payload.target.scope);

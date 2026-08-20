@@ -68,7 +68,12 @@ const emit = defineEmits<{
   commitHighlightGroup: [payload: HighlightTermEditCommit];
   mergeHighlightGroups: [
     payload: {
-      source: { storedTerms: string[]; scope: "global" | "book" };
+      source: {
+        storedTerms: string[];
+        scope: "global" | "book";
+        /** 从多词组拖出单词语：指定被移动的词；缺省则整组合并 */
+        moveTerm?: string;
+      };
       target: {
         storedTerms: string[];
         scope: "global" | "book";
@@ -658,8 +663,13 @@ function onItemDrop(item: HighlightListRow, ev: DragEvent) {
   }
   emit("mergeHighlightGroups", {
     source: {
-      storedTerms: payload.storedTerms,
+      // 单词语拖出时，源组应为完整词组（用于定位源组），被移动的词走 moveTerm
+      storedTerms:
+        payload.kind === "term" && activeDrag.value
+          ? activeDrag.value.groupStoredTerms
+          : payload.storedTerms,
       scope: payload.scope,
+      moveTerm: payload.kind === "term" ? payload.storedTerms[0] : undefined,
     },
     target: {
       storedTerms: [...item.storedTerms],
