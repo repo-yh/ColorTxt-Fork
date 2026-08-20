@@ -156,6 +156,13 @@ HighlightListPanel 右键
 
 要点：这些函数全部操作 `HighlightWordsByIndex`（`HighlightWord[][]`），**保留 isRegex**。拖放合并/拆分时不要用 `string[][]`，否则 isRegex 丢失。
 
+### 6.1 单词移动（从多词组拖出单词到另一组）
+
+- 拖多词组中的**单个词**放到另一组时，不整组合并，只移动该词，源组保留其余词。
+- 事件链路：`HighlightListPanel.onItemDrop` 判断 `payload.kind === "term"` → `source.storedTerms` 传**完整源组**（仅用于 `findGroupLocation` 定位），被移动的词走新增的 `source.moveTerm` → `ReaderSidebar` 透传 → `App.vue` → `useAppHighlightTerms.onMergeHighlightGroups`。
+- `onMergeHighlightGroups` 有 `moveTerm` 时走单词移动分支：`removeHighlightTermFromMap` 从源组移除该词 + `upsertHighlightGroupInMap` 把词合入目标组。同 scope 一次落盘；跨 scope（全局↔本书）源/目标各落盘一次。目标组已存在同名词则忽略，词的 `isRegex` 保留。
+- 无 `moveTerm` 时保持原整组合并行为不变。
+
 ---
 
 ## 7. 一键染色（按颜色分组多色滚动条）— 本次新增
