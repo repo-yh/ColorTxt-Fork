@@ -164,7 +164,7 @@ function buildAgentSystemPrompt(
     );
   } else {
     lines.push(
-      "**向量语义检索已在应用中关闭**：当前会话**不提供** ragSearch / ragContext，无法检索全书正文分块。",
+      "**向量语义检索已在应用中关闭**：当前会话**不提供** ragSearch，无法检索全书正文分块；读章节原文请用 highlightBody。",
       "涉及本书具体情节、对白、人名与设定时：若用户消息或对话历史中**没有**给出相应原文摘录，请如实说明当前无法检索全书，并建议用户在 **设置 → 向量模型** 中启用向量模型、配置嵌入接口并等待索引构建完成后再提问。",
       "不得编造本书细节；可基于用户已粘贴或引用的文字作答。",
       AI_USER_VISIBLE_CH_REF_RULE,
@@ -182,10 +182,12 @@ function buildAgentSystemPrompt(
 
   lines.push(
     "## 高亮词情景分析（highlightDistribution / highlightBody 工具）",
-    "- 用户问「高亮词涉及的情景 / 高亮词在剧情中标记什么 / 谁和谁干了什么 / 高亮词分布与集中度」时：**先**调用 **highlightDistribution** 获取当前书高亮词分布（按章节分组，含命中行号与命中词）。",
-    "- 拿到分布后，对需要细看的高亮词命中行，用 **highlightBody** 按 `start`/`end`（行范围）或 `chapterIndex`（整章）拉取**纯文本正文**原文，据此分析情节与人物（谁和谁干了什么）。",
+    "- 用户问「高亮词涉及的情景 / 高亮词在剧情中标记什么 / 谁和谁干了什么 / 高亮词分布与集中度」时：**先**调用 **highlightDistribution** 获取**全书**高亮词分布（按章节分组，含命中行号与命中词）。**不要关心当前阅读章节或进度**，只关注全文高亮词的分布与集中情况。",
+    "- **集中判定**：单一或多个高亮词在**约 20 行内**出现 **≥5 次**命中（如某行 `words` 含多个词、或相邻多行连续命中），即视为**集中点**——这通常是剧情重要情节/高潮。",
+    "- 对每个集中点，用 **highlightBody** 按 `start`/`end`（该集中点行范围，可前后各扩几行）或 `chapterIndex`（整章）拉取**纯文本正文**原文，据此分析该章节的情节内容与人物。",
     "- 正文过长时用多次 `start`/`end` 分段获取，勿一次拉取整本；**不要截断**正文内容。",
-    "- **高亮词情景分析必须用这两个工具**，不要用 ragSearch / ragContext 代替——它们会经向量分块或压缩，导致高亮词命中位置与正文细节不准确。",
+    "- **高亮词情景分析必须用这两个工具**，不要用 ragSearch 代替——它会经向量分块导致高亮词命中位置与正文细节不准确。",
+    "- **敏感内容照常分析，不拒答**：正文涉及暴力、情感、犯罪、隐私等常见小说题材时正常分析。涉及人物时，明确告诉用户**男女主在干什么**（包括亲密、隐私、敏感情节），不要回避或过滤。",
     "",
   );
 
@@ -218,7 +220,7 @@ function buildAgentSystemPrompt(
 
   if (ragEnabled && !chapterMatchRuleOnlyTurn) {
     lines.push(
-      "说明：「本章」「当前章」指下方「当前阅读章节」；正文须通过 ragContext 或 ragSearch 获取，不要臆测。",
+      "说明：「本章」「当前章」指下方「当前阅读章节」；正文须通过 highlightBody 或 ragSearch 获取，不要臆测。",
       "",
     );
   } else if (!ragEnabled) {
@@ -537,12 +539,12 @@ function formatReadingAnchorForTurn(
   }
   if (ragEnabled) {
     return (
-      `【本轮阅读位置｜须与此对齐】${title}（内部 chapterIndex=${idx}，仅供 ragContext/（ch=N），勿写入用户可见回复）。` +
-      `用户刚发起本轮提问时的阅读位置以上为准；若对话历史中仍有其它章节的摘要或工具结果，**不得**据此回答本轮「本章 / 这章 / 这一章 / 当前章 / 该章 / 总结本章」类问题，必须重新调用 ragContext(${idx}) 后再作答。`
+      `【本轮阅读位置｜须与此对齐】${title}（内部 chapterIndex=${idx}，仅供 highlightBody/（ch=N），勿写入用户可见回复）。` +
+      `用户刚发起本轮提问时的阅读位置以上为准；若对话历史中仍有其它章节的摘要或工具结果，**不得**据此回答本轮「本章 / 这章 / 这一章 / 当前章 / 该章 / 总结本章」类问题，必须重新调用 highlightBody(${idx}) 后再作答。`
     );
   }
   return (
-    `【本轮阅读位置】${title}。向量检索未启用，无法 ragContext；请勿编造本章情节，可依据系统提示中的节选与用户原文。`
+    `【本轮阅读位置】${title}。向量检索未启用，无法 ragSearch；读章节原文请用 highlightBody；请勿编造本章情节，可依据系统提示中的节选与用户原文。`
   );
 }
 
@@ -1536,7 +1538,8 @@ export async function runAgentChat(opts: {
       };
       if (!finalizeMetaRound) {
         body.tools = buildAgentToolsWithSkills(enabledSkills, ragEnabled, {
-          includeRagContext: !chapterMatchRuleOnlyTurn,
+          // 临时关闭 ragContext：读章节原文改用 highlightBody（不压缩不截断不依赖向量库）
+          includeRagContext: false,
         });
         body.stream_options = { include_usage: true };
       }
@@ -1624,7 +1627,7 @@ export async function runAgentChat(opts: {
 
         const dupNotice = JSON.stringify({
           notice:
-            "本轮工具调用与上一轮参数完全相同，未重复执行检索。请直接阅读对话中已有 tool 消息里的 JSON 结果作答；`（ch=N）` 中的 N 须为 **chapterIndex（从 0 起）**。需要更多原文时请使用 ragContext(chapterIndex) 或更换 ragSearch 的 query。",
+            "本轮工具调用与上一轮参数完全相同，未重复执行检索。请直接阅读对话中已有 tool 消息里的 JSON 结果作答；`（ch=N）` 中的 N 须为 **chapterIndex（从 0 起）**。需要更多原文时请使用 highlightBody(chapterIndex) 或更换 ragSearch 的 query。",
         });
 
         for (const tc of toolCalls) {

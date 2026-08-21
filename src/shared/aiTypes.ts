@@ -663,7 +663,7 @@ export const AI_AGENT_TOOLS: Array<{
     function: {
       name: "highlightDistribution",
       description:
-        "获取当前书的高亮词分布（按章节分组，含命中行号与命中词）。用于分析高亮词在文本中的分布与集中度、定位高亮词涉及的情景。返回 chapters[]，每章含 lines[]（命中行：line 行号、text 行原文、words 命中词列表）。正文原文请另用 highlightBody 按 start/end 或 chapterIndex 获取。",
+        "获取**全书**高亮词分布（按章节分组，含命中行号与命中词），不关心当前阅读章节。用于分析高亮词在全文的分布与集中度、定位集中点（约 20 行内 ≥5 次命中）。返回 chapters[]，每章含 lines[]（命中行：line 行号、text 行原文、words 命中词列表）。正文原文请另用 highlightBody 按 start/end 或 chapterIndex 获取。",
       parameters: {
         type: "object",
         properties: {
