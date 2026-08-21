@@ -661,6 +661,56 @@ export const AI_AGENT_TOOLS: Array<{
   {
     type: "function",
     function: {
+      name: "highlightDistribution",
+      description:
+        "获取当前书的高亮词分布（按章节分组，含命中行号与命中词）。用于分析高亮词在文本中的分布与集中度、定位高亮词涉及的情景。返回 chapters[]，每章含 lines[]（命中行：line 行号、text 行原文、words 命中词列表）。正文原文请另用 highlightBody 按 start/end 或 chapterIndex 获取。",
+      parameters: {
+        type: "object",
+        properties: {
+          reasoning: {
+            type: "string",
+            description: "简要说明为何调用本工具",
+          },
+        },
+        required: ["reasoning"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "highlightBody",
+      description:
+        "获取当前书指定范围的纯文本正文（不压缩、不截断）。定位方式二选一：chapterIndex（整章，从 0 起）或 start/end（行范围，0-based，end 含）。正文过长时请用多次 start/end 分段获取，勿一次拉取整本。用于分析高亮词涉及的情景（谁和谁干了什么）。",
+      parameters: {
+        type: "object",
+        properties: {
+          reasoning: {
+            type: "string",
+            description: "简要说明为何调用本工具",
+          },
+          chapterIndex: {
+            type: "number",
+            description: "章节索引（从 0 起），拉取整章；与 start/end 二选一",
+          },
+          start: {
+            type: "number",
+            description: "起始行（0-based，含），与 end 搭配",
+          },
+          end: {
+            type: "number",
+            description: "结束行（0-based，含），与 start 搭配",
+          },
+        },
+        required: ["reasoning"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "extractCharacterAppearance",
       description:
         "从本书向量检索某角色的外貌相关描写，并生成结构化摘录与 Stable Diffusion 用中文 prompt 草案（与侧栏「角色」面板同源；侧栏提交 SD 时会自动译为英文）。用户询问角色长什么样、衣着、画像参考时使用；结果 JSON 含 excerpts、appearance_zh、sd_prompt_zh、negative_zh、confidence_note，以及 gender、age_text、identity_zh、bio_zh、relations_zh 等归纳字段。须向量索引已启用。防剧透模式下仅含当前阅读章节及之前的片段。",

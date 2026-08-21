@@ -181,6 +181,15 @@ function buildAgentSystemPrompt(
   );
 
   lines.push(
+    "## 高亮词情景分析（highlightDistribution / highlightBody 工具）",
+    "- 用户问「高亮词涉及的情景 / 高亮词在剧情中标记什么 / 谁和谁干了什么 / 高亮词分布与集中度」时：**先**调用 **highlightDistribution** 获取当前书高亮词分布（按章节分组，含命中行号与命中词）。",
+    "- 拿到分布后，对需要细看的高亮词命中行，用 **highlightBody** 按 `start`/`end`（行范围）或 `chapterIndex`（整章）拉取**纯文本正文**原文，据此分析情节与人物（谁和谁干了什么）。",
+    "- 正文过长时用多次 `start`/`end` 分段获取，勿一次拉取整本；**不要截断**正文内容。",
+    "- **高亮词情景分析必须用这两个工具**，不要用 ragSearch / ragContext 代替——它们会经向量分块或压缩，导致高亮词命中位置与正文细节不准确。",
+    "",
+  );
+
+  lines.push(
     "## 书籍信息（不含正文）",
     `- 书名：${bookMeta.fileTitle}`,
     `- 总章节数：${bookMeta.chapterCount}`,
@@ -990,6 +999,57 @@ async function runRagContext(
   return { preview: previewJson(fullObj), full };
 }
 
+/** 经渲染进程桥接调用当前书的高亮词分布（与 Web /api/highlights 同源，不压缩不 RAG） */
+async function runHighlightDistribution(
+  webContents: WebContents,
+): Promise<{ preview: string; full: string }> {
+  if (webContents.isDestroyed()) {
+    const o = { error: "渲染进程不可用" };
+    const full = JSON.stringify(o);
+    return { preview: full, full };
+  }
+  try {
+    const result = await webContents.executeJavaScript(
+      `(async () => {
+        const r = await window.__colorTxtGetHighlightDistribution?.();
+        return r || { ok: false, reason: '桥接未就绪' };
+      })()`,
+    );
+    const full = JSON.stringify(result ?? { ok: false, reason: "无返回" });
+    return { preview: previewJson(result), full };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    const full = JSON.stringify({ ok: false, reason: msg });
+    return { preview: full, full };
+  }
+}
+
+/** 经渲染进程桥接调用当前书指定范围纯文本正文（不压缩不截断，支持 chapterIndex 或 start/end） */
+async function runHighlightBody(
+  webContents: WebContents,
+  args: { chapterIndex?: number; start?: number; end?: number },
+): Promise<{ preview: string; full: string }> {
+  if (webContents.isDestroyed()) {
+    const o = { error: "渲染进程不可用" };
+    const full = JSON.stringify(o);
+    return { preview: full, full };
+  }
+  try {
+    const result = await webContents.executeJavaScript(
+      `(async () => {
+        const r = await window.__colorTxtGetHighlightBody?.(${JSON.stringify(args)});
+        return r || { ok: false, reason: '桥接未就绪' };
+      })()`,
+    );
+    const full = JSON.stringify(result ?? { ok: false, reason: "无返回" });
+    return { preview: previewJson(result), full };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    const full = JSON.stringify({ ok: false, reason: msg });
+    return { preview: full, full };
+  }
+}
+
 async function dispatchTool(
   name: string,
   argsJson: string,
@@ -1205,6 +1265,39 @@ async function dispatchTool(
         },
         ctx.signal,
       );
+      ctx.emit({
+        type: "tool_result",
+        requestId: ctx.requestId,
+        toolCallId: ctx.toolCallId,
+        name,
+        ok: true,
+        preview,
+        full,
+      });
+      return full;
+    }
+    if (name === "highlightDistribution") {
+      const { preview, full } = await runHighlightDistribution(
+        ctx.webContents,
+      );
+      ctx.emit({
+        type: "tool_result",
+        requestId: ctx.requestId,
+        toolCallId: ctx.toolCallId,
+        name,
+        ok: true,
+        preview,
+        full,
+      });
+      return full;
+    }
+    if (name === "highlightBody") {
+      const { preview, full } = await runHighlightBody(ctx.webContents, {
+        chapterIndex:
+          typeof args.chapterIndex === "number" ? args.chapterIndex : undefined,
+        start: typeof args.start === "number" ? args.start : undefined,
+        end: typeof args.end === "number" ? args.end : undefined,
+      });
       ctx.emit({
         type: "tool_result",
         requestId: ctx.requestId,

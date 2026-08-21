@@ -3561,6 +3561,52 @@ async function buildHighlightLines(
   };
 }
 
+/**
+ * 获取当前书指定范围的纯文本正文（不压缩、不截断）。
+ * 定位方式二选一：chapterIndex（整章）或 start/end（行范围，0-based）。
+ */
+async function getHighlightBody(
+  fullText: string,
+  filePath: string,
+  highlightWords: HighlightWordsByIndex | undefined,
+  opts: { chapterIndex?: number; start?: number; end?: number },
+): Promise<
+  | { ok: false; reason: string }
+  | {
+      ok: true;
+      body: string;
+      start: number;
+      end: number;
+      total: number;
+    }
+> {
+  const lines = fullText.split("\n");
+  const total = lines.length;
+  if (total === 0) return { ok: false as const, reason: "文件无内容" as const };
+
+  let start: number;
+  let end: number;
+  if (typeof opts.chapterIndex === "number" && opts.chapterIndex >= 0) {
+    const { chapterList } = buildChapterList(fullText, filePath, lines);
+    if (chapterList.length === 0) {
+      return {
+        ok: false as const,
+        reason: "全书未检测到章节，无法用章节索引定位；请改用 start/end",
+      };
+    }
+    const ci = Math.min(opts.chapterIndex, chapterList.length - 1);
+    start = chapterList[ci].line;
+    end =
+      ci + 1 < chapterList.length ? chapterList[ci + 1].line - 1 : total - 1;
+  } else {
+    start = Math.max(0, Math.floor(opts.start ?? 0));
+    end = Math.max(start, Math.min(Math.floor(opts.end ?? total - 1), total - 1));
+  }
+
+  const body = lines.slice(start, end + 1).join("\n");
+  return { ok: true as const, body, start, end, total };
+}
+
 defineExpose({
   appendText,
   setFullText,
@@ -3697,6 +3743,23 @@ defineExpose({
     highlightWords: HighlightWordsByIndex | undefined,
   ) => {
     return buildHighlightLines(fullText, filePath, highlightWords);
+  },
+
+  getHighlightDistribution: async (
+    fullText: string,
+    filePath: string,
+    highlightWords: HighlightWordsByIndex | undefined,
+  ) => {
+    return buildHighlightLines(fullText, filePath, highlightWords);
+  },
+
+  getHighlightBody: async (
+    fullText: string,
+    filePath: string,
+    highlightWords: HighlightWordsByIndex | undefined,
+    opts: { chapterIndex?: number; start?: number; end?: number },
+  ) => {
+    return getHighlightBody(fullText, filePath, highlightWords, opts);
   },
 
   generateColoredHtml: async () => {

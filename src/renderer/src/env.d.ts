@@ -68,6 +68,39 @@ declare global {
       path: string;
       active: boolean;
     }>;
+    /** 高亮词分布（当前书）：供内置 AI 分析高亮词情景 */
+    __colorTxtGetHighlightDistribution?: () => Promise<
+      | { ok: false; reason: string }
+      | {
+          ok: true;
+          file: string;
+          total: number;
+          chapters: Array<{
+            title: string;
+            line: number;
+            lines: Array<{
+              line: number;
+              text: string;
+              words: string[];
+            }>;
+          }>;
+        }
+    >;
+    /** 高亮词正文（当前书）：按 chapterIndex 或 start/end 返回纯文本正文 */
+    __colorTxtGetHighlightBody?: (opts: {
+      chapterIndex?: number;
+      start?: number;
+      end?: number;
+    }) => Promise<
+      | { ok: false; reason: string }
+      | {
+          ok: true;
+          body: string;
+          start: number;
+          end: number;
+          total: number;
+        }
+    >;
   }
 }
 

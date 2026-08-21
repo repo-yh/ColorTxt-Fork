@@ -607,6 +607,58 @@ onMounted(() => {
       };
     });
   };
+  // 高亮词分布（当前书）：与 Web /api/highlights 同源，供内置 AI 分析高亮词情景
+  window.__colorTxtGetHighlightDistribution = async () => {
+    const fp = currentFile.value;
+    if (!fp) return { ok: false as const, reason: "未打开文件" as const };
+    const text = readerRef.value?.getAllText?.() ?? "";
+    if (!text) return { ok: false as const, reason: "文件无内容" as const };
+    let hl = highlightWordsByIndexGlobal.value;
+    const meta = findFileMetaRecord(fileMetaRecords.value, fp);
+    if (meta?.highlightWordsByIndex) {
+      const merged: Record<string, any[]> = { ...hl };
+      for (const [idx, words] of Object.entries(
+        meta.highlightWordsByIndex,
+      )) {
+        merged[idx] = [...(merged[idx] ?? []), ...words];
+      }
+      hl = merged;
+    }
+    return (
+      readerRef.value?.getHighlightDistribution?.(text, fp, hl) ?? {
+        ok: false as const,
+        reason: "阅读器未就绪" as const,
+      }
+    );
+  };
+  // 高亮词正文（当前书）：按 chapterIndex 或 start/end 返回纯文本正文
+  window.__colorTxtGetHighlightBody = async (opts: {
+    chapterIndex?: number;
+    start?: number;
+    end?: number;
+  }) => {
+    const fp = currentFile.value;
+    if (!fp) return { ok: false as const, reason: "未打开文件" as const };
+    const text = readerRef.value?.getAllText?.() ?? "";
+    if (!text) return { ok: false as const, reason: "文件无内容" as const };
+    let hl = highlightWordsByIndexGlobal.value;
+    const meta = findFileMetaRecord(fileMetaRecords.value, fp);
+    if (meta?.highlightWordsByIndex) {
+      const merged: Record<string, any[]> = { ...hl };
+      for (const [idx, words] of Object.entries(
+        meta.highlightWordsByIndex,
+      )) {
+        merged[idx] = [...(merged[idx] ?? []), ...words];
+      }
+      hl = merged;
+    }
+    return (
+      readerRef.value?.getHighlightBody?.(text, fp, hl, opts) ?? {
+        ok: false as const,
+        reason: "阅读器未就绪" as const,
+      }
+    );
+  };
   // 主窗口推送找书/设置共用的 HTTP 代理（词典等网络请求依赖主进程默认代理）
   syncPersistedFindBookProxyToMain();
 });
