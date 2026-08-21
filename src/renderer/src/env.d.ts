@@ -29,12 +29,38 @@ declare global {
       | {
           ok: true;
           html: string;
+          /** 该行范围的纯文本块（行以 \n 连接，无任何 HTML 标签） */
+          text: string;
           theme: string;
           file: string;
           chapters: { title: string; line: number }[];
           total: number;
           start: number;
           end: number;
+        }
+    >;
+    __colorTxtGenerateHighlightLinesForText?: (
+      text: string,
+      filePath: string,
+    ) => Promise<
+      | { ok: false; reason: string }
+      | {
+          ok: true;
+          file: string;
+          total: number;
+          chapters: Array<{
+            title: string;
+            /** 章节起始行（0-based，空标题组为 0） */
+            line: number;
+            lines: Array<{
+              /** 行号（0-based，与 content 的 L<行号> 一致） */
+              line: number;
+              /** 行原文 */
+              text: string;
+              /** 该行命中的高亮词（正则词为实际匹配片段），去重 */
+              words: string[];
+            }>;
+          }>;
         }
     >;
     __colorTxtGetFileList?: () => Array<{

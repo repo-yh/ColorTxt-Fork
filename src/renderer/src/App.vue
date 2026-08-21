@@ -575,6 +575,28 @@ onMounted(() => {
       }
     );
   };
+  window.__colorTxtGenerateHighlightLinesForText = async (
+    text: string,
+    filePath: string,
+  ) => {
+    let hl = highlightWordsByIndexGlobal.value;
+    const meta = findFileMetaRecord(fileMetaRecords.value, filePath);
+    if (meta?.highlightWordsByIndex) {
+      const merged: Record<string, any[]> = { ...hl };
+      for (const [idx, words] of Object.entries(
+        meta.highlightWordsByIndex,
+      )) {
+        merged[idx] = [...(merged[idx] ?? []), ...words];
+      }
+      hl = merged;
+    }
+    return (
+      readerRef.value?.generateHighlightLinesForText?.(text, filePath, hl) ?? {
+        ok: false as const,
+        reason: "阅读器未就绪" as const,
+      }
+    );
+  };
   window.__colorTxtGetFileList = () => {
     return txtFiles.value.map((f) => {
       const meta = findFileMetaRecord(fileMetaRecords.value, f.path);
@@ -709,11 +731,18 @@ watch(webDisplayEnabled, async (enabled) => {
         { kind: "danger" },
       );
     } else {
+      if (currentFile.value) {
+        void window.colorTxt.webDisplay.setCurrentFile(currentFile.value);
+      }
       appToast("Web 展示服务已启动: http://localhost:8888", { kind: "success" });
     }
   } else {
     await window.colorTxt.webDisplay.stop();
   }
+});
+
+watch(currentFile, (fp) => {
+  if (fp) void window.colorTxt.webDisplay.setCurrentFile(fp);
 });
 
 /** 小于该字数的章节不纳入章节列表与导航 */

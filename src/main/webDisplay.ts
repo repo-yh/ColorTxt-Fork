@@ -22,6 +22,8 @@ export type ContentResult =
   | {
       ok: true;
       html: string;
+      /** 分段请求返回：该行范围的纯文本块（行以 \n 连接，无 HTML 标签）；全文请求为 undefined */
+      text?: string;
       theme: string;
       file: string;
       chapters: { title: string; line: number }[];
@@ -35,6 +37,33 @@ export type FileListItem = {
   path: string;
   active: boolean;
 };
+
+export type HighlightLineItem = {
+  /** 行号（0-based，与 content 的 L<行号> 一致） */
+  line: number;
+  /** 行原文 */
+  text: string;
+  /** 该行命中的高亮词（正则词为实际匹配片段），去重 */
+  words: string[];
+};
+
+export type HighlightChapterGroup = {
+  /** 章节标题；空标题 = 第一章之前（或全书无章节）的正文 */
+  title: string;
+  /** 章节起始行（0-based，空标题组为 0） */
+  line: number;
+  /** 该章节内含高亮词的行（行号 + 原文 + 命中词列表） */
+  lines: HighlightLineItem[];
+};
+
+export type HighlightsResult =
+  | { ok: false; reason: string }
+  | {
+      ok: true;
+      file: string;
+      total: number;
+      chapters: HighlightChapterGroup[];
+    };
 
 // ---- Cache ----
 
@@ -103,6 +132,7 @@ export function startWebDisplay(
   getContentForFile: (filePath: string, refresh?: boolean) => Promise<ContentResult>,
   getContentForSegment: (filePath: string, start: number, end: number, refresh?: boolean) => Promise<ContentResult>,
   getFileList: () => Promise<FileListItem[]>,
+  getHighlightsForFile: (filePath: string) => Promise<HighlightsResult>,
 ): boolean {
   if (server) return true;
 
@@ -183,24 +213,40 @@ export function startWebDisplay(
       return;
     }
 
-    if (url.pathname === "/api/status") {
+    if (url.pathname === "/api/highlights") {
+      const fileParam = url.searchParams.get("file");
+
       try {
-        const result = await getCurrentContent();
+        let result: HighlightsResult;
+        if (fileParam) {
+          result = await getHighlightsForFile(fileParam);
+        } else {
+          const fp = getCurrentFilePath();
+          if (!fp) {
+            result = { ok: false, reason: "未打开文件" };
+          } else {
+            result = await getHighlightsForFile(fp);
+          }
+        }
         res.writeHead(200, {
           "Content-Type": "application/json; charset=utf-8",
         });
-        res.end(
-          JSON.stringify({
-            ok: result.ok,
-            file: result.ok ? result.file : undefined,
-          }),
-        );
+        res.end(JSON.stringify(result));
       } catch {
-        res.writeHead(200, {
+        res.writeHead(500, {
           "Content-Type": "application/json; charset=utf-8",
         });
-        res.end(JSON.stringify({ ok: false }));
+        res.end(JSON.stringify({ ok: false, reason: "服务内部错误" }));
       }
+      return;
+    }
+
+    if (url.pathname === "/api/status") {
+      const fp = getCurrentFilePath();
+      res.writeHead(200, {
+        "Content-Type": "application/json; charset=utf-8",
+      });
+      res.end(JSON.stringify({ ok: fp != null, file: fp ?? undefined }));
       return;
     }
 
