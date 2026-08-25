@@ -263,3 +263,85 @@ highlightWordsByIndexGlobal.value = ...
 | `src/renderer/src/components/ReaderMain.vue` | Monaco 编辑器 + defineExpose（setInlineSearchGroups 等） |
 | `src/renderer/src/App.vue` | 事件绑定 + 全局词状态 + onFavorite/onUnfavorite |
 | `src/renderer/src/monaco/txtrHighlightMonarch.ts` | Monarch 前景色染色（高亮词实时着色） |
+
+---
+
+## 11. AI 技能（内置 AI 工具）
+
+> 目的：记录 `main` 分支上**内置 AI 对话助手**新增的工具与技能，供未来版本合并偏离后按文档恢复。
+> 两个技能：**高亮词情景分析**（`highlightDistribution` / `highlightBody`）与 **章节名补全**（`getChapterTitles` / `applyChapterTitles`）。
+> 详细计划见 `.qwen/specs/ai-highlight-context-tool.md` 与 `.qwen/specs/ai-chapter-title-completion.md`。
+
+### 11.1 高亮词情景分析（highlightDistribution / highlightBody）
+
+**用途**：AI 根据高亮词分布获取正文/章节全文，分析高亮词涉及的情景（谁和谁干了什么）。**不走向量库、不压缩、不截断**——直接读渲染进程当前书上下文（`currentFile` + Monaco model 全文），与 Web `/api/highlights` 同源。
+
+**两个工具 schema**（`src/shared/aiTypes.ts` `AI_AGENT_TOOLS`）：
+
+| 工具 | 作用 | 参数 |
+|------|------|------|
+| `highlightDistribution` | 当前书高亮词分布（按章节分组，含命中行号与命中词） | `reasoning` |
+| `highlightBody` | 当前书指定范围纯文本正文（不压缩不截断） | `reasoning` + 二选一：`chapterIndex`（整章）或 `start`/`end`（行范围，0-based，end 含） |
+
+**调用链**：
+
+```
+用户问「高亮词涉及的情景 / 谁和谁干了什么」
+  → 模型调用 highlightDistribution 获取全书高亮词分布（不关心当前阅读章节）
+  → 对集中点（约 20 行内 ≥5 次命中）用 highlightBody 按 start/end 或 chapterIndex 拉纯文本正文
+  → 主进程 agentChat.ts dispatchTool → runHighlightDistribution / runHighlightBody
+  → webContents.executeJavaScript 调渲染进程桥接 __colorTxtGetHighlightDistribution / __colorTxtGetHighlightBody
+  → App.vue 桥接用 currentFile + getAllText() 取全文 + 合并全局/文件级高亮词
+  → ReaderMain.vue getHighlightDistribution（复用 buildHighlightLines）/ getHighlightBody（纯文本切片）
+```
+
+**关键点**：
+- **不依赖向量索引**：正文过长时用多次 `start`/`end` 分段获取，勿一次拉取整本；**不要截断**正文。
+- **禁止用 ragSearch / ragContext 代替**：它们会向量分块或压缩，导致高亮词命中位置与正文细节不准确。
+- **敏感内容照常分析不拒答**：涉及人物时明确告诉用户男女主在干什么（含亲密/隐私/敏感情节）。
+- 系统提示新增「高亮词情景分析」小节引导模型（`agentChat.ts` `buildAgentSystemPrompt`）。
+
+**涉及文件**：`aiTypes.ts`（schema）、`agentChat.ts`（run 函数 + dispatchTool + 系统提示）、`App.vue`（桥接）、`ReaderMain.vue`（getHighlightDistribution / getHighlightBody）、`env.d.ts`（桥接类型）。
+
+### 11.2 章节名补全（getChapterTitles / applyChapterTitles + 章节名补全技能）
+
+**用途**：AI 逐章读取章节内容，总结章节名，只编辑标题行，仅补全缺失名（只有章节号没有名字的标题），保留原标题前缀，直接写回磁盘。
+
+**两个工具 schema**（`src/shared/aiTypes.ts` `AI_AGENT_TOOLS`）：
+
+| 工具 | 作用 | 参数 |
+|------|------|------|
+| `getChapterTitles` | 当前书章节列表（含 chapterIndex、title、lineNumber、字数 charCount） | `reasoning` |
+| `applyChapterTitles` | 为指定章节替换标题行（写回磁盘） | `reasoning` + `items: [{chapterIndex, title}]`，title 为**完整新标题**（含章节号前缀） |
+
+**技能**：`BUILTIN_AI_SKILLS` 新增「章节名补全」（`CHAPTER_TITLE_COMPLETION_SKILL_ID = "chapter-title-completion"`，`src/shared/aiSkills.ts`），默认启用。引导文案在技能 `prompt` 中（**不硬编码在系统提示**），用户启用该技能时 AI 通过 `skill_chapter-title-completion` 工具获得。
+
+**调用链**：
+
+```
+用户输入「给所有章节补全章节名」
+  → 模型调用 getChapterTitles 获取章节列表（含 charCount）并判断哪些缺名
+  → 对缺名章用 highlightBody(chapterIndex) 读原文（不截断）→ 总结章节名（保留前缀拼完整新标题）
+  → 调用 applyChapterTitles([{chapterIndex, title}...]) 写回
+  → 主进程 agentChat.ts dispatchTool → runGetChapterTitles / runApplyChapterTitles
+  → webContents.executeJavaScript 调渲染进程桥接 __colorTxtGetChapterTitles / __colorTxtApplyChapterTitles
+  → App.vue 桥接：getChapterTitles 读内存 chapters；applyChapterTitles 定位物理行替换整行 → 写盘刷新
+```
+
+**写回实现（App.vue `__colorTxtApplyChapterTitles`）**：
+1. 用内存 `chapters[chapterIndex].lineNumber`（展示行号）→ `stream.getDisplayLineToPhysicalLine()` 映射物理行（map 为空时物理行 = 展示行号）。
+2. **直接替换整行**：`lines[physicalLine - 1] = title`（AI 传的完整新标题，含前缀）。
+3. 批量替换后一次性重建全文，复用 `onApplyPartialPhysicalEdit` 链路：`writeTextFile` → `commitPhysicalLinesFromPlainText` → `applyReaderDisplayFromPhysicalLines` → `syncChaptersAfterViewportSettled`。
+4. **不使用正则**：章节识别、缺名判断、前缀保留全由 AI 基于 `getChapterTitles` 返回的内存 `chapters` 数据完成；渲染进程只定位物理行并直接替换。
+
+**关键点**：
+- **正文获取只用 highlightBody**：不压缩不截断，支持 chapterIndex 整章；**禁止使用 ragContext**（会截断/压缩正文）。
+- **分批处理避免大上下文**：缺名章中 `charCount > 10000` 的超长章节**每章单独一批**（一章读完、写回，再处理下一章），不与其他章合批；其余普通章**每 5 章一批**循环，避免一次拉取超大正文导致上下文过大。
+- **章节引用标记**：`highlightBody` / `getChapterTitles` 描述与技能 prompt 均补充 `（ch=N）` 章节跳转标记引导（N = chapterIndex，从 0 起），使 AI 回答中可点击跳转正文对应章节。
+- **向量检索关闭时工具仍开放**：`buildAgentToolsWithSkills` 只排除 RAG 依赖工具（`ragSearch` / `ragContext` / `extractCharacterAppearance`），`highlightBody` / `getChapterTitles` / `applyChapterTitles` 等非 RAG 工具始终开放。
+- **runSkillInvokeTool 特殊指令**：`agentTools.ts` 为章节名补全技能加特殊指令（用 highlightBody、禁止 ragSearch/ragContext、分批处理）。
+
+**涉及文件**：`aiTypes.ts`（schema + 描述）、`aiAgentSkillToolNames.ts`（技能 ID）、`aiSkills.ts`（技能定义）、`agentChat.ts`（run 函数 + dispatchTool）、`agentTools.ts`（buildAgentToolsWithSkills + runSkillInvokeTool）、`App.vue`（桥接 + 写回）、`env.d.ts`（桥接类型）。
+
+
+
