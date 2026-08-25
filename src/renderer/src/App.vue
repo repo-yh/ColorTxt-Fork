@@ -659,6 +659,131 @@ onMounted(() => {
       }
     );
   };
+  // 章节列表（当前书）：供内置 AI 补全章节名
+  window.__colorTxtGetChapterTitles = async () => {
+    const fp = currentFile.value;
+    if (!fp) return { ok: false as const, reason: "未打开文件" as const };
+    const list = chapters.value.map((c, i) => ({
+      chapterIndex: i,
+      title: c.title,
+      lineNumber: c.lineNumber,
+    }));
+    return { ok: true as const, chapters: list };
+  };
+  // 补全章节名（当前书）：保留原标题前缀，批量替换标题行并写回磁盘
+  window.__colorTxtApplyChapterTitles = async (payload: {
+    items?: Array<{ chapterIndex: number; title: string }>;
+  }) => {
+    const fp = currentFile.value;
+    if (!fp) return { ok: false as const, reason: "未打开文件" as const };
+    const p = physicalReaderPath.value;
+    if (!p || !window.colorTxt?.writeTextFile) {
+      return { ok: false as const, reason: "文件路径不可用" as const };
+    }
+    if (readerEditMode.value) {
+      return {
+        ok: false as const,
+        reason: "请退出编辑模式后再补全章节名" as const,
+      };
+    }
+    if (!canEnterReaderEditMode.value) {
+      return {
+        ok: false as const,
+        reason: "请等待当前文件加载完成后再补全章节名" as const,
+      };
+    }
+    const items = Array.isArray(payload?.items) ? payload.items : [];
+    if (items.length === 0) {
+      return { ok: false as const, reason: "没有要补全的章节" as const };
+    }
+    const map = stream.getDisplayLineToPhysicalLine();
+    const lines = stream.getPhysicalFilePlainText().split("\n");
+    const applied: Array<{
+      chapterIndex: number;
+      oldTitle: string;
+      newTitle: string;
+    }> = [];
+    const skipped: Array<{ chapterIndex: number; reason: string }> = [];
+    for (const item of items) {
+      const ci = Math.floor(item.chapterIndex);
+      const ch = chapters.value[ci];
+      if (!ch) {
+        skipped.push({ chapterIndex: ci, reason: "章节索引无效" });
+        continue;
+      }
+      const title = (item.title ?? "").trim();
+      if (!title) {
+        skipped.push({ chapterIndex: ci, reason: "章节名为空" });
+        continue;
+      }
+      const displayLine = ch.lineNumber;
+      const physicalLine =
+        map.length > 0 ? (map[displayLine - 1] ?? displayLine) : displayLine;
+      const oldLine = lines[physicalLine - 1] ?? "";
+      lines[physicalLine - 1] = title;
+      applied.push({ chapterIndex: ci, oldTitle: oldLine, newTitle: title });
+    }
+    if (applied.length === 0) {
+      return { ok: false as const, reason: "没有可补全的章节", skipped };
+    }
+    const nextText = lines.join("\n");
+    if (readerFileSaving.value) {
+      return { ok: false as const, reason: "正在保存，请稍后重试" as const };
+    }
+    readerFileSaving.value = true;
+    try {
+      await appLoading.with("保存中", async () => {
+        const normalized = normalizeIpcEncoding(readerSaveEncoding.value);
+        const written = await window.colorTxt.writeTextFile(
+          p,
+          nextText,
+          normalized,
+        );
+        if (!written.ok) {
+          void appAlert(written.message ?? "保存失败");
+          return;
+        }
+        readerSaveEncoding.value = normalized;
+        fileEncoding.value = formatTextEncodingLabel(normalized);
+        stream.commitPhysicalLinesFromPlainText(nextText);
+        const anchor =
+          captureViewportRestoreAnchor() ?? {
+            physicalLine: applied[0]!.chapterIndex >= 0
+              ? Math.max(
+                  1,
+                  Math.floor(
+                    (map.length > 0
+                      ? (map[
+                          (chapters.value[applied[0]!.chapterIndex]?.lineNumber ??
+                            1) - 1
+                        ] ?? 1)
+                      : (chapters.value[applied[0]!.chapterIndex]?.lineNumber ??
+                        1)),
+                  ),
+                )
+              : 1,
+            wrappedLineIndex: 0,
+          };
+        await withChapterListScrollSuppressed(async () => {
+          const ok = await stream.applyReaderDisplayFromPhysicalLines(anchor);
+          if (!ok) {
+            appToast("已写入磁盘，但刷新阅读显示失败，请重新打开文件。", {
+              kind: "warning",
+            });
+            return;
+          }
+          await syncChaptersAfterViewportSettled();
+        });
+        revalidateCurrentFileAnnotations();
+        refreshCurrentFileAnnotationDisplayTexts();
+        bumpAnnotationDisplayEpoch();
+        readerRef.value?.refreshReaderAnnotationDecorations?.();
+      });
+    } finally {
+      readerFileSaving.value = false;
+    }
+    return { ok: true as const, applied, skipped };
+  };
   // 主窗口推送找书/设置共用的 HTTP 代理（词典等网络请求依赖主进程默认代理）
   syncPersistedFindBookProxyToMain();
 });

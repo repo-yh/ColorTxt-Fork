@@ -806,6 +806,63 @@ export const AI_AGENT_TOOLS: Array<{
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "getChapterTitles",
+      description:
+        "获取当前书的章节列表（含章节索引 chapterIndex、标题 title、标题行号 lineNumber）。用于定位章节标题，需补全章节名时先调用本工具。是否缺名（只有章节号没有名字）由你根据 title 自行判断。正文获取请用 highlightBody。",
+      parameters: {
+        type: "object",
+        properties: {
+          reasoning: {
+            type: "string",
+            description: "简要说明为何调用本工具",
+          },
+        },
+        required: ["reasoning"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "applyChapterTitles",
+      description:
+        "为当前书指定章节替换标题行：把章节标题（如「第一章」）替换为完整新标题（如「第一章 主角登场」）。参数 items 为 [{chapterIndex, title}]，title 是**完整新标题**（须保留原标题的章节号前缀，如「第一章」→「第一章 主角登场」）。直接写回磁盘。",
+      parameters: {
+        type: "object",
+        properties: {
+          reasoning: {
+            type: "string",
+            description: "简要说明为何调用本工具",
+          },
+          items: {
+            type: "array",
+            description: "要替换标题的章节列表",
+            items: {
+              type: "object",
+              properties: {
+                chapterIndex: {
+                  type: "number",
+                  description: "章节索引（从 0 起）",
+                },
+                title: {
+                  type: "string",
+                  description: "完整新标题（含章节号前缀）",
+                },
+              },
+              required: ["chapterIndex", "title"],
+              additionalProperties: false,
+            },
+          },
+        },
+        required: ["reasoning", "items"],
+        additionalProperties: false,
+      },
+    },
+  },
 ];
 
 export interface AIIndexSearchHit {
