@@ -682,7 +682,7 @@ export const AI_AGENT_TOOLS: Array<{
     function: {
       name: "highlightBody",
       description:
-        "获取当前书指定范围的纯文本正文（不压缩、不截断）。定位方式二选一：chapterIndex（整章，从 0 起）或 start/end（行范围，0-based，end 含）。正文过长时请用多次 start/end 分段获取，勿一次拉取整本。用于分析高亮词涉及的情景（谁和谁干了什么）。",
+        "获取当前书指定范围的纯文本正文（不压缩、不截断）。定位方式二选一：chapterIndex（整章，从 0 起）或 start/end（行范围，0-based，end 含）。正文过长时请用多次 start/end 分段获取，勿一次拉取整本。用于分析高亮词涉及的情景（谁和谁干了什么）。回答中引用某章时，用 `（ch=N）` 章节跳转标记（N = 你传入的 chapterIndex，从 0 起），勿写 chapterIndex= 或「第 N 章」换算。",
       parameters: {
         type: "object",
         properties: {
@@ -811,7 +811,7 @@ export const AI_AGENT_TOOLS: Array<{
     function: {
       name: "getChapterTitles",
       description:
-        "获取当前书的章节列表（含章节索引 chapterIndex、标题 title、标题行号 lineNumber）。用于定位章节标题，需补全章节名时先调用本工具。是否缺名（只有章节号没有名字）由你根据 title 自行判断。正文获取请用 highlightBody。",
+        "获取当前书的章节列表（含章节索引 chapterIndex、标题 title、标题行号 lineNumber、字数 charCount）。用于定位章节标题，需补全章节名时先调用本工具。是否缺名（只有章节号没有名字）由你根据 title 自行判断。正文获取请用 highlightBody。回答中引用某章时，用 `（ch=N）` 章节跳转标记（N = chapterIndex，从 0 起）。",
       parameters: {
         type: "object",
         properties: {

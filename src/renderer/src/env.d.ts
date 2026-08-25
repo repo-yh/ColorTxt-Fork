@@ -110,6 +110,7 @@ declare global {
             chapterIndex: number;
             title: string;
             lineNumber: number;
+            charCount: number;
           }>;
         }
     >;

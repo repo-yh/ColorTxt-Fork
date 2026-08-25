@@ -4,6 +4,10 @@ export const CHAPTER_MATCH_RULES_SKILL_ID = "chapter-match-rules" as const;
 /** 编辑模式「AI 智能排版」提示词来源；默认不在对话助手中注册为工具 */
 export const SMART_FORMAT_SKILL_ID = "smart-format" as const;
 
+/** 内置 AI 章节名补全技能 id */
+export const CHAPTER_TITLE_COMPLETION_SKILL_ID =
+  "chapter-title-completion" as const;
+
 /** OpenAI function name：字母数字与 _ - */
 export function sanitizeAgentSkillToolName(id: string): string {
   const s = id.trim().replace(/[^a-zA-Z0-9_-]/g, "_");

@@ -667,6 +667,7 @@ onMounted(() => {
       chapterIndex: i,
       title: c.title,
       lineNumber: c.lineNumber,
+      charCount: c.charCount,
     }));
     return { ok: true as const, chapters: list };
   };

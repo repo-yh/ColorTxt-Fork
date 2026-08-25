@@ -192,17 +192,6 @@ function buildAgentSystemPrompt(
   );
 
   lines.push(
-    "## 章节名补全（getChapterTitles / applyChapterTitles 工具）",
-    "- 用户要求「补全章节名 / 给章节加名字 / 只有章节号没名字」时：**先**调用 **getChapterTitles** 获取当前书章节列表（含 chapterIndex、title、lineNumber）。",
-    "- 根据 title **自行判断**哪些章节缺名（只有章节号/回目没有副标题，如「第一章」「第1章」「1、」）；已有名字的章节（如「第一章 风月无情」）**不要**处理。",
-    "- 对缺名章用 **highlightBody**（chapterIndex 整章）拉取**纯文本正文**原文，据此总结该章章节名。正文过长时用多次 `start`/`end` 分段获取，勿一次拉取整本；**不要截断**正文。",
-    "- 总结出的章节名须**贴合本章剧情**、简洁（一般 2~8 字，可含人物/事件/地点），**不要**臆造未出现的内容。",
-    "- 汇总所有缺名章的章节名后，调用 **applyChapterTitles** 一次性写回。items 为 [{chapterIndex, title}]，title 是**完整新标题**：须**保留原标题的章节号前缀**（如「第一章」→「第一章 主角登场」），直接替换标题行。",
-    "- **禁止使用 ragContext**（会截断/压缩正文）；正文获取只用 highlightBody。",
-    "",
-  );
-
-  lines.push(
     "## 书籍信息（不含正文）",
     `- 书名：${bookMeta.fileTitle}`,
     `- 总章节数：${bookMeta.chapterCount}`,

@@ -5,6 +5,7 @@
 
 import {
   CHAPTER_MATCH_RULES_SKILL_ID,
+  CHAPTER_TITLE_COMPLETION_SKILL_ID,
   SMART_FORMAT_SKILL_ID,
 } from "./aiAgentSkillToolNames";
 import type { AIAgentEnabledSkill } from "./aiTypes";
@@ -695,6 +696,36 @@ ${chapterMatchBuiltinReferenceBlock()}
 - **sd_prompt_zh**（中文画面描述）
 - **negative_zh**（可选）
 - **confidence_note**（哪些为推断）`,
+  },
+  {
+    id: CHAPTER_TITLE_COMPLETION_SKILL_ID,
+    title: "章节名补全",
+    description: "为只有章节号没有名字的章节标题补全章节名",
+    prompt: `# 章节名补全助手
+
+你负责为当前书的章节标题补全章节名：把只有章节号/回目、没有副标题的章节标题（如「第一章」「第1章」「1、」）补上贴合本章剧情的章节名（如「第一章 主角登场」）。
+
+## 执行步骤
+
+1. **先调用 getChapterTitles** 获取当前书章节列表（含 chapterIndex、title、lineNumber、字数 charCount）。
+2. **自行判断哪些缺名**：根据 title 判断——只有章节号/回目没有副标题（如「第一章」「第1章」「1、」）即缺名；已有名字的章节（如「第一章 风月无情」）**不要**处理。得到缺名章的有序列表。
+3. **分批处理（循环）**：
+   - **超长章节单独处理**：缺名章中 **charCount > 10000** 的章节，**每章单独一批**（一章读完、写回，再处理下一章），**不要**与其它章合批，避免一次拉取超大正文导致上下文过大。
+   - **普通章节每 5 章一批**：其余缺名章每批最多 5 个。
+   - 取当前批次（超长章 1 个，或普通章最多 5 个）。
+   - 对批次内每一章用 **highlightBody**（chapterIndex 整章）拉取**纯文本正文**原文，据此总结该章章节名。正文过长时用多次 \`start\`/\`end\` 分段获取，勿一次拉取整本；**不要截断**正文。
+   - 章节名须**贴合本章剧情**、简洁（一般 2~8 字，可含人物/事件/地点），**不要**臆造未出现的内容。
+   - 本批次都总结完后，调用 **applyChapterTitles** 写回本批次（items 为该批的 [{chapterIndex, title}]），title 是**完整新标题**：须**保留原标题的章节号前缀**（如「第一章」→「第一章 主角登场」），直接替换标题行。
+   - 写回完成后，再处理**下一批**，如此循环，直到所有缺名章都处理完。
+   - **不要**一次性读完全部缺名章再写回——普通章每批最多 5 章、超长章每章单独一批，避免上下文过多。
+
+## 约束
+
+- **禁止使用 ragContext**（会截断/压缩正文）；正文获取只用 highlightBody。
+- 只处理缺名章节，已有名字的章节不要动。
+- 章节名须贴合剧情，不要臆造。
+- 每批最多 5 章，写回后再处理下一批，循环直到全部完成。
+- 向用户汇报补全结果、引用某章时，用 \`（ch=N）\` 章节跳转标记（N = chapterIndex，从 0 起），勿写 chapterIndex= 或「第 N 章」换算。`,
   },
 ];
 
