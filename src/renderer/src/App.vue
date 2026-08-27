@@ -603,6 +603,7 @@ onMounted(() => {
       return {
         name: meta?.fileName || f.name,
         path: f.path,
+        pathEncoded: encodeURIComponent(f.path).replace(/%20/g, "+"),
         active: f.path === currentFile.value,
       };
     });

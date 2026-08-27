@@ -66,6 +66,7 @@ declare global {
     __colorTxtGetFileList?: () => Array<{
       name: string;
       path: string;
+      pathEncoded?: string;
       active: boolean;
     }>;
     /** 高亮词分布（当前书）：供内置 AI 分析高亮词情景 */
