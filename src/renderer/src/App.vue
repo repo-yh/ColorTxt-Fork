@@ -632,7 +632,7 @@ onMounted(() => {
     );
   };
   // 高亮词正文（当前书）：按 chapterIndex 或 start/end 返回纯文本正文
-  window.__colorTxtGetHighlightBody = async (opts: {
+  window.__colorTxtGetFullText = async (opts: {
     chapterIndex?: number;
     start?: number;
     end?: number;
@@ -653,7 +653,7 @@ onMounted(() => {
       hl = merged;
     }
     return (
-      readerRef.value?.getHighlightBody?.(text, fp, hl, opts) ?? {
+      readerRef.value?.getFullText?.(text, fp, hl, opts) ?? {
         ok: false as const,
         reason: "阅读器未就绪" as const,
       }

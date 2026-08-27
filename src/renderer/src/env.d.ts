@@ -87,7 +87,7 @@ declare global {
         }
     >;
     /** 高亮词正文（当前书）：按 chapterIndex 或 start/end 返回纯文本正文 */
-    __colorTxtGetHighlightBody?: (opts: {
+    __colorTxtGetFullText?: (opts: {
       chapterIndex?: number;
       start?: number;
       end?: number;

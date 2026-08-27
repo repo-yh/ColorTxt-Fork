@@ -663,7 +663,7 @@ export const AI_AGENT_TOOLS: Array<{
     function: {
       name: "highlightDistribution",
       description:
-        "获取**全书**高亮词分布（按章节分组，含命中行号与命中词），不关心当前阅读章节。用于分析高亮词在全文的分布与集中度、定位集中点（约 20 行内 ≥5 次命中）。返回 chapters[]，每章含 lines[]（命中行：line 行号、text 行原文、words 命中词列表）。正文原文请另用 highlightBody 按 start/end 或 chapterIndex 获取。",
+        "获取**全书**高亮词分布（按章节分组，含命中行号与命中词），不关心当前阅读章节。用于分析高亮词在全文的分布与集中度、定位集中点（约 20 行内 ≥5 次命中）。返回 chapters[]，每章含 lines[]（命中行：line 行号、text 行原文、words 命中词列表）。正文原文请另用 getFullText 按 start/end 或 chapterIndex 获取。",
       parameters: {
         type: "object",
         properties: {
@@ -680,7 +680,7 @@ export const AI_AGENT_TOOLS: Array<{
   {
     type: "function",
     function: {
-      name: "highlightBody",
+      name: "getFullText",
       description:
         "获取当前书指定范围的纯文本正文（不压缩、不截断）。定位方式二选一：chapterIndex（整章，从 0 起）或 start/end（行范围，0-based，end 含）。正文过长时请用多次 start/end 分段获取，勿一次拉取整本。用于分析高亮词涉及的情景（谁和谁干了什么）。回答中引用某章时，用 `（ch=N）` 章节跳转标记（N = 你传入的 chapterIndex，从 0 起），勿写 chapterIndex= 或「第 N 章」换算。",
       parameters: {
@@ -811,7 +811,7 @@ export const AI_AGENT_TOOLS: Array<{
     function: {
       name: "getChapterTitles",
       description:
-        "获取当前书的章节列表（含章节索引 chapterIndex、标题 title、标题行号 lineNumber、字数 charCount）。用于定位章节标题，需补全章节名时先调用本工具。是否缺名（只有章节号没有名字）由你根据 title 自行判断。正文获取请用 highlightBody。回答中引用某章时，用 `（ch=N）` 章节跳转标记（N = chapterIndex，从 0 起）。",
+        "获取当前书的章节列表（含章节索引 chapterIndex、标题 title、标题行号 lineNumber、字数 charCount）。用于定位章节标题，需补全章节名时先调用本工具。是否缺名（只有章节号没有名字）由你根据 title 自行判断。正文获取请用 getFullText。回答中引用某章时，用 `（ch=N）` 章节跳转标记（N = chapterIndex，从 0 起）。",
       parameters: {
         type: "object",
         properties: {

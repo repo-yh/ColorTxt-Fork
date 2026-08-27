@@ -3571,7 +3571,7 @@ async function buildHighlightLines(
  * 获取当前书指定范围的纯文本正文（不压缩、不截断）。
  * 定位方式二选一：chapterIndex（整章）或 start/end（行范围，0-based）。
  */
-async function getHighlightBody(
+async function getFullText(
   fullText: string,
   filePath: string,
   highlightWords: HighlightWordsByIndex | undefined,
@@ -3759,13 +3759,13 @@ defineExpose({
     return buildHighlightLines(fullText, filePath, highlightWords);
   },
 
-  getHighlightBody: async (
+  getFullText: async (
     fullText: string,
     filePath: string,
     highlightWords: HighlightWordsByIndex | undefined,
     opts: { chapterIndex?: number; start?: number; end?: number },
   ) => {
-    return getHighlightBody(fullText, filePath, highlightWords, opts);
+    return getFullText(fullText, filePath, highlightWords, opts);
   },
 
   generateColoredHtml: async () => {
