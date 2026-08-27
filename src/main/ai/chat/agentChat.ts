@@ -1128,6 +1128,8 @@ async function dispatchTool(
     signal?: AbortSignal;
     chapterMatchRuleOnlyTurn: boolean;
     chapterCount: number;
+    /** 本次会话内已用 getFullText 按 chapterIndex 获取过正文的章节索引集合 */
+    fetchedChapterIndexes: Set<number>;
   },
 ): Promise<string> {
   let args: Record<string, unknown> = {};
@@ -1345,9 +1347,13 @@ async function dispatchTool(
       return full;
     }
     if (name === "getFullText") {
+      const chapterIndex =
+        typeof args.chapterIndex === "number" ? args.chapterIndex : undefined;
+      if (typeof chapterIndex === "number") {
+        ctx.fetchedChapterIndexes.add(chapterIndex);
+      }
       const { preview, full } = await runGetFullText(ctx.webContents, {
-        chapterIndex:
-          typeof args.chapterIndex === "number" ? args.chapterIndex : undefined,
+        chapterIndex,
         start: typeof args.start === "number" ? args.start : undefined,
         end: typeof args.end === "number" ? args.end : undefined,
       });
@@ -1363,6 +1369,8 @@ async function dispatchTool(
       return full;
     }
     if (name === "getChapterTitles") {
+      // 重新获取章节列表后，此前记录的已获取正文章节索引失效，清空以便重新校验
+      ctx.fetchedChapterIndexes.clear();
       const { preview, full } = await runGetChapterTitles(ctx.webContents);
       ctx.emit({
         type: "tool_result",
@@ -1379,9 +1387,35 @@ async function dispatchTool(
       const items = Array.isArray(args.items)
         ? (args.items as Array<{ chapterIndex: number; title: string }>)
         : [];
+      // 仅允许为已用 getFullText 获取过正文的章节补全标题，防止未读正文臆造章节名
+      const missing = items
+        .map((it) => it.chapterIndex)
+        .filter((idx) => !ctx.fetchedChapterIndexes.has(idx));
+      if (items.length > 0 && missing.length > 0) {
+        const full = JSON.stringify({
+          ok: false,
+          reason:
+            "以下章节尚未获取正文，无法补全标题：" +
+            missing.join(", ") +
+            "。请先用 getFullText（chapterIndex 整章）获取这些章节的正文后再调用 applyChapterTitles。",
+          missingChapterIndexes: missing,
+        });
+        ctx.emit({
+          type: "tool_result",
+          requestId: ctx.requestId,
+          toolCallId: ctx.toolCallId,
+          name,
+          ok: false,
+          preview: previewJson(JSON.parse(full) as Record<string, unknown>),
+          full,
+        });
+        return full;
+      }
       const { preview, full } = await runApplyChapterTitles(ctx.webContents, {
         items,
       });
+      // 已应用（写回）的章节视为处理完毕，清空记录，后续需重新 getFullText 才能再次写回
+      ctx.fetchedChapterIndexes.clear();
       ctx.emit({
         type: "tool_result",
         requestId: ctx.requestId,
@@ -1517,6 +1551,8 @@ export async function runAgentChat(opts: {
 
   let usageAcc: AITokenUsageTotals = { ...ZERO_TOKEN_USAGE };
   let usageAvailable = false;
+  // 本次会话内已用 getFullText 按 chapterIndex 获取过正文的章节索引（切换书籍/新会话自动重置）
+  const fetchedChapterIndexes = new Set<number>();
 
   try {
     const rows = listMessages(payload.threadId).filter(
@@ -1753,6 +1789,7 @@ export async function runAgentChat(opts: {
               signal: ac.signal,
               chapterMatchRuleOnlyTurn,
               chapterCount: payload.bookMeta.chapterCount,
+              fetchedChapterIndexes,
             });
           }
           appendAgentMessageRow({
