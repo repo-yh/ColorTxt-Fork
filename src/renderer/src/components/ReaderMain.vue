@@ -33,6 +33,7 @@ import {
 import { collectBlockMarkdownImageLines } from "../markdown/markdownImages";
 import {
   atxHeadingPrefixLength,
+  buildChaptersFromMarkdownEditorText,
   formatMarkdownHeadingLineForDisplay,
 } from "../markdown/markdownChapter";
 import {
@@ -3350,10 +3351,15 @@ function buildChapterList(
     return { chapterList: cached, chapterLineSet: set };
   }
 
-  const chapters = buildChaptersFromPlainText(
-    fullText,
-    props.chapterMinCharCount ?? 0,
-  );
+  // md 走 ATX 标题层级检测（与侧边章节栏一致），txt 走章节匹配正则
+  const chapters = isMarkdownFilePath(filePath)
+    ? buildChaptersFromMarkdownEditorText(fullText, {
+        minCharCount: props.chapterMinCharCount ?? 0,
+      })
+    : buildChaptersFromPlainText(
+        fullText,
+        props.chapterMinCharCount ?? 0,
+      );
   const chapterLineSet = new Set<number>();
   const chapterList = chapters.map((c) => {
     const titleText = chapterTitleForDisplay(c.title);
