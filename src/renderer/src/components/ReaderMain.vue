@@ -3370,15 +3370,47 @@ function buildChapterList(
   return { chapterList, chapterLineSet };
 }
 
+type TokenLinesResult = Awaited<ReturnType<typeof monaco.editor.tokenize>>;
+
+// 分词级缓存：全文 tokenize 是分段请求的主要耗时（~0.4s/万行），
+// 同一文件 + 文本未变 + 高亮词配置未变时直接复用分词结果
+const tokenizeCache = new Map<
+  string,
+  { text: string; wordsKey: string; tokenLines: TokenLinesResult }
+>();
+
+async function tokenizeWithCache(
+  fullText: string,
+  filePath: string,
+  highlightWords: HighlightWordsByIndex | undefined,
+): Promise<TokenLinesResult> {
+  const wordsKey = JSON.stringify(highlightWords ?? null);
+  const cached = tokenizeCache.get(filePath);
+  if (cached && cached.text === fullText && cached.wordsKey === wordsKey) {
+    return cached.tokenLines;
+  }
+  const restore = prepareHighlightMonarch(highlightWords);
+  const tokenLines = await monaco.editor.tokenize(fullText, "txtr-text");
+  if (restore) applyTxtrMonarchTokenizer();
+  tokenizeCache.set(filePath, { text: fullText, wordsKey, tokenLines });
+  if (tokenizeCache.size > 3) {
+    const firstKey = tokenizeCache.keys().next().value;
+    if (firstKey) tokenizeCache.delete(firstKey);
+  }
+  return tokenLines;
+}
+
 async function buildColoredHtml(
   fullText: string,
   filePath: string,
   highlightWords: HighlightWordsByIndex | undefined,
 ) {
   const { palette, tokenColorMap } = makeTokenColorMap();
-  const restore = prepareHighlightMonarch(highlightWords);
-  const tokenLines = await monaco.editor.tokenize(fullText, "txtr-text");
-  if (restore) applyTxtrMonarchTokenizer();
+  const tokenLines = await tokenizeWithCache(
+    fullText,
+    filePath,
+    highlightWords,
+  );
 
   const lines = fullText.split("\n");
   const { chapterList, chapterLineSet } = buildChapterList(
@@ -3416,14 +3448,16 @@ async function buildColoredHtmlSegment(
   endLine: number,
 ) {
   const { palette, tokenColorMap } = makeTokenColorMap();
-  const restore = prepareHighlightMonarch(highlightWords);
-  const tokenLines = await monaco.editor.tokenize(fullText, "txtr-text");
-  if (restore) applyTxtrMonarchTokenizer();
+  const tokenLines = await tokenizeWithCache(
+    fullText,
+    filePath,
+    highlightWords,
+  );
 
   const lines = fullText.split("\n");
   const total = lines.length;
-  const clampedEnd = Math.min(endLine, total - 1);
-  const clampedStart = Math.min(startLine, clampedEnd);
+  const clampedEnd = Math.max(0, Math.min(Math.floor(endLine), total - 1));
+  const clampedStart = Math.max(0, Math.min(Math.floor(startLine), clampedEnd));
 
   const { chapterList, chapterLineSet } = buildChapterList(
     fullText,
@@ -3446,12 +3480,84 @@ async function buildColoredHtmlSegment(
   return {
     ok: true as const,
     html,
+    text: lines.slice(clampedStart, clampedEnd + 1).join("\n"),
     theme: lastAppThemeName,
     file: filePath,
     chapters: chapterList,
     total,
     start: clampedStart,
     end: clampedEnd,
+  };
+}
+
+async function buildHighlightLines(
+  fullText: string,
+  filePath: string,
+  highlightWords: HighlightWordsByIndex | undefined,
+) {
+  const tokenLines = await tokenizeWithCache(
+    fullText,
+    filePath,
+    highlightWords,
+  );
+
+  const lines = fullText.split("\n");
+  const total = lines.length;
+
+  const { chapterList } = buildChapterList(fullText, filePath, lines);
+
+  const matchedLines: { line: number; text: string; words: string[] }[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const tokens = tokenLines[i];
+    if (!tokens) continue;
+    const words: string[] = [];
+    for (let j = 0; j < tokens.length; j++) {
+      const t = tokens[j];
+      if (
+        t.type.replace(/\.txtr-text$/, "").startsWith("txtr.customHighlight.")
+      ) {
+        const nextOffset =
+          j + 1 < tokens.length ? tokens[j + 1].offset : lines[i].length;
+        const word = lines[i].slice(t.offset, nextOffset);
+        if (word && !words.includes(word)) {
+          words.push(word);
+        }
+      }
+    }
+    if (words.length > 0) {
+      matchedLines.push({ line: i, text: lines[i], words });
+    }
+  }
+
+  // 章节范围分组：空标题 = 第一章之前（或全书无章节）的正文
+  const ranges: { title: string; start: number; end: number }[] = [];
+  if (chapterList.length === 0) {
+    ranges.push({ title: "", start: 0, end: Math.max(total - 1, 0) });
+  } else {
+    if (chapterList[0].line > 0) {
+      ranges.push({ title: "", start: 0, end: chapterList[0].line - 1 });
+    }
+    for (let c = 0; c < chapterList.length; c++) {
+      const start = chapterList[c].line;
+      const end =
+        c + 1 < chapterList.length ? chapterList[c + 1].line - 1 : total - 1;
+      ranges.push({ title: chapterList[c].title, start, end });
+    }
+  }
+
+  const chaptersOut = ranges.map((r) => ({
+    title: r.title,
+    line: r.start,
+    lines: matchedLines
+      .filter((m) => m.line >= r.start && m.line <= r.end)
+      .map((m) => ({ line: m.line, text: m.text, words: m.words })),
+  }));
+
+  return {
+    ok: true as const,
+    file: filePath,
+    total,
+    chapters: chaptersOut,
   };
 }
 
@@ -3583,6 +3689,14 @@ defineExpose({
       startLine,
       endLine,
     );
+  },
+
+  generateHighlightLinesForText: async (
+    fullText: string,
+    filePath: string,
+    highlightWords: HighlightWordsByIndex | undefined,
+  ) => {
+    return buildHighlightLines(fullText, filePath, highlightWords);
   },
 
   generateColoredHtml: async () => {

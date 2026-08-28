@@ -21,7 +21,7 @@ import {
 } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { startWebDisplay, stopWebDisplay, isWebDisplayRunning, clearCache, setCurrentFilePath, getCurrentFilePath, type ContentResult, type FileListItem } from "./webDisplay";
+import { startWebDisplay, stopWebDisplay, isWebDisplayRunning, clearCache, setCurrentFilePath, getCurrentFilePath, type ContentResult, type FileListItem, type HighlightsResult } from "./webDisplay";
 import { getFonts } from "font-list";
 import iconv from "iconv-lite";
 import { detectTextFileEncoding } from "./detectTextEncoding";
@@ -1077,21 +1077,36 @@ function unknownQuoteAttributions(
       );
     };
 
-    const getCurrentContent = async () => {
+    const getCurrentContent = async (): Promise<ContentResult> => {
       const fp = getCurrentFilePath();
       if (!fp) return { ok: false as const, reason: "未打开文件" as const };
-      return { ok: false as const, reason: "缓存未就绪，请稍后刷新" as const };
+      return getContentForFileFn(fp);
     };
 
-    const getContentForFileFn = async (filePath: string, _refresh?: boolean): Promise<ContentResult> => {
+    const getContentForFileFn = async (filePath: string, refresh?: boolean): Promise<ContentResult> => {
+      if (refresh) textCache.delete(filePath);
+
       const w = findWindow();
       if (!w) return { ok: false as const, reason: "无可用窗口" as const };
+
+      // 与分段请求共享同一份文本缓存，避免重复读盘
+      let fullText = textCache.get(filePath) ?? null;
+      if (fullText == null) {
+        fullText = await readFullTextViaWindow(w, filePath);
+        if (fullText == null) {
+          return { ok: false as const, reason: "读取文件失败" as const };
+        }
+        textCache.set(filePath, fullText);
+        if (textCache.size > 5) {
+          const firstKey = textCache.keys().next().value;
+          if (firstKey) textCache.delete(firstKey);
+        }
+      }
+
       try {
         const result = await w.webContents.executeJavaScript(
           `(async () => {
-            const text = await window.colorTxt.readWholeTextFile?.(${JSON.stringify(filePath)});
-            if (!text?.ok) return { ok: false, reason: text?.message || '读取失败' };
-            return window.__colorTxtGenerateColoredHtmlForText?.(text.text, ${JSON.stringify(filePath)}) || { ok: false, reason: '阅读器未就绪' };
+            return window.__colorTxtGenerateColoredHtmlForText?.(${JSON.stringify(fullText)}, ${JSON.stringify(filePath)}) || { ok: false, reason: '阅读器未就绪' };
           })()`,
         );
         const r = result ?? { ok: false as const, reason: "获取内容失败" as const };
@@ -1112,6 +1127,23 @@ function unknownQuoteAttributions(
     // 文本缓存：避免重复从渲染进程读取全文
     const textCache = new Map<string, string>();
 
+    const readFullTextViaWindow = async (
+      w: BrowserWindow,
+      filePath: string,
+    ): Promise<string | null> => {
+      try {
+        const readResult = await w.webContents.executeJavaScript(
+          `(async () => {
+            const r = await window.colorTxt.readWholeTextFile?.(${JSON.stringify(filePath)});
+            return r?.ok ? r.text : null;
+          })()`,
+        );
+        return typeof readResult === "string" ? readResult : null;
+      } catch {
+        return null;
+      }
+    };
+
     const getContentForSegmentFn = async (
       filePath: string,
       start: number,
@@ -1126,25 +1158,15 @@ function unknownQuoteAttributions(
       // 从缓存或渲染进程获取全文
       let fullText = textCache.get(filePath) ?? null;
       if (fullText == null) {
-        try {
-          const readResult = await w.webContents.executeJavaScript(
-            `(async () => {
-              const r = await window.colorTxt.readWholeTextFile?.(${JSON.stringify(filePath)});
-              return r?.ok ? r.text : null;
-            })()`,
-          );
-          if (typeof readResult !== "string") {
-            return { ok: false as const, reason: "读取文件失败" as const };
-          }
-          fullText = readResult;
-          textCache.set(filePath, fullText);
-          // 限制缓存大小，避免长期运行内存泄漏
-          if (textCache.size > 5) {
-            const firstKey = textCache.keys().next().value;
-            if (firstKey) textCache.delete(firstKey);
-          }
-        } catch {
+        fullText = await readFullTextViaWindow(w, filePath);
+        if (fullText == null) {
           return { ok: false as const, reason: "读取文件失败" as const };
+        }
+        textCache.set(filePath, fullText);
+        // 限制缓存大小，避免长期运行内存泄漏
+        if (textCache.size > 5) {
+          const firstKey = textCache.keys().next().value;
+          if (firstKey) textCache.delete(firstKey);
         }
       }
 
@@ -1171,6 +1193,37 @@ function unknownQuoteAttributions(
       }
     };
 
+    const getHighlightsForFileFn = async (
+      filePath: string,
+    ): Promise<HighlightsResult> => {
+      const w = findWindow();
+      if (!w) return { ok: false as const, reason: "无可用窗口" as const };
+
+      // 无缓存：每次都从渲染进程读盘最新内容
+      const fullText = await readFullTextViaWindow(w, filePath);
+      if (fullText == null) {
+        return { ok: false as const, reason: "读取文件失败" as const };
+      }
+
+      try {
+        const result = await w.webContents.executeJavaScript(
+          `(async () => {
+            const r = await window.__colorTxtGenerateHighlightLinesForText?.(
+              ${JSON.stringify(fullText)},
+              ${JSON.stringify(filePath)}
+            );
+            return r || { ok: false, reason: '阅读器未就绪' };
+          })()`,
+        );
+        return (result as HighlightsResult) ?? {
+          ok: false as const,
+          reason: "获取高亮分布失败" as const,
+        };
+      } catch {
+        return { ok: false as const, reason: "获取高亮分布失败" as const };
+      }
+    };
+
     const started = startWebDisplay(
       getCurrentContent,
       getContentForFileFn,
@@ -1182,6 +1235,7 @@ function unknownQuoteAttributions(
           return [];
         }
       },
+      getHighlightsForFileFn,
     );
 
     return { ok: started, reason: started ? undefined : "端口被占用" };
