@@ -67,6 +67,45 @@ export type HighlightsResult =
       chapters: HighlightChapterGroup[];
     };
 
+export type ChapterTitlesResult =
+  | { ok: false; reason: string }
+  | {
+      ok: true;
+      chapters: Array<{
+        chapterIndex: number;
+        title: string;
+        lineNumber: number;
+        charCount: number;
+      }>;
+    };
+
+export type ApplyChapterTitlesResult =
+  | {
+      ok: false;
+      reason: string;
+      skipped?: Array<{ chapterIndex: number; reason: string }>;
+    }
+  | {
+      ok: true;
+      applied: Array<{
+        chapterIndex: number;
+        oldTitle: string;
+        newTitle: string;
+      }>;
+      skipped: Array<{ chapterIndex: number; reason: string }>;
+    };
+
+export type ChapterContentResult =
+  | { ok: false; reason: string }
+  | {
+      ok: true;
+      body: string;
+      start: number;
+      end: number;
+      total: number;
+      file: string;
+    };
+
 // ---- Cache ----
 
 let cacheDir: string | null = null;
@@ -129,12 +168,35 @@ function serveFile(
     });
 }
 
+/** 读取请求体（用于 POST 写回接口） */
+function readRequestBody(
+  req: import("node:http").IncomingMessage,
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    let data = "";
+    req.setEncoding("utf-8");
+    req.on("data", (chunk: string) => {
+      data += chunk;
+      // 防止超大 body 拖垮服务
+      if (data.length > 10 * 1024 * 1024) {
+        req.destroy();
+        reject(new Error("body 过大"));
+      }
+    });
+    req.on("end", () => resolve(data));
+    req.on("error", reject);
+  });
+}
+
 export function startWebDisplay(
   getCurrentContent: () => Promise<ContentResult>,
   getContentForFile: (filePath: string, refresh?: boolean) => Promise<ContentResult>,
   getContentForSegment: (filePath: string, start: number, end: number, refresh?: boolean) => Promise<ContentResult>,
   getFileList: () => Promise<FileListItem[]>,
   getHighlightsForFile: (filePath: string) => Promise<HighlightsResult>,
+  getChapterTitles: (filePath: string) => Promise<ChapterTitlesResult>,
+  applyChapterTitles: (filePath: string, items: Array<{ chapterIndex: number; title: string }>) => Promise<ApplyChapterTitlesResult>,
+  getContentForChapter: (filePath: string, chapterIndex: number, refresh?: boolean) => Promise<ChapterContentResult>,
 ): boolean {
   if (server) return true;
 
@@ -181,9 +243,27 @@ export function startWebDisplay(
       const refresh = url.searchParams.has("refresh");
       const startStr = url.searchParams.get("start");
       const endStr = url.searchParams.get("end");
+      const chapterIndexStr = url.searchParams.get("chapterIndex");
       const wantSegment = startStr != null && endStr != null && fileParam != null;
+      const wantChapter =
+        chapterIndexStr != null && startStr == null && endStr == null;
 
       try {
+        // 章节请求：按章节索引返回该章纯文本正文（复用 getFullText 桥接）
+        if (wantChapter) {
+          const chapterIndex = parseInt(chapterIndexStr!, 10);
+          const result = await getContentForChapter(
+            fileParam ?? getCurrentFilePath() ?? "",
+            chapterIndex,
+            refresh,
+          );
+          res.writeHead(200, {
+            "Content-Type": "application/json; charset=utf-8",
+          });
+          res.end(JSON.stringify(result));
+          return;
+        }
+
         // 分段请求：由上层提供分段专用处理器（全文分词，只生成片段 HTML）
         if (wantSegment) {
           const segStart = parseInt(startStr!, 10);
@@ -207,6 +287,48 @@ export function startWebDisplay(
         });
         res.end(JSON.stringify(result));
       } catch (e) {
+        res.writeHead(500, {
+          "Content-Type": "application/json; charset=utf-8",
+        });
+        res.end(JSON.stringify({ ok: false, reason: "服务内部错误" }));
+      }
+      return;
+    }
+
+    if (url.pathname === "/api/chapters") {
+      const fileParam = url.searchParams.get("file") ?? getCurrentFilePath() ?? "";
+
+      try {
+        if (req.method === "POST") {
+          // 写回：为指定章节替换标题行
+          const body = await readRequestBody(req);
+          let items: Array<{ chapterIndex: number; title: string }> = [];
+          try {
+            const parsed = body ? JSON.parse(body) : {};
+            if (Array.isArray(parsed?.items)) {
+              items = parsed.items as Array<{
+                chapterIndex: number;
+                title: string;
+              }>;
+            }
+          } catch {
+            // body 非法 JSON 时按空 items 处理，交由上层返回错误
+          }
+          const result = await applyChapterTitles(fileParam, items);
+          res.writeHead(200, {
+            "Content-Type": "application/json; charset=utf-8",
+          });
+          res.end(JSON.stringify(result));
+          return;
+        }
+
+        // GET：获取章节列表
+        const result = await getChapterTitles(fileParam);
+        res.writeHead(200, {
+          "Content-Type": "application/json; charset=utf-8",
+        });
+        res.end(JSON.stringify(result));
+      } catch {
         res.writeHead(500, {
           "Content-Type": "application/json; charset=utf-8",
         });

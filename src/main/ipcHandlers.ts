@@ -21,7 +21,7 @@ import {
 } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { startWebDisplay, stopWebDisplay, isWebDisplayRunning, clearCache, setCurrentFilePath, getCurrentFilePath, type ContentResult, type FileListItem, type HighlightsResult } from "./webDisplay";
+import { startWebDisplay, stopWebDisplay, isWebDisplayRunning, clearCache, setCurrentFilePath, getCurrentFilePath, type ContentResult, type FileListItem, type HighlightsResult, type ChapterTitlesResult, type ApplyChapterTitlesResult, type ChapterContentResult } from "./webDisplay";
 import { getFonts } from "font-list";
 import iconv from "iconv-lite";
 import { detectTextFileEncoding } from "./detectTextEncoding";
@@ -1224,6 +1224,88 @@ function unknownQuoteAttributions(
       }
     };
 
+    const getChapterTitlesFn = async (
+      _filePath: string,
+    ): Promise<ChapterTitlesResult> => {
+      const w = findWindow();
+      if (!w) return { ok: false as const, reason: "无可用窗口" as const };
+      try {
+        const result = await w.webContents.executeJavaScript(
+          `(async () => {
+            const r = await window.__colorTxtGetChapterTitles?.();
+            return r || { ok: false, reason: '桥接未就绪' };
+          })()`,
+        );
+        return (result as ChapterTitlesResult) ?? {
+          ok: false as const,
+          reason: "获取章节列表失败" as const,
+        };
+      } catch {
+        return { ok: false as const, reason: "获取章节列表失败" as const };
+      }
+    };
+
+    const applyChapterTitlesFn = async (
+      _filePath: string,
+      items: Array<{ chapterIndex: number; title: string }>,
+    ): Promise<ApplyChapterTitlesResult> => {
+      const w = findWindow();
+      if (!w) return { ok: false as const, reason: "无可用窗口" as const };
+      try {
+        const result = await w.webContents.executeJavaScript(
+          `(async () => {
+            const r = await window.__colorTxtApplyChapterTitles?.(${JSON.stringify({ items })});
+            return r || { ok: false, reason: '桥接未就绪' };
+          })()`,
+        );
+        return (result as ApplyChapterTitlesResult) ?? {
+          ok: false as const,
+          reason: "补全章节名失败" as const,
+        };
+      } catch {
+        return { ok: false as const, reason: "补全章节名失败" as const };
+      }
+    };
+
+    const getContentForChapterFn = async (
+      _filePath: string,
+      chapterIndex: number,
+      _refresh?: boolean,
+    ): Promise<ChapterContentResult> => {
+      const w = findWindow();
+      if (!w) return { ok: false as const, reason: "无可用窗口" as const };
+      try {
+        const result = await w.webContents.executeJavaScript(
+          `(async () => {
+            const r = await window.__colorTxtGetFullText?.(${JSON.stringify({ chapterIndex })});
+            return r || { ok: false, reason: '桥接未就绪' };
+          })()`,
+        );
+        const r = result as
+          | { ok: false; reason: string }
+          | {
+              ok: true;
+              body: string;
+              start: number;
+              end: number;
+              total: number;
+            };
+        if (r && r.ok) {
+          return {
+            ok: true as const,
+            body: r.body,
+            start: r.start,
+            end: r.end,
+            total: r.total,
+            file: _filePath,
+          };
+        }
+        return { ok: false as const, reason: r?.reason ?? "获取章节正文失败" };
+      } catch {
+        return { ok: false as const, reason: "获取章节正文失败" as const };
+      }
+    };
+
     const started = startWebDisplay(
       getCurrentContent,
       getContentForFileFn,
@@ -1236,6 +1318,9 @@ function unknownQuoteAttributions(
         }
       },
       getHighlightsForFileFn,
+      getChapterTitlesFn,
+      applyChapterTitlesFn,
+      getContentForChapterFn,
     );
 
     return { ok: started, reason: started ? undefined : "端口被占用" };
