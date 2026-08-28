@@ -250,7 +250,6 @@ import { appAlert, appConfirm } from "./services/appDialog";
 import { mergeShortcutBindings } from "./services/shortcutUtils";
 import {
   syncTxtFilesCategoriesAfterCatalogEdit,
-  normalizeTxtFileItem,
   type TxtFileItem,
 } from "./services/fileListService";
 import {
@@ -1450,12 +1449,6 @@ function onApplyCategoryCatalog(payload: {
   persistSettings();
 }
 
-function replaceFileBaseName(filePath: string, newBaseName: string): string {
-  const idx = Math.max(filePath.lastIndexOf("/"), filePath.lastIndexOf("\\"));
-  if (idx < 0) return newBaseName;
-  return `${filePath.slice(0, idx + 1)}${newBaseName}`;
-}
-
 /** 重命名：仅修改文件列表中展示的 name 字段，不动磁盘文件 */
 function onRenameFileName(payload: { oldPath: string; newName: string }) {
   const oldPath = payload.oldPath.trim();
@@ -1474,99 +1467,6 @@ function onRenameFileName(payload: { oldPath: string; newName: string }) {
     () => ({ fileName: nameKey }),
   );
   persistFileListCache({ force: true });
-  persistFileMeta();
-}
-
-/** @deprecated 保留但不再使用：磁盘重命名 + 全量迁移（避免上游差异过大） */
-async function onRenameFilePath(payload: { oldPath: string; newName: string }) {
-  const oldPath = payload.oldPath.trim();
-  const newName = payload.newName.trim();
-  if (!oldPath || !newName) return;
-  const targetPath = replaceFileBaseName(oldPath, newName);
-  if (fileHistoryKey(targetPath) === fileHistoryKey(oldPath)) return;
-  const result = await window.colorTxt.renamePath(oldPath, targetPath);
-  if (!result.ok) {
-    await appAlert(`重命名失败：${result.message}`);
-    return;
-  }
-
-  const nextPath = result.path;
-  const oldKey = fileHistoryKey(oldPath);
-  const nextKey = fileHistoryKey(nextPath);
-  txtFiles.value = txtFiles.value.map((f) => {
-    if (fileHistoryKey(f.path) !== oldKey) return f;
-    return normalizeTxtFileItem({
-      ...f,
-      path: nextPath,
-      size: result.size,
-    });
-  });
-
-  recentFiles.value = recentFiles.value.map((item) =>
-    fileHistoryKey(item.path) === oldKey ? { ...item, path: nextPath } : item,
-  );
-
-  // file.meta 迁移：优先按旧路径精确匹配；若不存在再按旧文件名兜底（仅唯一候选时迁移，避免同名串数据）。
-  let prevMeta = fileMetaRecords.value.find(
-    (m) => fileHistoryKey(m.path) === oldKey,
-  );
-  if (!prevMeta) {
-    const oldNameKey = fileNameKey(oldPath);
-    const fallbackCandidates = fileMetaRecords.value.filter(
-      (m) => m.fileName === oldNameKey,
-    );
-    if (fallbackCandidates.length === 1) {
-      prevMeta = fallbackCandidates[0];
-    }
-  }
-  if (prevMeta) {
-    const prevMetaKey = fileHistoryKey(prevMeta.path);
-    const migrated: FileMetaRecord = {
-      ...prevMeta,
-      path: nextPath,
-      fileName: fileNameKey(nextPath),
-      updatedAt: Date.now(),
-    };
-    fileMetaRecords.value = [
-      migrated,
-      ...fileMetaRecords.value.filter((m) => {
-        const k = fileHistoryKey(m.path);
-        if (k === prevMetaKey) return false;
-        if (k === oldKey) return false;
-        if (k === nextKey) return false;
-        return true;
-      }),
-    ];
-  }
-
-  // 进度映射 key 基于 path，重命名后需迁移，否则 UI 可能仍引用旧路径进度。
-  if (metaProgressByPathKey.value.has(oldKey)) {
-    const m = new Map(metaProgressByPathKey.value);
-    const v = m.get(oldKey);
-    m.delete(oldKey);
-    if (typeof v === "number") m.set(nextKey, v);
-    metaProgressByPathKey.value = m;
-  }
-
-  if (currentFile.value && fileHistoryKey(currentFile.value) === oldKey) {
-    currentFile.value = nextPath;
-  }
-  if (
-    physicalReaderPath.value &&
-    fileHistoryKey(physicalReaderPath.value) === oldKey
-  ) {
-    physicalReaderPath.value = nextPath;
-  }
-  if (
-    activeStreamFilePath.value &&
-    fileHistoryKey(activeStreamFilePath.value) === oldKey
-  ) {
-    activeStreamFilePath.value = nextPath;
-  }
-
-  persistFileListCache();
-  persistRecentFiles();
-  // 落盘时机保持原有策略：走现有防抖 + 门控；窗口卸载仍会兜底立即落盘。
   persistFileMeta();
 }
 
@@ -3888,7 +3788,6 @@ useAppShellThemeWatch({
           @find-highlight-term="(payload) => onFindHighlightTermFromSidebar(payload)"
           @find-highlight-term-prev="(payload) => onFindHighlightTermPrevFromSidebar(payload)"
           @color-all-highlights="onColorAllHighlights"
-          @add-highlight-term="(text: string, _isRegex: boolean) => onAddHighlightTerm({ text, colorIndex: Math.floor(Math.random() * highlightColorsForReader.length) })"
           @update:search-query="searchQuery = $event"
           @update:search-match-case="searchMatchCase = $event"
           @update:search-whole-word="searchWholeWord = $event"

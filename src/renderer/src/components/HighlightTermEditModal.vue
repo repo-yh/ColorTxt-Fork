@@ -62,7 +62,7 @@ const dragIndex = ref<number | null>(null);
 function onTagDragStart(i: number) {
   dragIndex.value = i;
 }
-function onTagDragOver(i: number, ev: DragEvent) {
+function onTagDragOver(ev: DragEvent) {
   ev.preventDefault();
 }
 function onTagDrop(i: number) {
@@ -231,7 +231,7 @@ function focusInput() {
           :title="draftTerms.length > 1 ? '拖动调整顺序' : undefined"
           draggable="true"
           @dragstart="onTagDragStart(i)"
-          @dragover="onTagDragOver(i, $event)"
+          @dragover="onTagDragOver($event)"
           @drop="onTagDrop(i)"
           @dragend="onTagDragEnd"
         >

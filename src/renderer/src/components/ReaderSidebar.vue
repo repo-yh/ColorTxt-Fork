@@ -314,7 +314,6 @@ const emit = defineEmits<{
   ];
   clearInlineSearchHighlight: [];
   clearHighlights: [];
-  addHighlightTerm: [text: string, isRegex: boolean];
   exportBookHighlightsJson: [];
   importBookHighlightsJson: [];
   exportFavoriteHighlightsJson: [];
@@ -625,10 +624,6 @@ async function onHighlightsAiSearchSelect(
 const bookmarksHeaderMoreBtnRef = ref<HTMLButtonElement | null>(null);
 const notesHeaderMoreBtnRef = ref<HTMLButtonElement | null>(null);
 const aiAssistantHeaderMoreBtnRef = ref<HTMLButtonElement | null>(null);
-const addHighlightInputRef = ref<HTMLInputElement | null>(null);
-const showAddHighlightInput = ref(false);
-const addHighlightText = ref("");
-const isRegexMode = ref(false);
 
 const aiAssistantPanelTeleportPopoversOpen = ref(false);
 
@@ -724,30 +719,6 @@ function onPrimaryTabClick(tab: ReaderSidebarTab) {
   }
   emit("update:activeTab", tab);
   if (!props.panelExpanded) emit("requestExpandPanel");
-}
-
-function toggleAddHighlightInput() {
-  if (showAddHighlightInput.value) {
-    showAddHighlightInput.value = false;
-    addHighlightText.value = "";
-    isRegexMode.value = false;
-    return;
-  }
-  showAddHighlightInput.value = true;
-  addHighlightText.value = "";
-  isRegexMode.value = false;
-  nextTick(() => {
-    addHighlightInputRef.value?.focus();
-  });
-}
-
-function onConfirmAddHighlight() {
-  const text = addHighlightText.value.trim();
-  if (!text) return;
-  emit("addHighlightTerm", text, isRegexMode.value);
-  showAddHighlightInput.value = false;
-  addHighlightText.value = "";
-  isRegexMode.value = false;
 }
 
 function bindChapterListRef(value: any) {
@@ -1126,15 +1097,6 @@ defineExpose({
             <span class="svg" v-html="icons.more" />
           </button>
         </div>
-        <div v-else-if="activeTab === 'highlights'" class="sidebarHeaderEnd">
-          <button
-            type="button"
-            class="link hoverMode sidebarTabFooterAction"
-            @click="toggleAddHighlightInput"
-          >
-            添加高亮词
-          </button>
-        </div>
         <div v-else-if="activeTab === 'aiAssistant'" class="sidebarHeaderEnd">
           <button
             ref="aiAssistantHeaderMoreBtnRef"
@@ -1167,33 +1129,6 @@ defineExpose({
           </button>
         </div>
         <div v-else></div>
-      </div>
-      <div v-if="activeTab === 'highlights' && showAddHighlightInput" class="highlightAddInput">
-        <input
-          ref="addHighlightInputRef"
-          type="text"
-          v-model="addHighlightText"
-          :placeholder="isRegexMode ? '输入正则表达式' : '输入高亮词（regex: 前缀支持正则）'"
-          class="highlightAddInputField"
-          @keydown.enter="onConfirmAddHighlight"
-        />
-        <button
-          type="button"
-          class="link hoverMode sidebarTabFooterAction highlightRegexBtn"
-          :class="{ 'highlightRegexBtn--active': isRegexMode }"
-          :title="isRegexMode ? '关闭正则' : '打开正则'"
-          @click="isRegexMode = !isRegexMode"
-        >
-          .*
-        </button>
-        <button
-          type="button"
-          class="link hoverMode sidebarTabFooterAction"
-          :title="addHighlightText.trim() ? '添加高亮词' : '输入内容'"
-          @click="onConfirmAddHighlight"
-        >
-          确认
-        </button>
       </div>
       <ChapterListPanel
         ref="chapterListPanelRef"
@@ -1273,7 +1208,6 @@ defineExpose({
         :highlight-colors="highlightColors"
         :monaco-font-family="monacoFontFamily"
         :menu-anchor-el="highlightsHeaderMoreBtnRef"
-        @add-highlight-term="toggleAddHighlightInput"
         @find-highlight-term="emit('findHighlightTerm', $event)"
         @find-highlight-term-prev="emit('findHighlightTermPrev', $event)"
         @color-all-highlights="emit('colorAllHighlights', $event)"
@@ -1832,43 +1766,5 @@ defineExpose({
   font-size: 12px;
   color: var(--tab-fg);
   white-space: nowrap;
-}
-
-.highlightAddInput {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg);
-}
-
-.highlightAddInputField {
-  width: 100%;
-  flex: 1;
-  padding: 6px 10px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: var(--bg);
-  color: var(--fg);
-  font-size: 13px;
-  outline: none;
-  box-sizing: border-box;
-}
-
-.highlightAddInputField:focus {
-  border-color: var(--primary);
-}
-
-.highlightRegexBtn {
-  font-weight: 600;
-  border-radius: 3px;
-}
-
-.highlightRegexBtn--active {
-  color: var(--fg);
-  font-weight: 700;
-  background: color-mix(in srgb, var(--muted) 18%, transparent);
 }
 </style>

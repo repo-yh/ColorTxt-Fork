@@ -338,10 +338,6 @@ function expandHighlightMapToListTerms(
   return out;
 }
 
-function groupTextsOfGroups(groups: HighlightWord[][]): string[][] {
-  return groups.map((g) => g.map((w) => w.text));
-}
-
 export function buildHighlightListTerms(
   global: HighlightWordsByIndex | undefined,
   book: HighlightWordsByIndex | undefined,
