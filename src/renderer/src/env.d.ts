@@ -69,6 +69,48 @@ declare global {
       pathEncoded?: string;
       active: boolean;
     }>;
+    __colorTxtGetFullText?: (opts: {
+      chapterIndex?: number;
+      start?: number;
+      end?: number;
+    }) => Promise<
+      | { ok: false; reason: string }
+      | {
+          ok: true;
+          body: string;
+          start: number;
+          end: number;
+          total: number;
+        }
+    >;
+    /** 章节列表（当前书）：供内置 AI 补全章节名 */
+    __colorTxtGetChapterTitles?: () => Promise<
+      | { ok: false; reason: string }
+      | {
+          ok: true;
+          chapters: Array<{
+            chapterIndex: number;
+            title: string;
+            lineNumber: number;
+            charCount: number;
+          }>;
+        }
+    >;
+    /** 补全章节名（当前书）：保留原标题前缀，批量替换标题行并写回磁盘 */
+    __colorTxtApplyChapterTitles?: (payload: {
+      items?: Array<{ chapterIndex: number; title: string }>;
+    }) => Promise<
+      | { ok: false; reason: string; skipped?: Array<{ chapterIndex: number; reason: string }> }
+      | {
+          ok: true;
+          applied: Array<{
+            chapterIndex: number;
+            oldTitle: string;
+            newTitle: string;
+          }>;
+          skipped: Array<{ chapterIndex: number; reason: string }>;
+        }
+    >;
   }
 }
 
