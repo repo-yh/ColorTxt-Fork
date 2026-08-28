@@ -9,6 +9,7 @@ import {
   nextTick,
 } from "vue";
 import * as monaco from "monaco-editor";
+import { md5 } from "js-md5";
 import kingHwaFontUrl from "../assets/KingHwa_OldSong1.0.ttf?url";
 import {
   type ChapterStickyLine,
@@ -3334,8 +3335,13 @@ function buildLineHtml(
 
 const chaptersCache = new Map<
   string,
-  { title: string; line: number }[]
+  { text: string; list: { title: string; line: number }[] }
 >();
+
+/** 章节缓存指纹：全文 MD5，检测正文变化后失效章节缓存 */
+function chapterTextFingerprint(fullText: string): string {
+  return md5(fullText);
+}
 
 function buildChapterList(
   fullText: string,
@@ -3345,10 +3351,11 @@ function buildChapterList(
   chapterList: { title: string; line: number }[];
   chapterLineSet: Set<number>;
 } {
+  const fingerprint = chapterTextFingerprint(fullText);
   const cached = chaptersCache.get(filePath);
-  if (cached) {
-    const set = new Set(cached.map((c) => c.line));
-    return { chapterList: cached, chapterLineSet: set };
+  if (cached && cached.text === fingerprint) {
+    const set = new Set(cached.list.map((c) => c.line));
+    return { chapterList: cached.list, chapterLineSet: set };
   }
 
   // md 走 ATX 标题层级检测（与侧边章节栏一致），txt 走章节匹配正则
@@ -3372,7 +3379,7 @@ function buildChapterList(
     chapterLineSet.add(targetLine);
     return { title: titleText, line: targetLine };
   });
-  chaptersCache.set(filePath, chapterList);
+  chaptersCache.set(filePath, { text: fingerprint, list: chapterList });
   return { chapterList, chapterLineSet };
 }
 
