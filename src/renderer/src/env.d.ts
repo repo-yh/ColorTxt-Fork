@@ -66,6 +66,7 @@ declare global {
     __colorTxtGetFileList?: () => Array<{
       name: string;
       path: string;
+      pathEncoded?: string;
       active: boolean;
     }>;
   }

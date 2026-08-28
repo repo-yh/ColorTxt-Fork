@@ -35,6 +35,8 @@ export type ContentResult =
 export type FileListItem = {
   name: string;
   path: string;
+  /** path 的 URL 编码副本（application/x-www-form-urlencoded，空格 → +），供直接拼 URL 请求 content 等接口 */
+  pathEncoded?: string;
   active: boolean;
 };
 
