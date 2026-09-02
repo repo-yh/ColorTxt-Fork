@@ -48,7 +48,7 @@
     "@types/sortablejs": "^1.15.9",
     "@types/ws": "^8.5.14",
     "@vitejs/plugin-vue": "^5.2.3",
-    "@xmldom/xmldom": "^0.9.10",
+    "@xmldom/xmldom": "^0.9.12",
     "cheerio": "^1.2.0",
     "d3-cloud": "^1.2.7",
     "d3-scale": "^4.0.2",
