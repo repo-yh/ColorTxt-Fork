@@ -27,7 +27,7 @@
     "iconv-lite": "^0.7.2",
     "js-md5": "^0.9.2",
     "mdict-js": "^10.0.1",
-    "opencc": "^1.3.1",
+    "opencc": "1.3.1",
     "sharp": "file:scripts/sharp-pack-stub",
     "sqlite-vec": "^0.1.6",
     "ws": "^8.18.0"
@@ -36,6 +36,9 @@
     "sharp": "file:scripts/sharp-pack-stub",
     "@huggingface/transformers": {
       "sharp": "file:scripts/sharp-pack-stub"
+    },
+    "fs-web": {
+      "path": "0.12.7"
     }
   },
   "devDependencies": {
@@ -279,5 +282,13 @@
       "owner": "repo-yh",
       "repo": "ColorTxt-Fork"
     }
+  },
+  "allowScripts": {
+    "electron@35.7.5": true,
+    "better-sqlite3@12.11.1": true,
+    "onnxruntime-node@1.21.0": true,
+    "esbuild@0.25.12": true,
+    "protobufjs@7.6.6": true,
+    "electron-winstaller@5.4.0": true
   }
 }
