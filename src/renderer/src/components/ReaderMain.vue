@@ -4115,7 +4115,6 @@ async function buildHighlightLines(
 async function getFullText(
   fullText: string,
   filePath: string,
-  highlightWords: HighlightWordsByIndex | undefined,
   opts: { chapterIndex?: number; start?: number; end?: number },
 ): Promise<
   | { ok: false; reason: string }
@@ -4297,10 +4296,10 @@ defineExpose({
   getFullText: async (
     fullText: string,
     filePath: string,
-    highlightWords: HighlightWordsByIndex | undefined,
+    _highlightWords: HighlightWordsByIndex | undefined,
     opts: { chapterIndex?: number; start?: number; end?: number },
   ) => {
-    return getFullText(fullText, filePath, highlightWords, opts);
+    return getFullText(fullText, filePath, opts);
   },
 
   generateColoredHtml: async () => {
