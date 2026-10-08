@@ -493,12 +493,18 @@ function commitGroupTermOrder(
   if (!moved) return;
   if (fromIndex < to) to -= 1;
   next.splice(to, 0, moved);
+  // 按 text 找回原始 HighlightWord，保留 isRegex
+  const sourceWords = item.storedWords;
+  const nextWords = next.map((t: string) => {
+    const w = sourceWords?.find((x) => x.text === t);
+    return w ? { ...w } : { text: t };
+  });
   suppressItemClick.value = true;
   emit("commitHighlightGroup", {
     mode: "edit",
     scope: item.scope,
     colorIndex: item.colorIndex,
-    terms: next.map((t: string) => ({ text: t })),
+    terms: nextWords,
     replaceStoredTerms: [...item.storedTerms],
   });
 }

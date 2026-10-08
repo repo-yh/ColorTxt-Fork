@@ -3,6 +3,7 @@ import { computed, nextTick, ref, watch } from "vue";
 import { icons } from "../icons";
 import { useAnchoredAppShellMenu } from "../composables/useAnchoredAppShellMenu";
 import { normalizeHighlightGroup, parseHighlightInputTerms } from "../utils/highlightWords";
+import { useSortableReorder } from "../composables/useSortableReorder";
 import type { HighlightWord } from "../stores/fileMetaStore";
 import AppModal from "./AppModal.vue";
 import AppCheckbox from "./AppCheckbox.vue";
@@ -59,25 +60,26 @@ const splitOnCommit = ref(true);
 const inputEl = ref<HTMLInputElement | null>(null);
 const tagInputRef = ref<HTMLElement | null>(null);
 const colorBtnRef = ref<HTMLButtonElement | null>(null);
-const dragIndex = ref<number | null>(null);
+const tagCount = computed(() => draftTerms.value.length);
 
-function onTagDragStart(i: number) {
-  dragIndex.value = i;
-}
-function onTagDragOver(ev: DragEvent) {
-  ev.preventDefault();
-}
-function onTagDrop(i: number) {
-  if (dragIndex.value == null || dragIndex.value === i) return;
-  const arr = draftTerms.value.slice();
-  const [item] = arr.splice(dragIndex.value, 1);
-  arr.splice(i, 0, item!);
-  draftTerms.value = arr;
-  dragIndex.value = null;
-}
-function onTagDragEnd() {
-  dragIndex.value = null;
-}
+useSortableReorder({
+  containerRef: tagInputRef,
+  draggable: ".hlTag",
+  handle: false,
+  filter: ".hlTagRemove, .hlTagField",
+  preferDraggableIndex: true,
+  active: open,
+  itemCount: tagCount,
+  enabled: computed(() => draftTerms.value.length > 1),
+  onReorder(from, to) {
+    if (from === to) return;
+    const arr = draftTerms.value.slice();
+    const [item] = arr.splice(from, 1);
+    if (!item) return;
+    arr.splice(to, 0, item);
+    draftTerms.value = arr;
+  },
+});
 
 const title = computed(() =>
   props.mode === "add" ? "添加高亮词" : "编辑高亮词",
@@ -231,18 +233,13 @@ function focusInput() {
       >
         <span
           v-for="(term, i) in draftTerms"
-          :key="i"
+          :key="term.text"
           class="hlTag"
           :style="{
             backgroundColor: highlightPreviewBg,
             color: draftColor,
           }"
           :title="draftTerms.length > 1 ? '拖动调整顺序' : undefined"
-          draggable="true"
-          @dragstart="onTagDragStart(i)"
-          @dragover="onTagDragOver($event)"
-          @drop="onTagDrop(i)"
-          @dragend="onTagDragEnd"
         >
           <span class="hlTagText">{{ term.text }}</span>
           <span
