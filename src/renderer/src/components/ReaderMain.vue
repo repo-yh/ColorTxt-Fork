@@ -65,7 +65,7 @@ import {
 } from "../monaco/txtrTextMonarch";
 import { installReaderScrollKeyHandler } from "../monaco/readerKeyScroll";
 import { installReaderReadOnlyImeGuard } from "../monaco/readerReadOnlyImeGuard";
-import { scheduleReaderBackgroundStickyAlign } from "../constants/readerBackground";
+import { flushReaderBackgroundStickyAlign, scheduleReaderBackgroundStickyAlign } from "../constants/readerBackground";
 import {
   applyLeadIndentFullWidth,
   buildChaptersFromPlainText,
@@ -5224,14 +5224,14 @@ onMounted(() => {
     }
     const d1 = e.onDidScrollChange(() => {
       emitProbeLine(true);
-      scheduleReaderBackgroundStickyAlign();
+      flushReaderBackgroundStickyAlign();
       scheduleReadingRulerFollowViewport();
     });
     const dLayout = e.onDidLayoutChange(() => {
-      scheduleReaderBackgroundStickyAlign();
+      flushReaderBackgroundStickyAlign();
       refreshReadingRulerDecorations();
     });
-    window.addEventListener("resize", scheduleReaderBackgroundStickyAlign);
+    window.addEventListener("resize", flushReaderBackgroundStickyAlign);
     const d2 = e.onDidChangeCursorPosition(() => {
       emitProbeLine(false);
       syncMinimapCursorLineDecoration();
@@ -5415,7 +5415,7 @@ onMounted(() => {
     onBeforeUnmount(() => {
       d1.dispose();
       dLayout.dispose();
-      window.removeEventListener("resize", scheduleReaderBackgroundStickyAlign);
+      window.removeEventListener("resize", flushReaderBackgroundStickyAlign);
       d2.dispose();
       dSel.dispose();
       d3.dispose();

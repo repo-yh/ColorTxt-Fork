@@ -136,6 +136,7 @@ import clickModeIcon from "./assets/click_mode.svg?raw";
 import readingRulerIcon from "./assets/reading_ruler.svg?raw";
 import eyedropperIcon from "./assets/eyedropper.svg?raw";
 import stealthModeIcon from "./assets/emituofo.svg?raw";
+import locationIcon from "./assets/location.svg?raw";
 
 /** 角色卡「语音」播放动画帧：speak_0 → speak_1 → speak */
 export const speakIconAnimFrames = [
@@ -340,4 +341,6 @@ export const icons = {
   eyedropper: eyedropperIcon,
   /** 摸鱼模式 */
   stealthMode: stealthModeIcon,
+  /** 侧栏列表：定位到当前项 */
+  location: locationIcon,
 } as const;

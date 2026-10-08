@@ -1,18 +1,18 @@
 /**
- * 任意 `.md`：解析 `<span id>`、内部 `[…](#fragment)` 与外链 `[…](https://…)`，产出侧车供 ReaderMain 装饰。
+ * 任意 `.md`：解析 `<span id>`、内部 `[…](#fragment)`、外链 `[…](https://…)` 与行内 `![…](…)`，产出侧车供 ReaderMain 装饰。
  */
 
 import { yieldToUi } from "../ebook/yieldToUi";
 import {
   type MdInternalLinkOccurrence,
-  type ParsedMdExternalLink,
-  type ParsedMdInternalLink,
-  lineContainsMdStripLink,
+  isExclusiveBlockMarkdownImageLine,
+  lineContainsMdStripMarkup,
   parseMdLinkTitleAttr,
   scanMdInternalLinkAt,
-  scanNextMdLinkAt,
+  scanNextMdStripTokenAt,
   visibleTextForMdLinkLabel,
   MD_LINK_EMPTY_PLACEHOLDER,
+  MD_LINK_ICON_PLACEHOLDER,
 } from "./markdownLinkShared";
 
 const RE_SPAN_ID =
@@ -72,18 +72,6 @@ function collectLeadingMdLinkLabelsFromLine(rawLine: string): string[] {
   return labels;
 }
 
-type NextMdLinkMatch =
-  | { kind: "internal"; link: ParsedMdInternalLink }
-  | { kind: "external"; link: ParsedMdExternalLink };
-
-function nextMdLinkMatch(line: string, from: number): NextMdLinkMatch | null {
-  const hit = scanNextMdLinkAt(line, from);
-  if (!hit) return null;
-  return hit.kind === "internal"
-    ? { kind: "internal", link: hit.link }
-    : { kind: "external", link: hit.link };
-}
-
 function pushMdLinkOccurrence(
   out: MdInternalLinkOccurrence[],
   physicalLine: number,
@@ -96,6 +84,7 @@ function pushMdLinkOccurrence(
     hoverTip?: string;
     builtinLinkIcon?: boolean;
     externalUrl?: string;
+    inlineImage?: boolean;
   },
 ): void {
   out.push({
@@ -108,6 +97,7 @@ function pushMdLinkOccurrence(
     hoverTip: fields.hoverTip,
     builtinLinkIcon: fields.builtinLinkIcon,
     externalUrl: fields.externalUrl,
+    inlineImage: fields.inlineImage,
   });
 }
 
@@ -116,12 +106,41 @@ function replaceMdLinksOnLine(
   physicalLine: number,
   out: MdInternalLinkOccurrence[],
 ): string {
+  /** 独占行插图留给 View Zone，语法原样留下；同行若还有内链仍剥离 */
+  const skipExclusiveImage = isExclusiveBlockMarkdownImageLine(line);
+
   let result = "";
   let last = 0;
   let searchFrom = 0;
   while (searchFrom < line.length) {
-    const hit = nextMdLinkMatch(line, searchFrom);
+    const hit = scanNextMdStripTokenAt(line, searchFrom);
     if (!hit) break;
+
+    if (hit.kind === "image") {
+      const parsed = hit.image;
+      const index = parsed.index;
+      if (skipExclusiveImage) {
+        result += line.slice(last, index + parsed.full.length);
+        last = index + parsed.full.length;
+        searchFrom = last;
+        continue;
+      }
+      result += line.slice(last, index);
+      const visible = MD_LINK_ICON_PLACEHOLDER;
+      const colStart = result.length + 1;
+      const hoverTip = parsed.title?.trim() || parsed.alt.trim() || undefined;
+      pushMdLinkOccurrence(out, physicalLine, colStart, visible, {
+        targetId: "",
+        label: parsed.alt.trim(),
+        iconRel: parsed.url,
+        hoverTip,
+        inlineImage: true,
+      });
+      result += visible;
+      last = index + parsed.full.length;
+      searchFrom = last;
+      continue;
+    }
 
     if (hit.kind === "internal") {
       const parsed = hit.link;
@@ -208,8 +227,8 @@ export function stripMdInternalLinksFromPhysicalLines(
     const raw = physicalLines[i] ?? "";
     const hasSpan = RE_SPAN_ID.test(raw);
     RE_SPAN_ID.lastIndex = 0;
-    const hasLink = lineContainsMdStripLink(raw);
-    if (!hasSpan && !hasLink) {
+    const hasMarkup = lineContainsMdStripMarkup(raw);
+    if (!hasSpan && !hasMarkup) {
       strippedLines.push(raw);
       continue;
     }
@@ -254,8 +273,8 @@ export async function stripMdInternalLinksFromPhysicalLinesAsync(
     const raw = physicalLines[i] ?? "";
     const hasSpan = RE_SPAN_ID.test(raw);
     RE_SPAN_ID.lastIndex = 0;
-    const hasLink = lineContainsMdStripLink(raw);
-    if (!hasSpan && !hasLink) {
+    const hasMarkup = lineContainsMdStripMarkup(raw);
+    if (!hasSpan && !hasMarkup) {
       strippedLines.push(raw);
       continue;
     }

@@ -164,9 +164,7 @@ export function useAppVoiceRead(deps: {
     return gen === playbackLoopGen && modeValue !== "off";
   }
 
-  /** 当前批次（供段高亮与行锚点） */
-  let activeBatchEnd = 0;
-  let activeChunks: VoiceReadSpeakChunk[] = [];
+  /** 当前批次各段对应的正文行（供段高亮与行锚点） */
   let activeChunkToLine: number[] = [];
 
   watch(mode, (m) => {
@@ -418,8 +416,6 @@ export function useAppVoiceRead(deps: {
   }
 
   function clearActiveBatch() {
-    activeBatchEnd = 0;
-    activeChunks = [];
     activeChunkToLine = [];
     currentChunkIndex = 0;
   }
@@ -774,8 +770,6 @@ export function useAppVoiceRead(deps: {
       const chunks = batchBuilt.chunks;
       const chunkToModelLine = batchBuilt.chunkToModelLine;
 
-      activeBatchEnd = batchEnd;
-      activeChunks = chunks;
       activeChunkToLine = chunkToModelLine;
 
       if (chunks.length === 0) {

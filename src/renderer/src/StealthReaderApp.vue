@@ -43,11 +43,14 @@ const renderFontFamily = computed(() =>
 );
 const hovered = ref(false);
 const menuOpen = ref(false);
+/** 右键菜单刚关闭时，吞掉用于点空白收起菜单的那次单击翻页 */
+let suppressPageFlipAfterMenu = false;
+let suppressPageFlipAfterMenuTimer: ReturnType<typeof setTimeout> | undefined;
 const pageText = ref("");
 /** 源窗换章请求中（未缓存章可能较慢） */
 const chapterLoading = ref(false);
-/** 打开后绿底找窗；首次 hover 后改用设置里的样式 */
-const locateUntilHover = ref(true);
+/** 打开后显示左右点按翻页提示层；点击后关闭 */
+const showPageTapHint = ref(true);
 
 let text = "";
 let lineStarts: number[] = [0];
@@ -91,8 +94,6 @@ const textColorCss = computed(() => {
 });
 
 const paintBgCss = computed(() => {
-  // 定位绿底用 class + !important，这里只处理用户背景
-  if (locateUntilHover.value) return "transparent";
   if (!contentVisible.value) return "transparent";
   const a = settings.value.bgOpacity;
   if (a <= 0) return "transparent";
@@ -107,10 +108,10 @@ const fontStyleCss = computed(() =>
   settings.value.fontItalic ? "italic" : "normal",
 );
 
-function endLocateUntilHover(): void {
-  if (!locateUntilHover.value) return;
-  locateUntilHover.value = false;
-  // 绿底略不透明，结束后带微移重申透明
+function endPageTapHint(): void {
+  if (!showPageTapHint.value) return;
+  showPageTapHint.value = false;
+  // 提示层略不透明，结束后带微移重申透明
   requestRefreshTransparency(true);
 }
 
@@ -120,16 +121,15 @@ function requestRefreshTransparency(nudge = false): void {
 
 function onRootPointerEnter(): void {
   hovered.value = true;
-  if (locateUntilHover.value) {
-    endLocateUntilHover();
-  } else {
-    // 悬停触发重绘 + 主进程重申透明，便于从 DWM 实心底恢复
-    requestRefreshTransparency();
-  }
+  // 拖/缩放中不要刷透明：Win11 上易与 setPosition/setBounds 打架导致窗尺寸漂移
+  if (pointerDown) return;
+  // 悬停触发重绘 + 主进程重申透明，便于从 DWM 实心底恢复
+  requestRefreshTransparency();
 }
 
 function onRootPointerLeave(): void {
   hovered.value = false;
+  if (pointerDown) return;
   requestRefreshTransparency();
 }
 
@@ -677,6 +677,7 @@ async function syncLastBoundsFromWindow(): Promise<void> {
   if (!bounds) return;
   const prev = lastBounds;
   lastBounds = bounds;
+  syncRootBoxToBounds(bounds);
   if (
     prev.width !== bounds.width ||
     prev.height !== bounds.height ||
@@ -686,6 +687,16 @@ async function syncLastBoundsFromWindow(): Promise<void> {
     settings.value = { ...settings.value, bounds };
     saveStealthReaderSettings(settings.value);
   }
+}
+
+/** Windows OS 可能把窗撑得比逻辑尺寸高；根节点按逻辑宽高排版，下方透明区靠 setShape 点穿。 */
+function syncRootBoxToBounds(bounds: StealthBounds): void {
+  const root = rootEl.value;
+  if (!root) return;
+  const w = Math.max(1, Math.round(bounds.width));
+  const h = Math.max(1, Math.round(bounds.height));
+  root.style.width = `${w}px`;
+  root.style.height = `${h}px`;
 }
 
 function onContextMenu(ev: MouseEvent): void {
@@ -843,6 +854,7 @@ function applyResize(ev: PointerEvent): void {
     width: Math.round(width),
     height: Math.round(height),
   };
+  syncRootBoxToBounds(lastBounds);
   window.colorTxt.stealthReaderSetBounds(lastBounds);
 }
 
@@ -868,6 +880,18 @@ function finishPointer(ev: PointerEvent, commitClick: boolean): void {
     return;
   }
   if (!commitClick || ev.detail > 1) return;
+  if (suppressPageFlipAfterMenu) {
+    suppressPageFlipAfterMenu = false;
+    if (suppressPageFlipAfterMenuTimer != null) {
+      clearTimeout(suppressPageFlipAfterMenuTimer);
+      suppressPageFlipAfterMenuTimer = undefined;
+    }
+    return;
+  }
+  if (showPageTapHint.value) {
+    endPageTapHint();
+    return;
+  }
   const el = rootEl.value;
   if (!el) return;
   if (ev.clientX >= el.clientWidth / 2) requestPageFlip(1);
@@ -894,8 +918,15 @@ function onPointerMove(ev: PointerEvent): void {
   if (dragging) {
     const x = originBounds.x + dx;
     const y = originBounds.y + dy;
-    lastBounds = { ...lastBounds, x, y };
-    window.colorTxt.stealthReaderSetPosition(x, y);
+    // 移动也带上宽高走 setBounds：避免 Win11 上 setPosition 让 HWND 尺寸漂移
+    lastBounds = {
+      ...lastBounds,
+      x: Math.round(x),
+      y: Math.round(y),
+      width: originBounds.width,
+      height: originBounds.height,
+    };
+    window.colorTxt.stealthReaderSetBounds(lastBounds);
   }
 }
 
@@ -941,7 +972,11 @@ function onWheel(ev: WheelEvent): void {
 async function boot(payload: StealthPagePayload): Promise<void> {
   applyPagePayload(payload);
   const bounds = await window.colorTxt.stealthReaderGetBounds();
-  if (bounds) lastBounds = bounds;
+  if (bounds) {
+    lastBounds = bounds;
+    await nextTick();
+    syncRootBoxToBounds(bounds);
+  }
   await nextTick();
   if (isStealthTerminalFont(settings.value.fontFamily)) {
     await refreshTerminalFace();
@@ -958,7 +993,7 @@ async function boot(payload: StealthPagePayload): Promise<void> {
   relayoutFromCurrentStart();
 }
 
-/** 源窗热换章：重置正文与行表，不重启定位绿底 */
+/** 源窗热换章：重置正文与行表，不重启点按提示层 */
 function applyPagePayload(payload: StealthPagePayload): void {
   clearPageCache();
   text = payload.text;
@@ -1066,6 +1101,16 @@ onMounted(() => {
   unsubscribers.push(
     window.colorTxt.onStealthReaderMenuOpen((open) => {
       menuOpen.value = open;
+      if (open) return;
+      // 原生菜单点窗外关闭时，同一次点击还会落到覆盖层并翻页；吞掉紧随其后的单击
+      suppressPageFlipAfterMenu = true;
+      if (suppressPageFlipAfterMenuTimer != null) {
+        clearTimeout(suppressPageFlipAfterMenuTimer);
+      }
+      suppressPageFlipAfterMenuTimer = setTimeout(() => {
+        suppressPageFlipAfterMenu = false;
+        suppressPageFlipAfterMenuTimer = undefined;
+      }, 400);
     }),
   );
   const el = pageEl.value;
@@ -1108,10 +1153,13 @@ onBeforeUnmount(() => {
   resizeObserver?.disconnect();
   if (relayoutTimer != null) clearTimeout(relayoutTimer);
   if (persistTimer != null) clearTimeout(persistTimer);
+  if (suppressPageFlipAfterMenuTimer != null) {
+    clearTimeout(suppressPageFlipAfterMenuTimer);
+  }
   if (pageFlipRaf) cancelAnimationFrame(pageFlipRaf);
   if (lineScrollRaf) cancelAnimationFrame(lineScrollRaf);
   stopTimedScroll();
-  locateUntilHover.value = false;
+  showPageTapHint.value = false;
   clearOwnerChapterNavPending();
   document.documentElement.style.background = "transparent";
   document.body.style.background = "transparent";
@@ -1128,7 +1176,6 @@ onBeforeUnmount(() => {
     class="stealthRoot"
     :class="{
       'is-active': hovered || menuOpen,
-      'stealthRoot--locate-green': locateUntilHover,
     }"
     :style="{
       color: textColorCss,
@@ -1152,6 +1199,18 @@ onBeforeUnmount(() => {
         加载中<LoadingDotsBounce />
       </span>
       <template v-else>{{ pageText }}</template>
+    </div>
+    <div
+      v-if="showPageTapHint"
+      class="stealthTapHint"
+      aria-hidden="true"
+    >
+      <div class="stealthTapHintSide stealthTapHintSide--prev">
+        <span class="stealthTapHintLabel">上一页</span>
+      </div>
+      <div class="stealthTapHintSide stealthTapHintSide--next">
+        <span class="stealthTapHintLabel">下一页</span>
+      </div>
     </div>
     <div class="edge edge--n" data-edge="n"></div>
     <div class="edge edge--s" data-edge="s"></div>
@@ -1207,9 +1266,43 @@ body {
   -webkit-user-select: none;
 }
 
-.stealthRoot--locate-green {
-  /* 略透明，避免实心底把 Windows 透明窗合成锁死 */
-  background-color: rgba(0, 255, 0, 0.3) !important;
+.stealthTapHint {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  pointer-events: none;
+}
+
+.stealthTapHintSide {
+  flex: 1 1 50%;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 180, 0, 0.28);
+}
+
+.stealthTapHintSide--prev {
+  border-right: 2px solid rgba(255, 255, 255, 0.85);
+}
+
+.stealthTapHintLabel {
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  font-family:
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    sans-serif;
+  font-style: normal;
 }
 
 .stealthPage {

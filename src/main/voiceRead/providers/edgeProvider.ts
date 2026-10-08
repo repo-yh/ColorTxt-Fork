@@ -1,6 +1,7 @@
 import type { VoiceReadEdgeTtsRequest } from "@shared/voiceReadEdgeIpc";
 import { getVoiceReadEngineMeta } from "@shared/voiceReadEngines";
-import { arrayBufferForIpc } from "@shared/voiceReadIpcSerialize";import { synthesizeEdgeTtsMp3 } from "../../voiceReadEdgeTts";
+import { arrayBufferForIpc } from "@shared/voiceReadIpcSerialize";
+import { synthesizeEdgeTtsMp3 } from "../../voiceReadEdgeTts";
 import type { VoiceReadTtsProvider } from "./types";
 
 function inferLangFromEdgeVoiceId(voiceId: string): string {
@@ -29,8 +30,8 @@ export const edgeTtsProvider: VoiceReadTtsProvider = {
   engineId: "edge",
   async synthesize(req, signal) {
     if (signal.aborted) throw new Error("interrupted");
-    const mp3 = await synthesizeEdgeTtsMp3(toEdgeRequest(req));
+    const { data, pauses } = await synthesizeEdgeTtsMp3(toEdgeRequest(req));
     if (signal.aborted) throw new Error("interrupted");
-    return { format: "mp3", data: arrayBufferForIpc(mp3) };
+    return { format: "mp3", data: arrayBufferForIpc(data), pauses };
   },
 };

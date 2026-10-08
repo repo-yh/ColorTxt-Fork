@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { computed, nextTick, ref } from "vue";
 import LoadingDotsBounce from "../../components/LoadingDotsBounce.vue";
 import LoadingDotsRotate from "../../components/LoadingDotsRotate.vue";
 import VirtualList from "../../components/VirtualList.vue";
 import { icons } from "../../icons";
 import type { BookChapter } from "@shared/bookSource/types";
 
-withDefaults(
+const props = withDefaults(
   defineProps<{
     chapters: BookChapter[];
     currentDisplayIndex: number;
@@ -35,6 +35,23 @@ const emit = defineEmits<{
 }>();
 
 const chapterListRef = ref<InstanceType<typeof VirtualList> | null>(null);
+
+const canLocateCurrentChapter = computed(() => {
+  const idx = props.currentDisplayIndex;
+  return idx >= 0 && idx < props.chapters.length;
+});
+
+async function onLocateCurrentChapter() {
+  if (!canLocateCurrentChapter.value) return;
+  const idx = props.currentDisplayIndex;
+  await nextTick();
+  requestAnimationFrame(() => {
+    chapterListRef.value?.scrollToIndex(idx, {
+      align: "center",
+      behavior: "smooth",
+    });
+  });
+}
 
 function scrollToIndex(
   ...args: Parameters<InstanceType<typeof VirtualList>["scrollToIndex"]>
@@ -151,7 +168,19 @@ defineExpose({
       </div>
     </div>
     <div v-if="chapters.length" class="sidebarTabFooter">
-      <span class="sidebarTabFooterStat">共 {{ chapters.length }} 章</span>
+      <div class="sidebarTabFooterStart">
+        <span class="sidebarTabFooterStat">共 {{ chapters.length }} 章</span>
+        <button
+          type="button"
+          class="aiActivityLikeBtn"
+          :disabled="!canLocateCurrentChapter"
+          title="定位到当前章节"
+          aria-label="定位到当前章节"
+          @click="onLocateCurrentChapter"
+        >
+          <span class="svg" v-html="icons.location" />
+        </button>
+      </div>
     </div>
   </div>
 </template>
@@ -325,8 +354,15 @@ defineExpose({
   background: var(--bg);
   user-select: none;
 }
-.sidebarTabFooterStat {
+.sidebarTabFooterStart {
   flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.sidebarTabFooterStat {
+  flex: 0 1 auto;
   min-width: 0;
   text-align: left;
   white-space: nowrap;

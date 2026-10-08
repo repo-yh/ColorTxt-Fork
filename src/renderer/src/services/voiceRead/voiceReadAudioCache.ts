@@ -1,6 +1,7 @@
 import { engineConfigFingerprint } from "@shared/voiceReadEngineConfig";
 import { voiceReadEmotionCacheToken } from "@shared/voiceReadEmotion";
 import type { VoiceReadEmotionId } from "@shared/voiceReadEmotion";
+import { clonePausePoints } from "@shared/voiceReadPunctuationPauses";
 import type { VolcengineSpeechSlot } from "@shared/voiceReadVolcengineAudio";
 import type { VoiceReadSettings } from "../../constants/voiceRead";
 import type { VoiceReadSynthesisResult } from "@shared/voiceReadSynthesis";
@@ -118,6 +119,7 @@ export class VoiceReadAudioCache {
       format: prep.format,
       data: prep.data.slice(0),
       sampleRate: prep.sampleRate,
+      pauses: clonePausePoints(prep.pauses),
     };
   }
 }

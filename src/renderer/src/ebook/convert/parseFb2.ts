@@ -145,17 +145,6 @@ function exportImageRelForBinaryId(
   return rel;
 }
 
-function pushImageLineForBinaryId(
-  href: string,
-  binaryById: Map<string, ArrayBuffer>,
-  idToContentType: Map<string, string>,
-  ctx: Fb2ImageCtx,
-  out: string[],
-): void {
-  const rel = exportImageRelForBinaryId(href, binaryById, idToContentType, ctx);
-  if (rel) out.push(formatMdBlockImage(rel));
-}
-
 function flushAccParagraph(acc: { text: string }, out: string[]): void {
   const raw = acc.text.replace(/\u00a0/g, " ").replace(/\s+/g, " ").trim();
   acc.text = "";
@@ -212,9 +201,17 @@ function walkFb2Inline(
           }
         }
       }
-      flushAccParagraph(acc, out);
       const href = getFb2ImageHref(child);
-      pushImageLineForBinaryId(href, binaryById, idToContentType, ctx, out);
+      const rel = exportImageRelForBinaryId(
+        href,
+        binaryById,
+        idToContentType,
+        ctx,
+      );
+      if (rel) {
+        const alt = child.getAttribute("alt")?.trim() ?? "";
+        acc.text += formatMdBlockImage(rel, alt);
+      }
       continue;
     }
     if (tag === "a") {

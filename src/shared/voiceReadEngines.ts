@@ -43,6 +43,8 @@ export type VoiceReadEngineMeta = {
   auth: VoiceReadEngineAuth;
   supportsRate: boolean;
   supportsPitch: boolean;
+  /** 是否支持标点停顿（目前仅 Edge TTS，按 WordBoundary 时间戳在播放端插静音） */
+  supportsPunctuationPauses: boolean;
   voiceSource: VoiceReadEngineVoiceSource;
   audioFormat: VoiceReadEngineAudioFormat;
   /** 相对默认切段单位：edge 较短 */
@@ -50,7 +52,12 @@ export type VoiceReadEngineMeta = {
   defaultVoiceId: string;
 };
 
-type VoiceReadEngineMetaBase = Omit<VoiceReadEngineMeta, "defaultVoiceId">;
+type VoiceReadEngineMetaBase = Omit<
+  VoiceReadEngineMeta,
+  "defaultVoiceId" | "supportsPunctuationPauses"
+> & {
+  supportsPunctuationPauses?: boolean;
+};
 
 const ENGINE_LIST_BASE: VoiceReadEngineMetaBase[] = [
   {
@@ -61,6 +68,7 @@ const ENGINE_LIST_BASE: VoiceReadEngineMetaBase[] = [
     auth: "none",
     supportsRate: true,
     supportsPitch: true,
+    supportsPunctuationPauses: true,
     voiceSource: "static",
     audioFormat: "mp3",
     shortChunks: true,
@@ -141,6 +149,7 @@ const ENGINE_LIST_BASE: VoiceReadEngineMetaBase[] = [
 
 const ENGINE_LIST: VoiceReadEngineMeta[] = ENGINE_LIST_BASE.map((meta) => ({
   ...meta,
+  supportsPunctuationPauses: meta.supportsPunctuationPauses === true,
   defaultVoiceId: defaultVoiceIdForEngine(meta.id),
 }));
 

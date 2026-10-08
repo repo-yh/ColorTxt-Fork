@@ -138,6 +138,10 @@ export type VoiceReadProfileSettings = {
   engine: VoiceReadEngineId;
   rate: number;
   pitch: number;
+  /** 句末停顿（。！？…）时长 ms；0 表示不插入停顿（仅 Edge TTS 生效） */
+  pauseSentenceMs: number;
+  /** 句中停顿（，；：、）时长 ms；0 表示不插入停顿（仅 Edge TTS 生效） */
+  pauseCommaMs: number;
   /** 播放音量，0～1；不参与 TTS 合成与音频缓存键 */
   volume: number;
   /** 为 false 时不向支持情绪的引擎传递语气/情绪参数 */
@@ -448,6 +452,11 @@ export function normalizeVoiceReadProfileSettingsFromPartial(
     multi: mergeVoiceReadMultiVoiceSettings(src.multi),
     rate: typeof src.rate === "number" ? src.rate : 1,
     pitch: typeof src.pitch === "number" ? src.pitch : 1,
+    // 默认关闭：老存档无字段保持原听感；0 表示关闭（仅 Edge TTS 生效）
+    pauseSentenceMs:
+      typeof src.pauseSentenceMs === "number" ? src.pauseSentenceMs : 0,
+    pauseCommaMs:
+      typeof src.pauseCommaMs === "number" ? src.pauseCommaMs : 0,
     volume: typeof src.volume === "number" ? src.volume : 1,
     emotionEnabled: src.emotionEnabled !== false,
     dashscopeApiKey: engineConfig.dashscopeApiKey?.trim() ?? legacyDash.trim(),

@@ -1812,6 +1812,12 @@ export function useAppPersistence(deps: {
       bookPackUnpackDirKeyPresent,
       characterPortraitCacheDirKeyPresent,
     } = loadPersistedSettings();
+    /**
+     * 须在首次 `await` 之前同步加载：设置里的「打开时间」排序会立刻触发侧栏快照；
+     * 若等 hydrate 之后再 loadFileMeta，会在空 meta 上拍快照，启动后顺序错乱。
+     */
+    loadRecentFiles();
+    loadFileMeta();
     await hydrateVoiceReadSecretsFromVault();
     await hydrateTranslationSecretsFromVault();
     settingsLoaded.value = true;
@@ -1842,8 +1848,6 @@ export function useAppPersistence(deps: {
     if (needDefaultSettingsPersist) {
       persistSettings();
     }
-    loadRecentFiles();
-    loadFileMeta();
     if (!storageSyncBound) {
       window.addEventListener("storage", onStorageSync);
       storageSyncBound = true;

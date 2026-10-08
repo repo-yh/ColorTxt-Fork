@@ -13,7 +13,7 @@ export const STEALTH_READER_IPC = {
   setPosition: "stealthReader:setPosition",
   setMinSize: "stealthReader:setMinSize",
   blur: "stealthReader:blur",
-  /** 重申窗口透明（不改尺寸）；设置窗抢焦点 / 定位绿底结束后用 */
+  /** 重申窗口透明（不改尺寸）；设置窗抢焦点 / 点按提示层结束后用 */
   refreshTransparency: "stealthReader:refreshTransparency",
   prepareEyedropper: "stealthReader:prepareEyedropper",
   restoreEyedropper: "stealthReader:restoreEyedropper",

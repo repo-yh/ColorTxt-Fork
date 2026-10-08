@@ -105,7 +105,17 @@ function nameRefMap(dictStr: string): Array<{ name: string; obj: number }> {
 async function inflateZlib(data: Uint8Array): Promise<Uint8Array> {
   const tryFmt = async (fmt: CompressionFormat) => {
     const ds = new DecompressionStream(fmt);
-    const out = await new Response(new Blob([data]).stream().pipeThrough(ds)).arrayBuffer();
+    const copy = data.slice();
+    const out = await new Response(
+      new Blob([
+        copy.buffer.slice(
+          copy.byteOffset,
+          copy.byteOffset + copy.byteLength,
+        ) as ArrayBuffer,
+      ])
+        .stream()
+        .pipeThrough(ds),
+    ).arrayBuffer();
     return new Uint8Array(out);
   };
   try {
@@ -645,13 +655,10 @@ export async function decodePdfXObjectImage(
       const px = Math.floor(rgba.length / 4);
       const w = img.width;
       const h = w > 0 ? Math.max(1, Math.floor(px / w)) : img.height;
-      const im = new ImageData(
-        rgba instanceof Uint8ClampedArray
-          ? rgba.subarray(0, w * h * 4)
-          : new Uint8ClampedArray(rgba.buffer, rgba.byteOffset, w * h * 4),
-        w,
-        h,
-      );
+      const n = w * h * 4;
+      const pixels = new Uint8ClampedArray(n);
+      pixels.set(rgba.subarray(0, n));
+      const im = new ImageData(pixels, w, h);
       const png = await imageDataToPngBuffer(im);
       return png ? { data: png, ext: "png" } : null;
     }

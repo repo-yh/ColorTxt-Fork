@@ -1,5 +1,6 @@
 /**
- * 电子书转换 → Markdown：锚点 `<span id>`、内/外链 `[…](#frag)` / `[…](https://…)`、块级图 `![…](rel)`。
+ * 电子书转换 → Markdown：锚点 `<span id>`、内/外链 `[…](#frag)` / `[…](https://…)`、
+ * 图片 `![…](rel)`（独占行为块级插图，夹在正文中为行内字形图）。
  */
 
 const MD_LINK_HINT_MAX = 40;

@@ -986,7 +986,7 @@ export function registerMainIpcHandlers(
         typeof o.pitch === "number" && Number.isFinite(o.pitch) ? o.pitch : 1;
       const req: VoiceReadEdgeTtsRequest = { text, voice, lang, rate, pitch };
       try {
-        const mp3 = await synthesizeEdgeTtsMp3(req);
+        const { data: mp3 } = await synthesizeEdgeTtsMp3(req);
         return { ok: true, mp3 };
       } catch (e) {
         return {

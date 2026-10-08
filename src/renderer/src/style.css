@@ -243,23 +243,34 @@ body,
 
 /*
  * 粘性章节条：实心底色挡住滚动正文，::before 用与阅读表面相同的图并对齐
- *（`--reader-bg-align-*` 由 scheduleReaderBackgroundStickyAlign 写入）。
+ *（`--reader-bg-align-*` 只写在 `.sticky-widget` 上，标题行继承，避免缩放时各行各自算偏移对不齐）。
+ * 标题行也要叠纹理：末行上滑时父级行靠实心底色挡住下层字，不能整条只铺一层图。
  */
-.readerPane .monaco-editor .sticky-widget::before {
+.readerPane .monaco-editor .sticky-widget::before,
+.readerPane .monaco-editor .sticky-widget .sticky-line-content::before,
+.readerPane .monaco-editor .sticky-widget .sticky-line-number::before {
   content: "";
   position: absolute;
   pointer-events: none;
-  z-index: 0;
+  /* 低于标题文字：Monaco 用 position:absolute + top 叠层，勿给 .sticky-line-content 改 position */
+  z-index: -1;
   width: var(--reader-bg-align-w, 100%);
   height: var(--reader-bg-align-h, 100%);
-  left: var(--reader-bg-align-x, 0px);
-  top: var(--reader-bg-align-y, 0px);
   background-image: var(--reader-bg-image, none);
   background-repeat: var(--reader-bg-image-repeat, no-repeat);
   background-size: var(--reader-bg-image-size, cover);
   background-position: var(--reader-bg-image-position, right top);
   mix-blend-mode: var(--reader-bg-image-blend, normal);
   opacity: var(--reader-bg-image-opacity, 0);
+}
+.readerPane .monaco-editor .sticky-widget::before {
+  left: var(--reader-bg-align-x, 0px);
+  top: var(--reader-bg-align-y, 0px);
+}
+.readerPane .monaco-editor .sticky-widget .sticky-line-content::before,
+.readerPane .monaco-editor .sticky-widget .sticky-line-number::before {
+  left: calc(var(--reader-bg-align-x, 0px) - var(--sticky-line-dx, 0px));
+  top: calc(var(--reader-bg-align-y, 0px) - var(--sticky-line-dy, 0px));
 }
 
 /* 滚动条样式 */

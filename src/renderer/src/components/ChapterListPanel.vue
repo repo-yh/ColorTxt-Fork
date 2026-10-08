@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch, type ComponentPublicInstance } from "vue";
+import { computed, nextTick, ref, watch, type ComponentPublicInstance } from "vue";
 import type { Chapter } from "../chapter";
 import { icons } from "../icons";
 import { useAnchoredAppShellMenu } from "../composables/useAnchoredAppShellMenu";
@@ -181,6 +181,25 @@ function displayedIndexOfActive(): number {
   return displayedChapters.value.findIndex((ch) => props.isChapterActive(ch));
 }
 
+const canLocateCurrentChapter = computed(() =>
+  props.chaptersVisible.some((ch) => props.isChapterActive(ch)),
+);
+
+const listRef = ref<InstanceType<typeof VirtualList> | null>(null);
+
+async function onLocateCurrentChapter() {
+  if (!canLocateCurrentChapter.value) return;
+  const idx = displayedIndexOfActive();
+  if (idx < 0) return;
+  await nextTick();
+  requestAnimationFrame(() => {
+    listRef.value?.scrollToIndex(idx, {
+      align: "center",
+      behavior: "smooth",
+    });
+  });
+}
+
 function chapterItemKey(index: number): string {
   const ch = displayedChapters.value[index];
   return ch ? chapterListItemKey(ch) : `i:${index}`;
@@ -236,9 +255,11 @@ async function onCopyToc() {
 
 function onBindListRef(value: Element | ComponentPublicInstance | null) {
   if (value && typeof value === "object" && "$el" in value) {
+    listRef.value = value as InstanceType<typeof VirtualList>;
     emit("bindListRef", value as InstanceType<typeof VirtualList>);
     return;
   }
+  listRef.value = null;
   emit("bindListRef", null);
 }
 </script>
@@ -325,9 +346,21 @@ function onBindListRef(value: Element | ComponentPublicInstance | null) {
       </div>
     </div>
     <div v-if="currentFilePath" class="sidebarTabFooter">
-      <span class="sidebarTabFooterStat"
-        >共 {{ chaptersVisible.length }} 章</span
-      >
+      <div class="sidebarTabFooterStart">
+        <span class="sidebarTabFooterStat"
+          >共 {{ chaptersVisible.length }} 章</span
+        >
+        <button
+          type="button"
+          class="aiActivityLikeBtn"
+          :disabled="!canLocateCurrentChapter"
+          title="定位到当前章节"
+          aria-label="定位到当前章节"
+          @click="onLocateCurrentChapter"
+        >
+          <span class="svg" v-html="icons.location" />
+        </button>
+      </div>
       <button
         type="button"
         class="link danger hoverMode sidebarTabFooterAction"
@@ -490,8 +523,15 @@ function onBindListRef(value: Element | ComponentPublicInstance | null) {
   background: var(--bg);
   user-select: none;
 }
-.sidebarTabFooterStat {
+.sidebarTabFooterStart {
   flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.sidebarTabFooterStat {
+  flex: 0 1 auto;
   min-width: 0;
   text-align: left;
   white-space: nowrap;

@@ -21,6 +21,8 @@ export type MdInternalLinkOccurrence = {
   builtinLinkIcon?: boolean;
   /** `http(s):` / `mailto:` 外链；有值时点击用系统浏览器打开 */
   externalUrl?: string;
+  /** 行内字形图 `![alt](url)`（非链接、非独占行插图） */
+  inlineImage?: boolean;
 };
 
 export type MdCompactLinkHit = {
@@ -32,6 +34,7 @@ export type MdCompactLinkHit = {
   hoverTip?: string;
   builtinLinkIcon?: boolean;
   externalUrl?: string;
+  inlineImage?: boolean;
 };
 
 export type MdInternalLinkSidecar = {
@@ -86,6 +89,7 @@ export function mdLinkDecorationHoverMessage(
     | "targetId"
     | "iconRel"
     | "externalUrl"
+    | "inlineImage"
   >,
   options?: MdLinkHoverMessageOptions,
 ): string {
@@ -93,6 +97,9 @@ export function mdLinkDecorationHoverMessage(
   if (externalUrl) {
     const tip = hit.hoverTip?.trim() || hit.label?.trim();
     return tip && tip !== "·" ? `${tip}\n${externalUrl}` : externalUrl;
+  }
+  if (hit.inlineImage) {
+    return hit.hoverTip?.trim() || hit.label?.trim() || "";
   }
   const targetId = hit.targetId?.trim();
   const hash = targetId?.lastIndexOf("#") ?? -1;
@@ -115,6 +122,16 @@ export function lineContainsMdStripLink(raw: string): boolean {
     /]\(https?:\/\//i.test(raw) ||
     /]\(mailto:/i.test(raw)
   );
+}
+
+/** 含需剥离的 MD 行内图（`![…](…)`；独占行插图仍留给 View Zone） */
+export function lineContainsMdInlineImage(raw: string): boolean {
+  return raw.includes("![");
+}
+
+/** 只读展示需扫描剥离的 MD 标记（内/外链、行内图、由调用方另判 span 锚点） */
+export function lineContainsMdStripMarkup(raw: string): boolean {
+  return lineContainsMdStripLink(raw) || lineContainsMdInlineImage(raw);
 }
 
 export function isAllowedMdExternalUrl(url: string): boolean {
@@ -389,6 +406,35 @@ export type NextMdLinkScan =
   | { kind: "internal"; link: ParsedMdInternalLink }
   | { kind: "external"; link: ParsedMdExternalLink };
 
+export type ParsedMdStandaloneImage = {
+  full: string;
+  index: number;
+  alt: string;
+  url: string;
+  title?: string;
+};
+
+export type NextMdStripToken =
+  | NextMdLinkScan
+  | { kind: "image"; image: ParsedMdStandaloneImage };
+
+function parsedStandaloneImageAt(
+  line: string,
+  bang: number,
+): ParsedMdStandaloneImage | null {
+  const img = tryLexImageAt(line, bang);
+  if (!img) return null;
+  const url = (img.href ?? "").trim();
+  if (!url) return null;
+  return {
+    full: img.raw,
+    index: bang,
+    alt: img.text ?? "",
+    url,
+    title: img.title?.trim() || undefined,
+  };
+}
+
 export function scanNextMdLinkAt(
   line: string,
   from: number,
@@ -416,6 +462,48 @@ export function scanNextMdLinkAt(
   return null;
 }
 
+/** 内/外链或独立 `![alt](url)`（`[![icon](u)](#f)` 优先作链接） */
+export function scanNextMdStripTokenAt(
+  line: string,
+  from: number,
+): NextMdStripToken | null {
+  let pos = from;
+  while (pos < line.length) {
+    const bang = line.indexOf("![", pos);
+    const open = line.indexOf("[", pos);
+    if (open < 0 && bang < 0) return null;
+
+    const linkFirst = open >= 0 && (bang < 0 || open < bang);
+    if (linkFirst) {
+      const afterImage = skipIndexAfterMdImageBracket(line, open);
+      if (afterImage != null) {
+        pos = afterImage;
+        continue;
+      }
+      const tok = tryLexLinkAt(line, open);
+      if (tok) {
+        const parsed = parsedFromMarkedLink(tok, open);
+        if (parsed) {
+          return "fragment" in parsed
+            ? { kind: "internal", link: parsed }
+            : { kind: "external", link: parsed };
+        }
+      }
+      pos = open + 1;
+      continue;
+    }
+
+    if (bang < 0) return null;
+    const image = parsedStandaloneImageAt(line, bang);
+    if (!image) {
+      pos = bang + 2;
+      continue;
+    }
+    return { kind: "image", image };
+  }
+  return null;
+}
+
 export function scanMdInternalLinksOnLine(
   line: string,
 ): ParsedMdInternalLink[] {
@@ -438,8 +526,14 @@ export function stripMdLinksFromLine(line: string): string {
   let last = 0;
   let from = 0;
   while (from < line.length) {
-    const hit = scanNextMdLinkAt(line, from);
+    const hit = scanNextMdStripTokenAt(line, from);
     if (!hit) break;
+    if (hit.kind === "image") {
+      result += line.slice(last, hit.image.index);
+      last = hit.image.index + hit.image.full.length;
+      from = last;
+      continue;
+    }
     const { link } = hit;
     result += line.slice(last, link.index);
     last = link.index + link.full.length;
@@ -461,4 +555,12 @@ export function visibleTextForMdLinkLabel(
     return MD_LINK_EMPTY_PLACEHOLDER;
   }
   return label.length > 0 ? label : MD_LINK_EMPTY_PLACEHOLDER;
+}
+
+/** 整行仅一处独立 `![…](…)`（非 `[![](icon)](#frag)`），留给块级插图 View Zone */
+export function isExclusiveBlockMarkdownImageLine(line: string): boolean {
+  const trimmed = line.replace(/<span[^>]*><\/span>/gi, "").trim();
+  if (!trimmed.startsWith("![")) return false;
+  const img = tryLexImageAt(trimmed, 0);
+  return Boolean(img && img.raw === trimmed);
 }

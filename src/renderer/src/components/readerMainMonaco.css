@@ -151,6 +151,10 @@
   -webkit-mask-position: center;
 }
 
+.monaco-editor .readerEbookLinkIcon.readerEbookInlineImage {
+  cursor: default;
+}
+
 .monaco-editor .readerInlineSearchMatch {
   background: var(
     --vscode-editor-findMatchHighlightBackground,

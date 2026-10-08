@@ -7,7 +7,6 @@ import {
 import {
   defaultMultiVoiceIdsForEngine,
   defaultSingleVoiceIdForEngine,
-  defaultVoiceIdForEngine,
   type VoiceReadEngineId,
 } from "@shared/voiceReadEngines";
 import {

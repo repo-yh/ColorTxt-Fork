@@ -228,7 +228,8 @@ export function useReaderSidebarLists(
 
   /**
    * 当前排序为「打开时间」（升或降）时从 meta 拍快照；排序只用快照，
-   * 打开文件时更新 `lastOpenedAt` 不会改列表顺序；每次选「打开时间」会重拍（含升/降互切）。
+   * 阅读过程中原地更新 `lastOpenedAt` 不会改列表顺序。
+   * 切入「打开时间」（含升/降互切）或打开列表中已有文件时会重拍一次。
    */
   const openedAtSortSnapshot = shallowRef(new Map<string, number>());
 
@@ -242,6 +243,19 @@ export function useReaderSidebarLists(
         m.set(fileHistoryKey(r.path), r.lastOpenedAt);
       }
     }
+    openedAtSortSnapshot.value = m;
+  }
+
+  function filePathInSidebarList(path: string): boolean {
+    const key = fileHistoryKey(path);
+    return props.files.some((f) => fileHistoryKey(f.path) === key);
+  }
+
+  /** 打开列表中的文件：重拍 meta，并把当前文件标为最新，避免 touch 尚未写入时顺序不变。 */
+  function refreshOpenedAtSortSnapshotForOpenedFile(path: string) {
+    refreshOpenedAtSortSnapshotFromMeta();
+    const m = new Map(openedAtSortSnapshot.value);
+    m.set(fileHistoryKey(path), Date.now());
     openedAtSortSnapshot.value = m;
   }
 
@@ -276,6 +290,34 @@ export function useReaderSidebarLists(
       }
     },
     { immediate: true },
+  );
+
+  /**
+   * 启动时排序偏好可能先于 file.meta 就绪；空快照补拍一次，避免「打开时间」按文件名排。
+   * 仅在快照仍为空时补拍，避免打开文件（原地改 lastOpenedAt）把当前项顶到最前。
+   */
+  watch(
+    () => props.fileMetaRecords,
+    (records) => {
+      const mode = props.fileSort ?? "nameAsc";
+      if (mode !== "lastReadAtAsc" && mode !== "lastReadAtDesc") return;
+      if (openedAtSortSnapshot.value.size > 0) return;
+      const hasOpenedAt = (records ?? []).some(
+        (r) =>
+          typeof r.lastOpenedAt === "number" && Number.isFinite(r.lastOpenedAt),
+      );
+      if (hasOpenedAt) refreshOpenedAtSortSnapshotFromMeta();
+    },
+  );
+
+  watch(
+    () => props.metaProgressByPathKey,
+    (map) => {
+      const mode = props.fileSort ?? "nameAsc";
+      if (mode !== "progressAsc" && mode !== "progressDesc") return;
+      if (progressSortSnapshot.value.size > 0) return;
+      if ((map?.size ?? 0) > 0) refreshProgressSortSnapshot();
+    },
   );
 
   /**
@@ -598,6 +640,24 @@ export function useReaderSidebarLists(
     }
     vl.scrollToIndex(idx, { align: "auto", behavior: "auto" });
   }
+
+  /**
+   * 按「打开时间」排序时：打开列表里已有的文件则刷新一次顺序
+   *（降序排到最前；升序排到有时间记录的末尾）。不在列表中的文件不重排。
+   */
+  watch(
+    () => props.currentFilePath,
+    (path) => {
+      const mode = props.fileSort ?? "nameAsc";
+      if (mode !== "lastReadAtAsc" && mode !== "lastReadAtDesc") return;
+      const p = path?.trim() ?? "";
+      if (!p || !filePathInSidebarList(p)) return;
+      refreshOpenedAtSortSnapshotForOpenedFile(p);
+      void nextTick(() => {
+        void ensureCurrentFileVisible("center");
+      });
+    },
+  );
 
   async function ensureActiveBookmarkVisible(
     mode: "edge" | "center" = "center",

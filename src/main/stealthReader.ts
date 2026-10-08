@@ -54,6 +54,26 @@ let sessionShortcutsRegistered = false;
 /** 渲染进程 updateMinSize 同步过来的字号最小尺寸（setBounds 兜底） */
 let overlayMinWidth = 8;
 let overlayMinHeight = 8;
+/**
+ * 逻辑窗位（渲染进程 / 持久化用）。Windows 无边框窗 OS 最小高度约标题栏高（~39px），
+ * 小于该值时 OS 会撑高；用 setShape 裁出逻辑尺寸，getBounds 仍回逻辑值。
+ */
+let overlayLogicalBounds: StealthBounds | null = null;
+/** 右键菜单打开时勿 moveTop，避免盖住菜单 */
+let overlayMenuOpen = false;
+/** 指针在任务栏条带内时的快速重申 */
+let stealthTaskbarWatchTimer: ReturnType<typeof setInterval> | null = null;
+/** 关窗等 shell 重排时的周期兜底重申 */
+let stealthZOrderFallbackTimer: ReturnType<typeof setInterval> | null = null;
+let stealthCursorWasOverTaskbar = false;
+/** 取消过期的置顶重申（进出任务栏可能连续触发） */
+let stealthZOrderReassertGen = 0;
+
+const STEALTH_AOT_LEVEL = "screen-saver" as const;
+/** 相对同级再抬一层，减轻被任务栏盖住 */
+const STEALTH_AOT_RELATIVE = 1;
+/** 关窗/任务栏抢层等无法用指针感知的场景，周期兜底 */
+const STEALTH_ZORDER_FALLBACK_MS = 700;
 
 export function isStealthReaderWindow(win: BrowserWindow): boolean {
   return (win as unknown as Record<string, unknown>)[STEALTH_FLAG] === true;
@@ -91,12 +111,177 @@ export function refreshStealthOverlayTransparency(opts?: {
       if (b.width > 0 && b.height > 0) {
         win.setBounds({ ...b, x: b.x + 1 }, false);
         win.setBounds(b, false);
+        // setBounds 可能冲掉 shape，按逻辑尺寸再裁一次
+        applyOverlayShape(win);
       }
     }
-    win.setAlwaysOnTop(true, "screen-saver");
+    assertStealthOverlayAlwaysOnTop(win);
   } catch {
     /* ignore */
   }
+}
+
+/** 重申摸鱼覆盖层置顶（含相对层级）；Win 上必要时 moveTop。 */
+function assertStealthOverlayAlwaysOnTop(win: BrowserWindow): void {
+  if (win.isDestroyed()) return;
+  try {
+    win.setAlwaysOnTop(true, STEALTH_AOT_LEVEL, STEALTH_AOT_RELATIVE);
+    if (process.platform === "win32") {
+      try {
+        win.moveTop();
+      } catch {
+        /* ignore */
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+function stopStealthZOrderWatch(): void {
+  stealthZOrderReassertGen += 1;
+  stealthCursorWasOverTaskbar = false;
+  if (stealthTaskbarWatchTimer != null) {
+    clearInterval(stealthTaskbarWatchTimer);
+    stealthTaskbarWatchTimer = null;
+  }
+  if (stealthZOrderFallbackTimer != null) {
+    clearInterval(stealthZOrderFallbackTimer);
+    stealthZOrderFallbackTimer = null;
+  }
+}
+
+/**
+ * 工作区外、显示器 bounds 内 = 任务栏/侧栏等 shell 条带。
+ * 摸鱼窗 focusable:false，点任务栏不会再走失活事件，靠指针位置做快速路径。
+ */
+function isCursorOverTaskbarStrip(): boolean {
+  const point = screen.getCursorScreenPoint();
+  const display = screen.getDisplayNearestPoint(point);
+  const { bounds, workArea } = display;
+  if (
+    point.x < bounds.x ||
+    point.y < bounds.y ||
+    point.x >= bounds.x + bounds.width ||
+    point.y >= bounds.y + bounds.height
+  ) {
+    return false;
+  }
+  return (
+    point.x < workArea.x ||
+    point.y < workArea.y ||
+    point.x >= workArea.x + workArea.width ||
+    point.y >= workArea.y + workArea.height
+  );
+}
+
+function tryAssertStealthOverlayZOrder(): void {
+  const s = session;
+  if (!s || s.overlay.isDestroyed()) return;
+  if (s.overlayHiddenByStealthHotkey || overlayMenuOpen) return;
+  if (!s.overlay.isVisible()) return;
+  assertStealthOverlayAlwaysOnTop(s.overlay);
+}
+
+/**
+ * Windows：shell 常把覆盖层压到任务栏下（点任务栏、关其它窗后的层级重排等）。
+ * - 指针进入任务栏条带：立刻分拍重申（快路径）
+ * - 周期兜底：盖住关窗等指针感知不到的场景
+ * 真·事件驱动需 SetWinEventHook（额外 FFI），目前不引入。
+ */
+function scheduleStealthZOrderReassert(): void {
+  const gen = ++stealthZOrderReassertGen;
+  for (const ms of [0, 80, 250]) {
+    setTimeout(() => {
+      if (gen !== stealthZOrderReassertGen) return;
+      tryAssertStealthOverlayZOrder();
+    }, ms);
+  }
+}
+
+function onStealthTaskbarWatchTick(): void {
+  const s = session;
+  if (!s || s.overlay.isDestroyed()) return;
+  if (s.overlayHiddenByStealthHotkey || overlayMenuOpen) return;
+  if (!s.overlay.isVisible()) return;
+  const over = isCursorOverTaskbarStrip();
+  if (over && !stealthCursorWasOverTaskbar) {
+    scheduleStealthZOrderReassert();
+  } else if (over) {
+    assertStealthOverlayAlwaysOnTop(s.overlay);
+  } else if (!over && stealthCursorWasOverTaskbar) {
+    scheduleStealthZOrderReassert();
+  }
+  stealthCursorWasOverTaskbar = over;
+}
+
+function startStealthZOrderWatch(_overlay: BrowserWindow): void {
+  stopStealthZOrderWatch();
+  if (process.platform !== "win32" || _overlay.isDestroyed()) return;
+  stealthTaskbarWatchTimer = setInterval(onStealthTaskbarWatchTick, 200);
+  stealthZOrderFallbackTimer = setInterval(
+    tryAssertStealthOverlayZOrder,
+    STEALTH_ZORDER_FALLBACK_MS,
+  );
+}
+
+function clearOverlayShape(win: BrowserWindow): void {
+  try {
+    if (typeof win.setShape === "function") {
+      win.setShape([]);
+    }
+  } catch {
+    /* macOS 等不支持 */
+  }
+}
+
+/** OS 窗大于逻辑尺寸时裁剪可视/点击区域（Windows 最小高度绕过）。 */
+function applyOverlayShape(win: BrowserWindow): void {
+  const logical = overlayLogicalBounds;
+  if (!logical || win.isDestroyed()) return;
+  if (typeof win.setShape !== "function") return;
+  try {
+    const after = win.getBounds();
+    const needShape =
+      after.width > logical.width + 1 || after.height > logical.height + 1;
+    if (needShape) {
+      win.setShape([
+        {
+          x: 0,
+          y: 0,
+          width: Math.max(1, logical.width),
+          height: Math.max(1, logical.height),
+        },
+      ]);
+    } else {
+      win.setShape([]);
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+function applyOverlayLogicalBounds(
+  win: BrowserWindow,
+  bounds: StealthBounds,
+): void {
+  const next = clampBoundsToDisplay(bounds);
+  overlayLogicalBounds = next;
+  win.setMinimumSize(overlayMinWidth, overlayMinHeight);
+  win.setBounds(next);
+  // 部分 Windows/DPI 下 setBounds 会悄悄小于 min，读回再钉死（仅钉逻辑下限）
+  const after = win.getBounds();
+  if (after.width < overlayMinWidth || after.height < overlayMinHeight) {
+    const repaired = clampBoundsToDisplay({
+      x: after.x,
+      y: after.y,
+      width: Math.max(after.width, overlayMinWidth),
+      height: Math.max(after.height, overlayMinHeight),
+    });
+    overlayLogicalBounds = repaired;
+    win.setBounds(repaired);
+  }
+  applyOverlayShape(win);
 }
 
 function sendCommand(command: StealthCommand, extra?: string): void {
@@ -188,7 +373,7 @@ export function restoreStealthAfterEyedropper(): void {
   if (s.overlayHiddenByStealthHotkey) return;
   s.overlay.setFocusable(false);
   s.overlay.showInactive();
-  s.overlay.setAlwaysOnTop(true, "screen-saver");
+  assertStealthOverlayAlwaysOnTop(s.overlay);
 }
 
 function clampBoundsToDisplay(bounds: StealthBounds): StealthBounds {
@@ -285,13 +470,20 @@ function createOverlayWindow(bounds: StealthBounds): BrowserWindow {
   }
   const win = new BrowserWindow(opts);
   (win as unknown as Record<string, unknown>)[STEALTH_FLAG] = true;
-  win.setAlwaysOnTop(true, "screen-saver");
+  overlayLogicalBounds = b;
+  assertStealthOverlayAlwaysOnTop(win);
+  try {
+    win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  } catch {
+    /* 部分平台不支持 */
+  }
   win.setMenuBarVisibility(false);
   win.removeMenu();
   win.setBackgroundColor("#00000000");
   win.setFocusable(false);
   win.setResizable(false);
   lockEmptyWindowTitle(win);
+  applyOverlayShape(win);
 
   win.webContents.on("before-input-event", (event, input) => {
     const isToggleDevToolsKey =
@@ -329,6 +521,8 @@ function teardown(restore: boolean): void {
   tearingDown = true;
   const s = session;
   session = null;
+  stopStealthZOrderWatch();
+  overlayMenuOpen = false;
   unregisterPageShortcuts();
   closeStealthSettingsWindow();
   const line = s?.lastLine ?? 1;
@@ -337,8 +531,10 @@ function teardown(restore: boolean): void {
   }
   const overlay = s?.overlay;
   if (overlay && !overlay.isDestroyed()) {
+    clearOverlayShape(overlay);
     overlay.destroy();
   }
+  overlayLogicalBounds = null;
   if (restore && s && !s.owner.isDestroyed()) {
     restoreOwner(s.owner, line);
   }
@@ -363,12 +559,14 @@ export function setStealthOverlayHiddenByHotkey(hidden: boolean): void {
   if (hidden) {
     s.overlay.hide();
     s.overlayHiddenByStealthHotkey = true;
+    stopStealthZOrderWatch();
     return;
   }
   s.overlayHiddenByStealthHotkey = false;
   s.overlay.setFocusable(false);
   s.overlay.showInactive();
-  s.overlay.setAlwaysOnTop(true, "screen-saver");
+  assertStealthOverlayAlwaysOnTop(s.overlay);
+  startStealthZOrderWatch(s.overlay);
 }
 
 function enterFromOwner(
@@ -444,8 +642,9 @@ function enterFromOwner(
     }
     overlay.setFocusable(false);
     overlay.showInactive();
-    overlay.setAlwaysOnTop(true, "screen-saver");
+    assertStealthOverlayAlwaysOnTop(overlay);
     registerPageShortcuts();
+    startStealthZOrderWatch(overlay);
   });
 
   return { ok: true };
@@ -454,7 +653,12 @@ function enterFromOwner(
 function setMenuOpen(open: boolean): void {
   const s = session;
   if (!s || s.overlay.isDestroyed()) return;
+  overlayMenuOpen = open;
   s.overlay.webContents.send(STEALTH_READER_IPC.menuOpen, open);
+  // 菜单关掉后立刻抢回置顶，避免点任务栏场景下长时间被压住
+  if (!open && !s.overlayHiddenByStealthHotkey) {
+    assertStealthOverlayAlwaysOnTop(s.overlay);
+  }
 }
 
 function popupContextMenu(timedScrollActive: boolean): void {
@@ -628,6 +832,8 @@ export function registerStealthReaderIpc(): void {
   ipcMain.handle(STEALTH_READER_IPC.getBounds, (evt) => {
     const win = BrowserWindow.fromWebContents(evt.sender);
     if (!win || win.isDestroyed()) return null;
+    // 优先逻辑尺寸：Windows 上 OS getBounds 可能被系统最小高度撑高
+    if (overlayLogicalBounds) return { ...overlayLogicalBounds };
     return win.getBounds();
   });
 
@@ -640,12 +846,12 @@ export function registerStealthReaderIpc(): void {
     const win = BrowserWindow.fromWebContents(evt.sender);
     if (!win || win.isDestroyed() || !raw || typeof raw !== "object") return;
     const o = raw as Record<string, unknown>;
-    const bounds = clampBoundsToDisplay({
+    const bounds = {
       x: Number(o.x),
       y: Number(o.y),
       width: Number(o.width),
       height: Number(o.height),
-    });
+    };
     if (
       !Number.isFinite(bounds.x) ||
       !Number.isFinite(bounds.y) ||
@@ -654,21 +860,7 @@ export function registerStealthReaderIpc(): void {
     ) {
       return;
     }
-    win.setMinimumSize(overlayMinWidth, overlayMinHeight);
-    win.setBounds(bounds);
-    // 部分 Windows/DPI 下 setBounds 会悄悄小于 min，读回再钉死
-    const after = win.getBounds();
-    if (
-      after.width < overlayMinWidth ||
-      after.height < overlayMinHeight
-    ) {
-      win.setBounds({
-        x: after.x,
-        y: after.y,
-        width: Math.max(after.width, overlayMinWidth),
-        height: Math.max(after.height, overlayMinHeight),
-      });
-    }
+    applyOverlayLogicalBounds(win, bounds);
   });
 
   ipcMain.on(STEALTH_READER_IPC.setPosition, (evt, x: unknown, y: unknown) => {
@@ -677,6 +869,16 @@ export function registerStealthReaderIpc(): void {
     const nx = Math.round(Number(x));
     const ny = Math.round(Number(y));
     if (!Number.isFinite(nx) || !Number.isFinite(ny)) return;
+    // Win11 上纯 setPosition 可能清掉 setShape，或让 HWND 宽高漂移；
+    // 有逻辑窗位时改走 setBounds，钉死宽高并重裁 shape。
+    if (overlayLogicalBounds) {
+      applyOverlayLogicalBounds(win, {
+        ...overlayLogicalBounds,
+        x: nx,
+        y: ny,
+      });
+      return;
+    }
     win.setPosition(nx, ny);
   });
 
@@ -689,15 +891,17 @@ export function registerStealthReaderIpc(): void {
     overlayMinHeight = height;
     win.setMinimumSize(width, height);
     // 仅 setMinimumSize 不会抬高已偏小的窗；字号变大时要把当前高度/宽度撑到能显示一行
-    const b = win.getBounds();
-    if (b.width >= width && b.height >= height) return;
-    const next = clampBoundsToDisplay({
+    const b = overlayLogicalBounds ?? win.getBounds();
+    if (b.width >= width && b.height >= height) {
+      applyOverlayShape(win);
+      return;
+    }
+    applyOverlayLogicalBounds(win, {
       x: b.x,
       y: b.y,
       width: Math.max(b.width, width),
       height: Math.max(b.height, height),
     });
-    win.setBounds(next);
   });
 
   ipcMain.on(STEALTH_READER_IPC.blur, (evt) => {

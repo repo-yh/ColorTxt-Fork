@@ -4,6 +4,7 @@
  */
 
 import type { FileSortMode } from "../constants/fileCategories";
+import { fileHistoryKey } from "../stores/recentHistoryStore";
 
 export type FileListTreeFileSource = {
   name: string;
@@ -389,7 +390,9 @@ export function collectAncestorFolderKeysForFile(
   ): string[] | null => {
     for (const n of nodes) {
       if (n.kind === "file") {
-        if (n.file.path === filePath) return ancestors;
+        if (fileHistoryKey(n.file.path) === fileHistoryKey(filePath)) {
+          return ancestors;
+        }
       } else {
         const hit = walk(n.children, [...ancestors, n.fullDirPath]);
         if (hit) return hit;
@@ -432,8 +435,9 @@ export function findFileRowIndex(
   rows: readonly FileListTreeFlatRow[],
   filePath: string,
 ): number {
+  const want = fileHistoryKey(filePath);
   return rows.findIndex(
-    (r) => r.kind === "file" && r.file.path === filePath,
+    (r) => r.kind === "file" && fileHistoryKey(r.file.path) === want,
   );
 }
 

@@ -107,7 +107,7 @@ function resolveSegmentVoice(
 
   const hit = findCharacterBySpeaker(roster, quoteAttr.speaker);
   const charVoice = hit?.voiceReadVoiceId?.trim();
-  if (charVoice) {
+  if (hit && charVoice) {
     const mode = normalizeVolcengineSpeechModePair({
       language: hit.voiceReadLanguage,
       dialect: hit.voiceReadDialect,

@@ -2,7 +2,7 @@ import { ref, shallowRef, type Ref, type ShallowRef } from "vue";
 import * as monaco from "monaco-editor";
 import {
   isAllowedMdExternalUrl,
-  lineContainsMdStripLink,
+  lineContainsMdStripMarkup,
   mdLinkDecorationHoverMessage,
   extractMdFootnoteHoverTextFromLine,
   shiftMdInternalLinkSidecarDisplayLines,
@@ -230,7 +230,15 @@ export function useReaderEbookInternalLinks(deps: {
       if (!hits?.length) continue;
       for (const h of hits) {
         let inlineClassName: string;
-        if (h.builtinLinkIcon) {
+        if (h.inlineImage) {
+          const iconRel = h.iconRel?.trim();
+          const iconHash =
+            iconRel && relToClass.has(iconRel)
+              ? relToClass.get(iconRel)
+              : undefined;
+          if (!iconRel || !iconHash) continue;
+          inlineClassName = `readerEbookLinkIcon readerEbookInlineImage readerEbookLinkIcon--${iconHash}`;
+        } else if (h.builtinLinkIcon) {
           inlineClassName =
             "readerEbookLinkIcon readerEbookLinkIcon--builtin-link";
         } else {
@@ -250,6 +258,9 @@ export function useReaderEbookInternalLinks(deps: {
             inlineClassName = "readerEbookInternalLink";
           }
         }
+        const hover = mdLinkDecorationHoverMessage(h, {
+          resolveFootnoteLineText: resolveFootnoteLineTextForEbookHover,
+        });
         decs.push({
           range: new monaco.Range(
             line,
@@ -259,11 +270,9 @@ export function useReaderEbookInternalLinks(deps: {
           ),
           options: {
             inlineClassName,
-            hoverMessage: {
-              value: mdLinkDecorationHoverMessage(h, {
-                resolveFootnoteLineText: resolveFootnoteLineTextForEbookHover,
-              }),
-            },
+            ...(hover
+              ? { hoverMessage: { value: hover } }
+              : {}),
           },
         });
       }
@@ -396,6 +405,7 @@ export function useReaderEbookInternalLinks(deps: {
       const hitRange = ebookCompactHitRange(pos.lineNumber, h);
       if (!hitRange.containsPosition(pos)) continue;
       if (!clientXWithinSingleLineModelRange(ed, m, hitRange, clientX)) continue;
+      if (h.inlineImage) continue;
       const externalUrl = h.externalUrl?.trim();
       if (externalUrl && isAllowedMdExternalUrl(externalUrl)) {
         void window.colorTxt.openExternal(externalUrl);
@@ -465,7 +475,7 @@ export function useReaderEbookInternalLinks(deps: {
     const m = deps.model.value;
     if (!e || !m) return;
     const raw = m.getValue();
-    if (!lineContainsMdStripLink(raw) && !/<span\s+id=/i.test(raw)) return;
+    if (!lineContainsMdStripMarkup(raw) && !/<span\s+id=/i.test(raw)) return;
     deps.beginProgrammaticScroll();
     const normalized = raw.replace(/\r\n/g, "\n");
     let {
@@ -543,6 +553,7 @@ export function useReaderEbookInternalLinks(deps: {
         hoverTip: occ.hoverTip,
         builtinLinkIcon: occ.builtinLinkIcon,
         externalUrl: occ.externalUrl,
+        inlineImage: occ.inlineImage,
       };
       const bucket = hitsByDisplayLine.get(dl);
       if (bucket) bucket.push(hit);

@@ -223,11 +223,6 @@ const fontMenuArrowX = computed(() => {
   return `${Math.max(10, Math.min(panelW - 10, x))}px`;
 });
 
-const fontMenuPanelMergedStyle = computed(() => ({
-  ...fontMenuPanelStyle.value,
-  ["--font-menu-arrow-x" as string]: fontMenuArrowX.value,
-}));
-
 function toggleFontMenu() {
   if (props.disabled) return;
   void fontMenu.toggleMenu();
@@ -347,12 +342,12 @@ watch(
         data-fullscreen-header-float
         :style="{
           position: 'fixed',
-          left: fontMenuPanelMergedStyle.left,
-          top: fontMenuPanelMergedStyle.top,
-          width: fontMenuPanelMergedStyle.width,
-          zIndex: fontMenuPanelMergedStyle.zIndex,
-          '--font-menu-max-height': fontMenuPanelMergedStyle.maxHeight,
-          '--font-menu-arrow-x': fontMenuPanelMergedStyle['--font-menu-arrow-x'],
+          left: fontMenuPanelStyle.left,
+          top: fontMenuPanelStyle.top,
+          width: fontMenuPanelStyle.width,
+          zIndex: fontMenuPanelStyle.zIndex,
+          '--font-menu-max-height': fontMenuPanelStyle.maxHeight,
+          '--font-menu-arrow-x': fontMenuArrowX,
         }"
         @click.stop
       >

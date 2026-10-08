@@ -56,6 +56,10 @@ export const voiceReadPitchMin = 0.5;
 export const voiceReadPitchMax = 2;
 export const voiceReadVolumeMin = 0;
 export const voiceReadVolumeMax = 1;
+export const voiceReadPauseSentenceMin = 0;
+export const voiceReadPauseSentenceMax = 1200;
+export const voiceReadPauseCommaMin = 0;
+export const voiceReadPauseCommaMax = 600;
 
 export { DASHSCOPE_TTS_VOICES } from "@shared/voiceReadDashscopeVoices";
 
@@ -69,12 +73,28 @@ export function clampVoiceReadPitch(v: number): number {
   return Math.max(voiceReadPitchMin, Math.min(voiceReadPitchMax, v));
 }
 
+export function clampVoiceReadPauseSentence(v: number): number {
+  if (!Number.isFinite(v)) return defaultVoiceReadSettings.pauseSentenceMs;
+  return Math.max(
+    voiceReadPauseSentenceMin,
+    Math.min(voiceReadPauseSentenceMax, v),
+  );
+}
+
+export function clampVoiceReadPauseComma(v: number): number {
+  if (!Number.isFinite(v)) return defaultVoiceReadSettings.pauseCommaMs;
+  return Math.max(
+    voiceReadPauseCommaMin,
+    Math.min(voiceReadPauseCommaMax, v),
+  );
+}
+
 export function clampVoiceReadVolume(v: number): number {
   if (!Number.isFinite(v)) return defaultVoiceReadSettings.volume;
   return Math.max(voiceReadVolumeMin, Math.min(voiceReadVolumeMax, v));
 }
 
-/** 变更时不应使 TTS 合成缓存失效的字段（如 volume）除外 */
+/** 变更时不应使 TTS 合成缓存失效的字段（如 volume、标点停顿时长）除外 */
 export function voiceReadSettingsSynthesisFingerprint(
   settings: VoiceReadSettings,
 ): string {
@@ -123,6 +143,8 @@ export function mergeVoiceReadSettings(
     engine,
     rate: clampVoiceReadRate(merged.rate),
     pitch: clampVoiceReadPitch(merged.pitch),
+    pauseSentenceMs: clampVoiceReadPauseSentence(merged.pauseSentenceMs),
+    pauseCommaMs: clampVoiceReadPauseComma(merged.pauseCommaMs),
     volume: clampVoiceReadVolume(merged.volume),
     dashscopeApiKey,
     engineConfig: syncEngineConfigDashscopeKey(engineConfig, dashscopeApiKey),
@@ -233,6 +255,12 @@ export function voiceReadEngineSupportsRate(
   engine: VoiceReadEngineId,
 ): boolean {
   return getVoiceReadEngineMeta(engine).supportsRate;
+}
+
+export function voiceReadEngineSupportsPunctuationPauses(
+  engine: VoiceReadEngineId,
+): boolean {
+  return getVoiceReadEngineMeta(engine).supportsPunctuationPauses;
 }
 
 export function inferLangFromEdgeVoiceId(voiceId: string): string {

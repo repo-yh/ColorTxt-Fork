@@ -1,6 +1,11 @@
 import { createHash, randomBytes } from "node:crypto";
 import WebSocket from "ws";
 import type { VoiceReadEdgeTtsRequest } from "@shared/voiceReadEdgeIpc";
+import {
+  computePausePoints,
+  type EdgeTtsWordBoundary,
+} from "@shared/voiceReadPunctuationPauses";
+import type { VoiceReadPausePoint } from "@shared/voiceReadSynthesis";
 import { getVoiceReadEngineMeta } from "@shared/voiceReadEngines";
 
 const EDGE_SPEECH_URL =
@@ -62,6 +67,37 @@ function escapeXml(text: string): string {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&apos;");
+}
+
+/** 解析 audio.metadata 帧中的 WordBoundary 列表（按音频顺序） */
+function parseWordBoundaries(body: string): EdgeTtsWordBoundary[] | null {
+  try {
+    const json: unknown = JSON.parse(body);
+    const metas =
+      json && typeof json === "object"
+        ? (json as { Metadata?: unknown[] }).Metadata
+        : undefined;
+    if (!Array.isArray(metas)) return null;
+    const words: EdgeTtsWordBoundary[] = [];
+    for (const m of metas) {
+      if (!m || typeof m !== "object") continue;
+      const meta = m as { Type?: unknown; Data?: unknown };
+      if (meta.Type !== "WordBoundary") continue;
+      const d = meta.Data as
+        | { text?: { Text?: unknown }; Offset?: unknown; Duration?: unknown }
+        | null
+        | undefined;
+      if (!d || typeof d.text?.Text !== "string") continue;
+      words.push({
+        text: d.text.Text,
+        offsetNs: typeof d.Offset === "number" ? d.Offset : 0,
+        durationNs: typeof d.Duration === "number" ? d.Duration : 0,
+      });
+    }
+    return words.length > 0 ? words : null;
+  } catch {
+    return null;
+  }
 }
 
 function genSSML(
@@ -140,9 +176,15 @@ function appendAudioChunk(target: ArrayBuffer, chunk: Buffer): ArrayBuffer {
   return merged.buffer;
 }
 
+export type EdgeTtsMp3Result = {
+  data: ArrayBuffer;
+  /** 标点停顿点（音频内 ms），播放端据此插入静音 */
+  pauses: VoiceReadPausePoint[];
+};
+
 async function synthesizeEdgeTtsMp3Once(
   req: VoiceReadEdgeTtsRequest,
-): Promise<ArrayBuffer> {
+): Promise<EdgeTtsMp3Result> {
   const text = removeIncompatibleCharacters(req.text?.trim() ?? "");
   if (!text) {
     throw new Error("Edge TTS：文本为空");
@@ -212,6 +254,7 @@ async function synthesizeEdgeTtsMp3Once(
 
   return new Promise((resolve, reject) => {
     let audioData = new ArrayBuffer(0);
+    const words: EdgeTtsWordBoundary[] = [];
     let settled = false;
     let lastResponseBody = "";
 
@@ -251,7 +294,12 @@ async function synthesizeEdgeTtsMp3Once(
           ),
         );
       } else {
-        settle(() => resolve(audioData));
+        settle(() =>
+          resolve({
+            data: audioData,
+            pauses: computePausePoints(text, words),
+          }),
+        );
       }
     };
 
@@ -270,6 +318,11 @@ async function synthesizeEdgeTtsMp3Once(
         const { path, body } = parseTextFrame(buf);
         if (path === "response") {
           lastResponseBody = body.trim();
+          return;
+        }
+        if (path === "audio.metadata") {
+          const parsed = parseWordBoundaries(body);
+          if (parsed) words.push(...parsed);
           return;
         }
         if (path === "turn.end") {
@@ -301,7 +354,12 @@ async function synthesizeEdgeTtsMp3Once(
           ),
         );
       } else {
-        settle(() => resolve(audioData));
+        settle(() =>
+          resolve({
+            data: audioData,
+            pauses: computePausePoints(text, words),
+          }),
+        );
       }
     });
 
@@ -318,7 +376,7 @@ async function synthesizeEdgeTtsMp3Once(
  */
 export async function synthesizeEdgeTtsMp3(
   req: VoiceReadEdgeTtsRequest,
-): Promise<ArrayBuffer> {
+): Promise<EdgeTtsMp3Result> {
   const maxAttempts = 3;
   let lastErr: Error | null = null;
   for (let attempt = 0; attempt < maxAttempts; attempt++) {

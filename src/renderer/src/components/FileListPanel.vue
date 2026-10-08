@@ -58,6 +58,7 @@ import AppShellMenuTeleport from "./AppShellMenuTeleport.vue";
 import { appToast } from "../services/appToast";
 import { appLoading } from "../services/appLoading";
 import { appConfirm } from "../services/appDialog";
+import { fileHistoryKey } from "../stores/recentHistoryStore";
 
 const FILES_HEADER_MORE_MENU_W = 140;
 const TREE_INDENT_PX = 14;
@@ -74,7 +75,7 @@ const props = withDefaults(
     fileSort: FileSortMode;
     fileListViewMode?: FileListViewMode;
     fileCategoryCatalog: FileCategoryDefinition[];
-    /** 全屏浮动侧栏是否展开；从展开变为收起时关闭 Teleport 到 body 的浮层 */
+    /** 全屏/极简浮动侧栏是否展开；从展开变为收起时关闭 Teleport 菜单/下拉（不含 AppModal） */
     showFullscreenSidebar?: boolean;
     /** 侧栏标题行「更多」按钮（锚定菜单） */
     menuAnchorEl?: HTMLButtonElement | null;
@@ -286,6 +287,16 @@ function folderExpandSetsEqual(a: Set<string>, b: Set<string>): boolean {
   return true;
 }
 
+function listPathForCurrentFile(): string {
+  const path = props.currentFilePath?.trim() ?? "";
+  if (!path) return "";
+  if (props.filesFiltered.some((f) => f.path === path)) return path;
+  const key = fileHistoryKey(path);
+  return (
+    props.filesFiltered.find((f) => fileHistoryKey(f.path) === key)?.path ?? ""
+  );
+}
+
 /**
  * 初始化 / 列表重建（含切换分类）：
  * - 当前打开文件在筛选列表中 → 只展开其祖先目录
@@ -295,9 +306,8 @@ function folderExpandSetsEqual(a: Set<string>, b: Set<string>): boolean {
 function applyExpandForCurrentFileOnTreeRebuild(
   roots: readonly FileListTreeNode[],
 ): boolean {
-  const path = props.currentFilePath?.trim() ?? "";
-  const inList =
-    !!path && props.filesFiltered.some((f) => f.path === path);
+  const path = listPathForCurrentFile();
+  const inList = !!path;
   if (!inList) {
     if (expandedFolderPaths.value.size > 0) {
       expandedFolderPaths.value = new Set();
@@ -320,10 +330,11 @@ function applyExpandForCurrentFileOnTreeRebuild(
 
 async function scrollTreeToCurrentFileRow(
   mode: "edge" | "center" = "center",
+  behavior: ScrollBehavior = "auto",
 ) {
   await nextTick();
   if (!isTreeMode.value || !props.panelVisible) return;
-  const path = props.currentFilePath;
+  const path = listPathForCurrentFile();
   if (!path) return;
   const idx = findFileRowIndex(treeFlatRows.value, path);
   if (idx < 0) return;
@@ -331,7 +342,7 @@ async function scrollTreeToCurrentFileRow(
   if (!vl) return;
   vl.scrollToIndex(idx, {
     align: mode === "center" ? "center" : "auto",
-    behavior: "auto",
+    behavior,
   });
 }
 
@@ -407,14 +418,17 @@ function fileItemFromPath(path: string): SidebarFileItem | undefined {
   return fileByPath.value.get(path);
 }
 
-/** 打开/居中当前文件时：展开其路径（可保留其它已展开目录）并滚入视口 */
-async function scrollTreeToCurrentFile(mode: "edge" | "center" = "center") {
+/** 打开/居中当前文件时：展开其路径（可保留其它已展开目录）；面板可见时再滚入视口 */
+async function scrollTreeToCurrentFile(
+  mode: "edge" | "center" = "center",
+  behavior: ScrollBehavior = "auto",
+) {
   await nextTick();
-  const path = props.currentFilePath;
-  if (!path || !isTreeMode.value || !props.panelVisible) return;
+  if (!isTreeMode.value) return;
+  const path = listPathForCurrentFile();
+  if (!path) return;
   const roots = fileTreeRoots.value;
   if (roots.length === 0) return;
-  if (!props.filesFiltered.some((f) => f.path === path)) return;
   const ancestors = collectAncestorFolderKeysForFile(roots, path);
   if (!ancestors) return;
   const next = new Set(expandedFolderPaths.value);
@@ -422,10 +436,14 @@ async function scrollTreeToCurrentFile(mode: "edge" | "center" = "center") {
   if (!folderExpandSetsEqual(next, expandedFolderPaths.value)) {
     expandedFolderPaths.value = next;
   }
-  await scrollTreeToCurrentFileRow(mode);
+  if (!props.panelVisible) return;
+  await scrollTreeToCurrentFileRow(mode, behavior);
 }
 
-async function scrollListToCurrentFile(mode: "edge" | "center" = "center") {
+async function scrollListToCurrentFile(
+  mode: "edge" | "center" = "center",
+  behavior: ScrollBehavior = "auto",
+) {
   await nextTick();
   if (isTreeMode.value || !props.panelVisible) return;
   const path = props.currentFilePath;
@@ -436,7 +454,7 @@ async function scrollListToCurrentFile(mode: "edge" | "center" = "center") {
   if (!vl) return;
   vl.scrollToIndex(idx, {
     align: mode === "center" ? "center" : "auto",
-    behavior: "auto",
+    behavior,
   });
 }
 
@@ -444,6 +462,28 @@ watch(
   () => props.shouldCenterFileList,
   (v) => {
     if (!v || !isTreeMode.value) return;
+    void scrollTreeToCurrentFile("center");
+  },
+);
+
+/**
+ * 会话恢复时先建树（尚无当前文件 → 全收起），再打开文件并切到「章节」。
+ * 当前文件就绪后补展开祖先；切到「文件」面板时再滚入视口。
+ */
+watch(
+  () => [isTreeMode.value, props.currentFilePath] as const,
+  () => {
+    if (!isTreeMode.value) return;
+    if (!listPathForCurrentFile()) return;
+    void scrollTreeToCurrentFile("center");
+  },
+);
+
+watch(
+  () => props.panelVisible,
+  (visible) => {
+    if (!visible || !isTreeMode.value) return;
+    if (!listPathForCurrentFile()) return;
     void scrollTreeToCurrentFile("center");
   },
 );
@@ -461,6 +501,17 @@ watch(isTreeMode, (tree) => {
     });
   });
 });
+
+const canLocateCurrentFile = computed(() => !!listPathForCurrentFile());
+
+function onLocateCurrentFile() {
+  if (!canLocateCurrentFile.value) return;
+  if (isTreeMode.value) {
+    void scrollTreeToCurrentFile("center", "smooth");
+    return;
+  }
+  void scrollListToCurrentFile("center", "smooth");
+}
 
 const filterVisible = ref(false);
 const fileFilterInputRef = ref<HTMLInputElement | null>(null);
@@ -1093,7 +1144,8 @@ function dismissAllFullscreenTeleportUi() {
   menus.dismissAllTeleportMenus();
   closeFolderContextMenuAll();
   filterVisible.value = false;
-  manageModalOpen.value = false;
+  // AppModal（分类管理）Teleport 到 body：蒙版打开时 chrome 会收起浮动侧栏，
+  // 若此处一并关掉弹窗，极简/全屏下「分类管理」会刚开即关。
   categoryToolbarSelectRef.value?.closePanel?.();
   sortToolbarSelectRef.value?.closePanel?.();
 }
@@ -1575,12 +1627,26 @@ onBeforeUnmount(() => {
       </template>
     </div>
     <div v-if="files.length > 0" class="sidebarTabFooter">
-      <span v-if="isEditingFileList" class="sidebarTabFooterStat">
-        已选中 {{ selectedFilePaths.length }} 个文件
-      </span>
-      <span v-else class="sidebarTabFooterStat"
-        >共 {{ filesFiltered.length }} 个文件</span
-      >
+      <div class="sidebarTabFooterStart">
+        <span v-if="isEditingFileList" class="sidebarTabFooterStat">
+          已选中 {{ selectedFilePaths.length }} 个文件
+        </span>
+        <template v-else>
+          <span class="sidebarTabFooterStat"
+            >共 {{ filesFiltered.length }} 个文件</span
+          >
+          <button
+            type="button"
+            class="aiActivityLikeBtn"
+            :disabled="!canLocateCurrentFile"
+            title="定位到当前打开文件"
+            aria-label="定位到当前打开文件"
+            @click="onLocateCurrentFile"
+          >
+            <span class="svg" v-html="icons.location" />
+          </button>
+        </template>
+      </div>
       <button
         v-if="!isEditingFileList"
         type="button"
@@ -2181,8 +2247,15 @@ onBeforeUnmount(() => {
   background: var(--bg);
   user-select: none;
 }
-.sidebarTabFooterStat {
+.sidebarTabFooterStart {
   flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.sidebarTabFooterStat {
+  flex: 0 1 auto;
   min-width: 0;
   text-align: left;
   white-space: nowrap;

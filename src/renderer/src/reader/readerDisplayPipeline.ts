@@ -16,7 +16,7 @@ import {
   stripMdInternalLinksFromPhysicalLines,
   type StripMdInternalLinksResult,
 } from "../markdown/markdownInternalLinks";
-import { lineContainsMdStripLink } from "../markdown/markdownLinkShared";
+import { lineContainsMdStripMarkup } from "../markdown/markdownLinkShared";
 import {
   createMdInternalLinkSidecar,
   type MdCompactLinkHit,
@@ -345,6 +345,7 @@ function attachPendingMdLinksToDisplayLine(
       hoverTip: occ.hoverTip,
       builtinLinkIcon: occ.builtinLinkIcon,
       externalUrl: occ.externalUrl,
+      inlineImage: occ.inlineImage,
     });
   }
   sidecar.hitsByDisplayLine.set(displayLine, hits);
@@ -368,7 +369,7 @@ export function formatPhysicalLinesForReader(
     (preStrip != null ||
       physicalLines.some(
         (line) =>
-          lineContainsMdStripLink(line) || /<span\s+id=/i.test(line),
+          lineContainsMdStripMarkup(line) || /<span\s+id=/i.test(line),
       ));
   const mdStrip =
     preStrip ??
@@ -591,7 +592,7 @@ export async function formatPhysicalLinesForReaderAsync(
     (preStrip != null ||
       physicalLines.some(
         (line) =>
-          lineContainsMdStripLink(line) || /<span\s+id=/i.test(line),
+          lineContainsMdStripMarkup(line) || /<span\s+id=/i.test(line),
       ));
   const mdStrip =
     preStrip ??

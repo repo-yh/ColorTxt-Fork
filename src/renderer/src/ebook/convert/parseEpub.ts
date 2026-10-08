@@ -312,6 +312,20 @@ async function appendImageLineFromHref(
   if (rel) out.push(formatMdBlockImage(rel));
 }
 
+async function appendInlineImageToAcc(
+  acc: { text: string },
+  imgEl: Element,
+  ctx: EpubImageContext,
+  htmlDirInZip: string,
+): Promise<void> {
+  const href = getImgHref(imgEl);
+  if (!href) return;
+  const rel = await exportImageRelFromHref(ctx.zip, htmlDirInZip, href, ctx);
+  if (!rel) return;
+  const alt = imgEl.getAttribute("alt")?.trim() ?? "";
+  acc.text += formatMdBlockImage(rel, alt);
+}
+
 function resolveInternalLinkTargetForLinkIcon(
   imgEl: Element,
   htmlDirInZip: string,
@@ -646,6 +660,28 @@ async function walkInlineNodes(
       onBreak();
       continue;
     }
+    if (tag === "img" || tag === "image") {
+      if (shouldTreatImgAsLinkIcon({ imgEl: el })) {
+        const link = resolveInternalLinkTargetForLinkIcon(
+          el,
+          htmlDirInZip,
+          ctx,
+        );
+        if (link) {
+          await appendInlineLinkIconToAcc(
+            acc,
+            el,
+            link.anchor,
+            link.targetId,
+            ctx,
+            htmlDirInZip,
+          );
+          continue;
+        }
+      }
+      await appendInlineImageToAcc(acc, el, ctx, htmlDirInZip);
+      continue;
+    }
     /** 注音/括注：不并入正文，避免「第一折」旁多出拼音或半角括号 */
     if (tag === "rt" || tag === "rp") {
       continue;
@@ -798,17 +834,7 @@ async function paragraphToLines(
           return;
         }
       }
-      flushTextLines();
-      const href = getImgHref(el);
-      if (href) {
-        await appendImageLineFromHref(
-          ctx.zip,
-          htmlDirInZip,
-          href,
-          ctx,
-          out,
-        );
-      }
+      await appendInlineImageToAcc(acc, el, ctx, htmlDirInZip);
       return;
     }
     if (tag === "br" || tag === "hr") {
@@ -1114,6 +1140,14 @@ async function emitFlowBlock(
       let t = normalizeSpace(el.textContent ?? "");
       if (wrapId) t = t ? wrapId + t : wrapId;
       if (t) out.push(t);
+      return;
+    }
+    /**
+     * 无 p、标题、figure 等流式块、但含 img/a/br 时按段落走：
+     * 否则 emitFlowChildNodes 会把行内字形图拆成独占行。
+     */
+    if (el.querySelector(BLOCK_INNER) === null) {
+      await paragraphToLines(el, out, ctx, htmlDirInZip, currentDocZipPath);
       return;
     }
     if (wrapId) out.push(wrapId);

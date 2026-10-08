@@ -42,7 +42,8 @@ function emitCardAction(
 ) {
   const t = e.currentTarget;
   if (t instanceof HTMLElement) t.blur();
-  emit(type, key);
+  if (type === "rename") emit("rename", key);
+  else emit("remove", key);
 }
 
 function scrollParent(el: HTMLElement): HTMLElement | null {

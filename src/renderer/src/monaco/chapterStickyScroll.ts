@@ -40,16 +40,20 @@ export function ensureStickyChapterBarClickDisabled(): void {
   background-color: var(--reader-bg) !important;
   box-shadow: none !important;
 }
-/* 子层透明，透出条上的底色 + 对齐后的纹理，避免挡住叠层 */
+/* 容器透明，透出条上的底色 + 纹理；行必须实心，否则 Monaco 末行上滑会叠进父级标题 */
 .readerPane .monaco-editor .sticky-widget .sticky-widget-line-numbers,
-.readerPane .monaco-editor .sticky-widget .sticky-widget-lines-scrollable,
-.readerPane .monaco-editor .sticky-widget .sticky-line-content,
-.readerPane .monaco-editor .sticky-widget .sticky-line-content:hover {
+.readerPane .monaco-editor .sticky-widget .sticky-widget-lines-scrollable {
   background-color: transparent !important;
 }
+.readerPane .monaco-editor .sticky-widget .sticky-line-content,
+.readerPane .monaco-editor .sticky-widget .sticky-line-content:hover,
+.readerPane .monaco-editor .sticky-widget .sticky-line-number {
+  overflow: hidden;
+  isolation: isolate;
+  background-color: var(--reader-bg) !important;
+}
+/* 勿改 position：Monaco 用 absolute + top 叠多层标题，relative 会把 top 变成流内偏移 */
 .readerPane .monaco-editor .sticky-widget .sticky-line-content {
-  position: relative;
-  z-index: 1;
   color: var(--reader-chapter-title) !important;
 }
 `;

@@ -613,50 +613,156 @@ export function outermostReaderSurfaceEl(
   return found;
 }
 
-/** 粘性条 `::before` 对齐阅读表面，使纹理与正文区同一张图。 */
+function setReaderBackgroundAlignVars(
+  el: HTMLElement,
+  surface: DOMRect,
+): void {
+  const r = el.getBoundingClientRect();
+  if (r.width < 1 || r.height < 1) return;
+  el.style.setProperty(
+    "--reader-bg-align-x",
+    `${Math.round(surface.left - r.left)}px`,
+  );
+  el.style.setProperty(
+    "--reader-bg-align-y",
+    `${Math.round(surface.top - r.top)}px`,
+  );
+  el.style.setProperty(
+    "--reader-bg-align-w",
+    `${Math.round(surface.width)}px`,
+  );
+  el.style.setProperty(
+    "--reader-bg-align-h",
+    `${Math.round(surface.height)}px`,
+  );
+}
+
+/** 行相对粘性条的偏移；缩放时 `--reader-bg-align-*` 只写在条上，各行继承以免互相对不齐。 */
+function setStickyLineOffsetFromWidget(
+  line: HTMLElement,
+  widgetRect: DOMRect,
+): void {
+  const r = line.getBoundingClientRect();
+  if (r.width < 1 || r.height < 1) return;
+  line.style.removeProperty("--reader-bg-align-x");
+  line.style.removeProperty("--reader-bg-align-y");
+  line.style.removeProperty("--reader-bg-align-w");
+  line.style.removeProperty("--reader-bg-align-h");
+  line.style.setProperty(
+    "--sticky-line-dx",
+    `${r.left - widgetRect.left}px`,
+  );
+  line.style.setProperty(
+    "--sticky-line-dy",
+    `${r.top - widgetRect.top}px`,
+  );
+}
+
+/** 粘性条 `::before` 对齐阅读表面；标题行继承条上的变量，再用 `--sticky-line-dx/dy` 扣掉行内偏移。 */
 export function syncReaderBackgroundStickyAlign(sticky: HTMLElement): void {
   const surface = outermostReaderSurfaceEl(sticky);
   if (!surface) return;
   const sr = surface.getBoundingClientRect();
   const wr = sticky.getBoundingClientRect();
   if (wr.width < 1 || wr.height < 1 || sr.width < 1 || sr.height < 1) return;
-  sticky.style.setProperty(
-    "--reader-bg-align-x",
-    `${Math.round(sr.left - wr.left)}px`,
-  );
-  sticky.style.setProperty(
-    "--reader-bg-align-y",
-    `${Math.round(sr.top - wr.top)}px`,
-  );
-  sticky.style.setProperty(
-    "--reader-bg-align-w",
-    `${Math.round(sr.width)}px`,
-  );
-  sticky.style.setProperty(
-    "--reader-bg-align-h",
-    `${Math.round(sr.height)}px`,
-  );
+  setReaderBackgroundAlignVars(sticky, sr);
+  sticky
+    .querySelectorAll<HTMLElement>(
+      ".sticky-line-content, .sticky-line-number",
+    )
+    .forEach((line) => setStickyLineOffsetFromWidget(line, wr));
 }
 
 export function syncAllReaderBackgroundStickyAlign(): boolean {
-  const widgets = document.querySelectorAll<HTMLElement>(
-    ".readerPane .monaco-editor .sticky-widget",
-  );
-  let aligned = false;
-  widgets.forEach((el) => {
-    const wr = el.getBoundingClientRect();
-    if (wr.width < 1 || wr.height < 1) return;
-    syncReaderBackgroundStickyAlign(el);
-    aligned = true;
-  });
-  return aligned;
+  if (stickyAlignSyncing) return false;
+  stickyAlignSyncing = true;
+  try {
+    const widgets = document.querySelectorAll<HTMLElement>(
+      ".readerPane .monaco-editor .sticky-widget",
+    );
+    let aligned = false;
+    widgets.forEach((el) => {
+      const wr = el.getBoundingClientRect();
+      if (wr.width < 1 || wr.height < 1) return;
+      observeStickyAlignTarget(el);
+      const surface = outermostReaderSurfaceEl(el);
+      if (surface) observeStickyAlignTarget(surface);
+      syncReaderBackgroundStickyAlign(el);
+      aligned = true;
+    });
+    return aligned;
+  } finally {
+    stickyAlignSyncing = false;
+    // 丢掉本次写入 CSS 变量触发的 mutation，避免循环
+    stickyAlignMO?.takeRecords();
+    if (stickyAlignNeedsResync) {
+      stickyAlignNeedsResync = false;
+      queueMicrotask(() => {
+        if (!stickyAlignSyncing) syncAllReaderBackgroundStickyAlign();
+      });
+    }
+  }
 }
 
 let stickyAlignRaf = 0;
 let stickyAlignAttempts = 0;
+let stickyAlignSyncing = false;
+let stickyAlignNeedsResync = false;
+let stickyAlignRO: ResizeObserver | null = null;
+let stickyAlignMO: MutationObserver | null = null;
+const stickyAlignObserved = new WeakSet<Element>();
+const stickyAlignMoObserved = new WeakSet<Element>();
 /** Monaco 粘性条常在大纲/布局之后才进 DOM，刷新后需多等几帧 */
 const STICKY_ALIGN_RETRY_MAX = 32;
 
+function ensureStickyAlignResizeObserver(): void {
+  if (stickyAlignRO || typeof ResizeObserver !== "function") return;
+  stickyAlignRO = new ResizeObserver(() => {
+    if (stickyAlignSyncing) {
+      stickyAlignNeedsResync = true;
+      return;
+    }
+    syncAllReaderBackgroundStickyAlign();
+  });
+}
+
+function ensureStickyAlignMutationObserver(): void {
+  if (stickyAlignMO || typeof MutationObserver !== "function") return;
+  stickyAlignMO = new MutationObserver(() => {
+    if (stickyAlignSyncing) return;
+    syncAllReaderBackgroundStickyAlign();
+  });
+}
+
+function observeStickyAlignTarget(el: Element): void {
+  ensureStickyAlignResizeObserver();
+  if (stickyAlignRO && !stickyAlignObserved.has(el)) {
+    stickyAlignObserved.add(el);
+    stickyAlignRO.observe(el);
+  }
+  if (!el.classList.contains("sticky-widget")) return;
+  ensureStickyAlignMutationObserver();
+  if (!stickyAlignMO || stickyAlignMoObserved.has(el)) return;
+  stickyAlignMoObserved.add(el);
+  stickyAlignMO.observe(el, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    attributeFilter: ["style", "class"],
+  });
+}
+
+/**
+ * 布局后立刻对齐（缩放过程中用这个，不要等 rAF：rAF 在布局前跑，会用上一帧坐标）。
+ * 条还不在 DOM 时退回 `scheduleReaderBackgroundStickyAlign`。
+ */
+export function flushReaderBackgroundStickyAlign(): void {
+  if (stickyAlignSyncing) return;
+  if (syncAllReaderBackgroundStickyAlign()) return;
+  scheduleReaderBackgroundStickyAlign();
+}
+
+/** 粘性条尚未进 DOM 时重试；缩放/布局热路径请用 `flushReaderBackgroundStickyAlign`。 */
 export function scheduleReaderBackgroundStickyAlign(): void {
   stickyAlignAttempts = 0;
   if (stickyAlignRaf) return;
