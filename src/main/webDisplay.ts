@@ -222,6 +222,16 @@ export function startWebDisplay(
       return;
     }
 
+    if (url.pathname === "/style.css") {
+      serveFile(res, join(frontDir, "style.css"), "text/css; charset=utf-8");
+      return;
+    }
+
+    if (url.pathname === "/app.js") {
+      serveFile(res, join(frontDir, "app.js"), "text/javascript; charset=utf-8");
+      return;
+    }
+
     if (url.pathname === "/api/files") {
       try {
         const files = await getFileList();
