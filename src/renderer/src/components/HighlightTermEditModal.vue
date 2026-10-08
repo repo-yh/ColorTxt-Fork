@@ -3,7 +3,6 @@ import { computed, nextTick, ref, watch } from "vue";
 import { icons } from "../icons";
 import { useAnchoredAppShellMenu } from "../composables/useAnchoredAppShellMenu";
 import { normalizeHighlightGroup, parseHighlightInputTerms } from "../utils/highlightWords";
-import { useSortableReorder } from "../composables/useSortableReorder";
 import type { HighlightWord } from "../stores/fileMetaStore";
 import AppModal from "./AppModal.vue";
 import AppCheckbox from "./AppCheckbox.vue";

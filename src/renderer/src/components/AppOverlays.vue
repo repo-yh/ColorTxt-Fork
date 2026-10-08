@@ -36,7 +36,7 @@ import type { TranslationSettings } from "@shared/translationTypes";
 import ShortcutPanel from "./ShortcutPanel.vue";
 import DragDropChoiceModal from "./DragDropChoiceModal.vue";
 import type { ShortcutBindingMap } from "../services/shortcutRegistry";
-import type { ReaderSurfacePalette, DragDropAction } from "../constants/appUi";
+import type { DragDropAction } from "../constants/appUi";
 import type { ReaderSurfaceColorEnabled } from "../constants/readerPalette";
 import type { ReaderPalettePreset } from "../constants/readerPalettePresets";
 import { readerEbookConvertingHintText, readerBookPackUnpackingHintText } from "../constants/appUi";
