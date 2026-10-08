@@ -32,6 +32,7 @@ const emit = defineEmits<{
   nextLine: [];
   regenerate: [];
   stop: [];
+  openSpeakSettings: [];
 }>();
 
 const toolbarLayer = ref<ToolbarLayer>("playback");
@@ -60,7 +61,7 @@ const playLabel = computed(() => {
 const showSettingsLayer = computed(() => toolbarLayer.value === "settings");
 
 const layerToggleLabel = computed(() =>
-  showSettingsLayer.value ? "切换到朗读控制" : "切换到朗读设置",
+  showSettingsLayer.value ? "朗读控制" : "朗读调节",
 );
 
 function toggleToolbarLayer() {
@@ -124,7 +125,7 @@ function toggleToolbarLayer() {
               </div>
             </div>
 
-            <!-- 朗读设置 -->
+            <!-- 朗读调节 -->
             <div
               class="layer layerSettings"
               :class="{ 'layer--hidden': !showSettingsLayer }"
@@ -163,6 +164,16 @@ function toggleToolbarLayer() {
             </div>
           </div>
         </div>
+
+        <button
+          type="button"
+          class="layerToggle layerToggle--left"
+          title="朗读设置"
+          aria-label="朗读设置"
+          @click="emit('openSpeakSettings')"
+        >
+          <span class="layerToggleIcon" v-html="icons.setting" />
+        </button>
 
         <IconButton
           class="playPauseBtn"
@@ -212,6 +223,7 @@ function toggleToolbarLayer() {
   pointer-events: auto;
   max-width: min(560px, calc(100% - 24px));
   padding-right: 20px;
+  padding-left: 20px;
 }
 
 .barCore {
@@ -506,6 +518,12 @@ function toggleToolbarLayer() {
   transition:
     background 0.16s ease,
     box-shadow 0.16s ease;
+}
+
+.layerToggle--left {
+  right: auto;
+  left: 0;
+  transform: translate(-50%, -50%);
 }
 
 .layerToggle:not(:disabled):hover {

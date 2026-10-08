@@ -270,13 +270,15 @@ function chapterHeaderPadding(
             </div>
             <div class="annotationItemContent">
               <template v-if="item.kind === 'note'">
-                <div class="annotationNoteText">{{ item.noteContent }}</div>
-                <div class="annotationQuote" :style="readerFontStyle()">
+                <div class="annotationNoteText" :title="item.text" :style="readerFontStyle()">
                   {{ item.text }}
+                </div>
+                <div class="annotationQuote" :title="item.noteContent">
+                  {{ item.noteContent }}
                 </div>
               </template>
               <template v-else>
-                <div class="annotationLineText" :style="readerFontStyle()">
+                <div class="annotationLineText" :title="item.text" :style="readerFontStyle()">
                   {{ item.text }}
                 </div>
                 <div v-if="item.stale" class="annotationStaleBadge">已失效</div>
@@ -582,15 +584,15 @@ function chapterHeaderPadding(
 }
 
 .annotationNoteText {
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.35;
   color: var(--list-item-fg);
   overflow: hidden;
   text-overflow: ellipsis;
   display: -webkit-box;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
-  line-clamp: 3;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -620,8 +622,8 @@ function chapterHeaderPadding(
   text-overflow: ellipsis;
   display: -webkit-box;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
-  line-clamp: 3;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
   white-space: pre-wrap;
   word-break: break-word;
 }

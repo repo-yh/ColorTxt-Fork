@@ -14,6 +14,7 @@ import {
 } from "@shared/bookSource/loginUi";
 import { appAlert, appConfirm, appLog } from "../../services/appDialog";
 import { appToast } from "../../services/appToast";
+import LoadingDotsBounce from "../../components/LoadingDotsBounce.vue";
 
 const props = defineProps<{
   source: BookSourceRecord | null;
@@ -230,8 +231,8 @@ async function onShowLogs() {
         此书源未配置登录规则。
       </p>
 
-      <p v-else-if="rowsLoading && rows.length === 0" class="bsLoginHint">
-        正在加载登录选项…
+      <p v-else-if="rowsLoading && rows.length === 0" class="bsLoginHint bsLoginLoading">
+        正在加载登录选项<LoadingDotsBounce />
       </p>
 
       <template v-else>
@@ -399,5 +400,10 @@ async function onShowLogs() {
   color: var(--text-muted, #888);
   margin: 0;
   line-height: 1.5;
+}
+.bsLoginLoading {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15em;
 }
 </style>

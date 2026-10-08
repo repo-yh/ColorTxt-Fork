@@ -75,6 +75,16 @@ export const VOICE_READ_ENGINE_DEFAULTS: Record<
       dialogueFemaleVoiceId: "茉莉",
     },
   },
+  volcengine: {
+    voiceId: "zh_male_ruyaqingnian_uranus_bigtts",
+    singleVoiceId: "zh_male_ruyaqingnian_uranus_bigtts",
+    multi: {
+      narrationVoiceId: "zh_male_ruyaqingnian_uranus_bigtts",
+      dialogueVoiceId: "zh_male_linjiananhai_uranus_bigtts",
+      dialogueMaleVoiceId: "zh_male_huolixiaoge_uranus_bigtts",
+      dialogueFemaleVoiceId: "zh_female_meilinvyou_uranus_bigtts",
+    },
+  },
 };
 
 export const DEFAULT_DASHSCOPE_TTS_MODEL =

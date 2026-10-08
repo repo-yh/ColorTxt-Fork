@@ -58,7 +58,9 @@ function createFindBookSettingsStore() {
   const mouseWheelScrollSensitivity = ref(initial.mouseWheelScrollSensitivity);
   const fastScrollSensitivity = ref(initial.fastScrollSensitivity);
   const stickyChapterTitleEnabled = ref(initial.stickyChapterTitleEnabled);
+  const readerClickMode = ref(initial.readerClickMode);
   const chapterNavToolbarEnabled = ref(initial.chapterNavToolbarEnabled);
+  const findBookChapterAdvanceEnabled = ref(initial.findBookChapterAdvanceEnabled);
   const readerEditShowLineNumbers = ref(initial.readerEditShowLineNumbers);
   const readerEditMinimap = ref(initial.readerEditMinimap);
   const fullscreenReaderWidthPercent = ref(initial.fullscreenReaderWidthPercent);
@@ -118,7 +120,9 @@ function createFindBookSettingsStore() {
       mouseWheelScrollSensitivity: mouseWheelScrollSensitivity.value,
       fastScrollSensitivity: fastScrollSensitivity.value,
       stickyChapterTitleEnabled: stickyChapterTitleEnabled.value,
+      readerClickMode: readerClickMode.value,
       chapterNavToolbarEnabled: chapterNavToolbarEnabled.value,
+      findBookChapterAdvanceEnabled: findBookChapterAdvanceEnabled.value,
       readerEditShowLineNumbers: readerEditShowLineNumbers.value,
       readerEditMinimap: readerEditMinimap.value,
       fullscreenReaderWidthPercent: fullscreenReaderWidthPercent.value,
@@ -198,6 +202,7 @@ function createFindBookSettingsStore() {
     mouseWheelScrollSensitivity.value = shared.mouseWheelScrollSensitivity;
     fastScrollSensitivity.value = shared.fastScrollSensitivity;
     stickyChapterTitleEnabled.value = shared.stickyChapterTitleEnabled;
+    readerClickMode.value = shared.readerClickMode;
     chapterNavToolbarEnabled.value = shared.chapterNavToolbarEnabled;
     readerEditShowLineNumbers.value = shared.readerEditShowLineNumbers;
     readerEditMinimap.value = shared.readerEditMinimap;
@@ -282,7 +287,9 @@ function createFindBookSettingsStore() {
     mouseWheelScrollSensitivity,
     fastScrollSensitivity,
     stickyChapterTitleEnabled,
+    readerClickMode,
     chapterNavToolbarEnabled,
+    findBookChapterAdvanceEnabled,
     readerEditShowLineNumbers,
     readerEditMinimap,
     fullscreenReaderWidthPercent,

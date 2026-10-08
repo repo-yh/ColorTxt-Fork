@@ -111,6 +111,8 @@ export function useAppFileSession(deps: {
   bookPackUnpacking: Ref<boolean>;
   /** 正在转换的电子书源路径（用于底栏在 resetSession 之前显示「转换中…」） */
   ebookConversionSourcePath: Ref<string | null>;
+  /** PDF 等分页转换进度，如 `12/480`；非转换中为空串 */
+  ebookConvertProgressText: Ref<string>;
   readerEditMode: Ref<boolean>;
   readerEditorDirty: Ref<boolean>;
   fileMetaRecords: Ref<FileMetaRecord[]>;
@@ -222,7 +224,13 @@ export function useAppFileSession(deps: {
         forceConvert: options?.forceEbookConvert,
         onActualConversionStart: async () => {
           deps.ebookConversionSourcePath.value = filePath;
+          deps.ebookConvertProgressText.value = "";
           deps.ebookParsing.value = true;
+          await nextTick();
+          await yieldToUi();
+        },
+        onPdfProgress: async ({ page, pageCount }) => {
+          deps.ebookConvertProgressText.value = `${page}/${pageCount}`;
           await nextTick();
           await yieldToUi();
         },
@@ -261,6 +269,7 @@ export function useAppFileSession(deps: {
     } finally {
       deps.ebookParsing.value = false;
       deps.ebookConversionSourcePath.value = null;
+      deps.ebookConvertProgressText.value = "";
     }
   }
 

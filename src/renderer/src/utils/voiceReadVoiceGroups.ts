@@ -35,6 +35,14 @@ import {
   findMimoTtsVoice,
   MIMO_TTS_VOICES,
 } from "@shared/voiceReadMimoVoices";
+import {
+  findVolcengineTtsVoice,
+  VOLCENGINE_TTS_VOICE_GROUPS,
+  VOLCENGINE_TTS_VOICES,
+} from "@shared/voiceReadVolcengineVoices";
+import {
+  VOLCENGINE_VOICE_SELECT_ITEMS,
+} from "./voiceReadVolcengineVoiceSelect";
 
 export type VoiceSelectOption = { id: string; label: string };
 
@@ -291,6 +299,11 @@ export function listVoiceOptionsForEngine(
       return minimaxVoiceOptions();
     case "mimo":
       return MIMO_TTS_VOICES.map((v) => ({ id: v.id, label: v.label }));
+    case "volcengine":
+      return VOLCENGINE_TTS_VOICES.map((v) => ({
+        id: v.id,
+        label: v.label,
+      }));
     default:
       return [];
   }
@@ -383,6 +396,15 @@ function groupWinSapiVoices(
     .map(([locale, options]) => [locale, options] as const);
 }
 
+const VOLCENGINE_VOICE_OPTION_GROUPS: VoiceOptionGroup[] =
+  VOLCENGINE_TTS_VOICE_GROUPS.map(
+    ([label, voices]) =>
+      [
+        label,
+        voices.map((voice) => ({ id: voice.id, label: voice.label })),
+      ] as const,
+  );
+
 export function getVoiceGroupsForEngine(
   engine: VoiceReadEngineId,
   systemVoices: SpeechSynthesisVoice[],
@@ -394,6 +416,9 @@ export function getVoiceGroupsForEngine(
   }
   if (engine === "minimax" && minimaxVoiceCatalog.value?.length) {
     return groupMinimaxVoices(minimaxVoiceCatalog.value);
+  }
+  if (engine === "volcengine") {
+    return VOLCENGINE_VOICE_OPTION_GROUPS;
   }
   return "flat";
 }
@@ -408,6 +433,9 @@ export function voiceSelectItemsForEngine(
   }
   if (engine === "mimo") {
     return mimoVoiceGroupsToSelectItems();
+  }
+  if (engine === "volcengine") {
+    return VOLCENGINE_VOICE_SELECT_ITEMS as CustomSelectItem[];
   }
   if (engine === "edge") {
     return edgeVoiceGroupsToSelectItems(
@@ -536,6 +564,9 @@ export function resolveVoiceReadDisplayLabel(
   }
   if (engine === "mimo") {
     return findMimoTtsVoice(id)?.label ?? id;
+  }
+  if (engine === "volcengine") {
+    return findVolcengineTtsVoice(id)?.label ?? id;
   }
   if (engine === "winSapi") {
     return winSapiVoiceOptions().find((v) => v.id === id)?.label ?? id;

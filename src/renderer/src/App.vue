@@ -109,6 +109,7 @@ import { useAiChapterPlainTextBridge } from "./composables/useAiChapterPlainText
 import { isEbookFilePath, isMarkdownFilePath, isPlainTextBookPath } from "./ebook/ebookFormat";
 import { useAppVoiceRead } from "./composables/useAppVoiceRead";
 import { useAppTimedScroll } from "./composables/useAppTimedScroll";
+import { useReaderClickModeAltHold } from "./composables/useReaderClickModeAltHold";
 import { useTxtStreamPipeline } from "./composables/useTxtStreamPipeline";
 import { basenameFromPath } from "./services/fileListService";
 import { bookTitleForExport } from "./utils/readerAnnotationExport";
@@ -148,6 +149,7 @@ import {
   clampMouseWheelScrollSensitivity,
   clampFastScrollSensitivity,
   defaultStickyChapterTitleEnabled,
+  defaultReaderClickMode,
   defaultChapterNavToolbarEnabled,
   defaultReaderEditShowLineNumbers,
   defaultReaderEditMinimap,
@@ -371,6 +373,7 @@ const pendingReplaceOldPath = ref("");
 const showDragDropChoice = ref(false);
 const dragDropChoiceDetail = ref("");
 const dragDropChoiceResolve = ref<((v: number) => void) | null>(null);
+const showVoiceReadSpeakSettingsPanel = ref(false);
 const chapterRuleErrorText = ref("");
 const chapterRuleState = ref(getChapterMatchRules());
 /** 主窗口文本替换规则（localStorage，与找书分键） */
@@ -912,6 +915,7 @@ const mouseWheelScrollSensitivity = ref(defaultMouseWheelScrollSensitivity);
 const fastScrollSensitivity = ref(defaultFastScrollSensitivity);
 /** 阅读区顶部粘性章节标题 */
 const stickyChapterTitleEnabled = ref(defaultStickyChapterTitleEnabled);
+const readerClickMode = ref(defaultReaderClickMode);
 const chapterNavToolbarEnabled = ref(defaultChapterNavToolbarEnabled);
 const readerEditShowLineNumbers = ref(defaultReaderEditShowLineNumbers);
 const readerEditMinimap = ref(defaultReaderEditMinimap);
@@ -1010,6 +1014,8 @@ const ebookParsing = ref(false);
 const bookPackUnpacking = ref(false);
 /** 转换进行中的电子书原路径（底栏路径；早于 currentFile 更新） */
 const ebookConversionSourcePath = ref<string | null>(null);
+/** PDF 转换页进度（底栏 / 蒙层「转换中 12/480」） */
+const ebookConvertProgressText = ref("");
 
 const readerPaletteOverridesLight = ref<Partial<ReaderSurfacePalette>>({});
 const readerPaletteOverridesDark = ref<Partial<ReaderSurfacePalette>>({});
@@ -1123,6 +1129,7 @@ const readerPaneWrapRef = useTemplateRef<HTMLElement>("readerPaneWrapRef");
 const {
   fullscreenReaderPaneStyle,
   onLayoutMouseDown: onFullscreenLayoutMouseDown,
+  onLayoutContextMenu: onFullscreenLayoutContextMenu,
   onLayoutWheel,
 } = useAppFullscreenReaderLayout({
   isFullscreenView,
@@ -1135,6 +1142,10 @@ const {
 function onLayoutMouseDown(ev: MouseEvent) {
   dismissFullscreenPanelsOnLayoutPointerDown(ev);
   onFullscreenLayoutMouseDown(ev);
+}
+
+function onLayoutContextMenu(ev: MouseEvent) {
+  onFullscreenLayoutContextMenu(ev);
 }
 
 const recentFiles = ref<RecentFileItem[]>([]);
@@ -1177,6 +1188,11 @@ const readingProgressSynced = ref(true);
 const readerEditMode = ref(false);
 const readerEditorDirty = ref(false);
 const editorContentChangeEpoch = ref(0);
+
+const { effectiveClickMode, clickModeAltHeld } = useReaderClickModeAltHold({
+  persistedClickMode: readerClickMode,
+  readerEditMode,
+});
 
 const readerSaveEncoding = ref("utf8");
 /** 编辑态 / 编码另存：整文件写盘中（禁用保存按钮，防重复点） */
@@ -1410,6 +1426,7 @@ const persistence = useAppPersistence({
   mouseWheelScrollSensitivity,
   fastScrollSensitivity,
   stickyChapterTitleEnabled,
+  readerClickMode,
   chapterNavToolbarEnabled,
   readerEditShowLineNumbers,
   readerEditMinimap,
@@ -1491,6 +1508,7 @@ watch(fileListEditing, (editing, wasEditing) => {
   }
 });
 
+watch(showSidebar, () => persistSettings());
 watch(aiAssistantDeepThinking, () => persistSettings());
 watch(aiAssistantSpoilerSafe, () => persistSettings());
 watch(wordcloudAngleMode, () => persistSettings());
@@ -2203,6 +2221,7 @@ const fileSession = useAppFileSession({
   ebookParsing,
   bookPackUnpacking,
   ebookConversionSourcePath,
+  ebookConvertProgressText,
   fileMetaRecords,
   bookPackUnpackDir,
   bookPackPassword,
@@ -2322,6 +2341,7 @@ const {
   isVoiceReadBlocksFind,
   isVoiceReadHeaderLocked,
   isVoiceReadNavigationBlocked,
+  voiceReadFooterStatus,
   toggleVoiceReadToolbar,
   togglePlayPause: voiceReadTogglePlayPause,
   exitVoiceRead,
@@ -2341,6 +2361,7 @@ const {
   monacoSmoothScrolling,
   aiFeaturesEnabled,
   characterRoster: currentFileCharacterRoster,
+  chapters,
 });
 
 const {
@@ -2439,6 +2460,7 @@ const {
   compressBlankLines,
   persistFileMeta,
   isVoiceReadNavigationBlocked,
+  ensurePinBeforeRevealFindWidget,
 });
 
 afterStreamFullTextInstalled = async () => {
@@ -2644,6 +2666,11 @@ async function onApplyPartialPhysicalEdit(payload: {
   } finally {
     readerFileSaving.value = false;
   }
+}
+
+function toggleReaderClickMode() {
+  readerClickMode.value = !readerClickMode.value;
+  persistSettings();
 }
 
 async function onToggleReaderEdit() {
@@ -3423,6 +3450,17 @@ function onSearchWithQuote(text: string) {
   searchQuery.value = q;
 }
 
+function openSidebarSearch() {
+  const sel = readerRef.value?.getSelectedText?.()?.trim() ?? "";
+  sidebarTab.value = "search";
+  showSidebar.value = true;
+  if (isFullscreenView.value) showFullscreenSidebar.value = true;
+  if (sel) searchQuery.value = sel;
+  void nextTick(() => {
+    readerSidebarRef.value?.focusSidebarSearchInput?.();
+  });
+}
+
 watch(readerEditMode, (edit) => {
   if (!edit) {
     clearChapterRefreshDebounce();
@@ -3708,6 +3746,7 @@ useAppWindowBindings({
   },
   openFindBook: openFindBookWindow,
   toggleFind: onToggleFind,
+  openSidebarSearch,
   toggleReaderEdit: () => {
     void onToggleReaderEdit();
   },
@@ -3740,6 +3779,10 @@ useAppWindowBindings({
   handleWindowCloseRequest,
   readerEditMode,
   voiceReadScrollLocked: isVoiceReadScrollLocked,
+  isVoiceReadActive,
+  onVoiceReadTogglePlayPause: voiceReadTogglePlayPause,
+  onVoiceReadPlayPrevLine: voiceReadPlayPrevLine,
+  onVoiceReadPlayNextLine: voiceReadPlayNextLine,
 });
 
 useAppShellThemeWatch({
@@ -3809,6 +3852,8 @@ useAppShellThemeWatch({
         :text-convert-letter="textConvertLetter"
         :text-convert-digit="textConvertDigit"
         :reader-edit-mode="readerEditMode"
+        :reader-click-mode="effectiveClickMode"
+        :reader-click-mode-alt-held="clickModeAltHeld"
         :can-enter-reader-edit-mode="canEnterReaderEditMode"
         :shortcut-bindings="shortcutBindings"
         @open-file="openFileViaDialog"
@@ -3855,6 +3900,7 @@ useAppShellThemeWatch({
         @open-about="showAboutPanel = true"
         @quit-app="quitApp"
         @toggle-reader-edit="onToggleReaderEdit"
+        @toggle-reader-click-mode="toggleReaderClickMode"
         @save-reader-file="onSaveReaderFile"
         :ai-features-enabled="aiFeaturesEnabled"
         :can-use-ai-smart-format="canUseAiSmartFormat"
@@ -3869,7 +3915,8 @@ useAppShellThemeWatch({
 
     <div
       class="layout"
-      @mousedown="onLayoutMouseDown"
+      @pointerdown="onLayoutMouseDown"
+      @contextmenu="onLayoutContextMenu"
       @wheel.capture="onLayoutWheel"
     >
       <div
@@ -4074,6 +4121,8 @@ useAppShellThemeWatch({
           :mouse-wheel-scroll-sensitivity="mouseWheelScrollSensitivity"
           :fast-scroll-sensitivity="fastScrollSensitivity"
           :sticky-chapter-title-enabled="stickyChapterTitleEnabled"
+          :reader-click-mode="effectiveClickMode"
+          :reader-click-mode-alt-held="clickModeAltHeld"
           :selection-toolbar-buttons="selectionToolbarButtons"
           :dictionary-settings="dictionarySettings"
           :web-search-settings="webSearchSettings"
@@ -4155,6 +4204,7 @@ useAppShellThemeWatch({
           @next-line="voiceReadPlayNextLine"
           @regenerate="voiceReadRegenerateCurrentLine"
           @stop="exitVoiceRead"
+          @open-speak-settings="showVoiceReadSpeakSettingsPanel = true"
         />
         <ReaderChapterNavBar
           v-if="readerChapterNavUiVisible && !isFullscreenView"
@@ -4224,12 +4274,14 @@ useAppShellThemeWatch({
         :loading="loading"
         :loading-progress-percent="loadingProgressPercent"
         :ebook-parsing="ebookParsing"
+        :ebook-convert-progress-text="ebookConvertProgressText"
         :current-file="currentFile"
         :path-caption="footerPathCaption"
         :reading-progress-percent-part="readingProgressParts.percentPart"
         :reading-progress-detail-part="readingProgressParts.detailPart"
         :reading-progress-placeholder="readingProgressParts.placeholder"
         :reading-progress-complete="readingProgressParts.complete"
+        :voice-read-footer-status="voiceReadFooterStatus"
         :total-char-count-text="
           formatCharCount(totalCharCount, chapterCharCountExact)
         "
@@ -4318,6 +4370,7 @@ useAppShellThemeWatch({
       v-model:show-web-search-manage-panel="showWebSearchManagePanel"
       v-model:show-translate-manage-panel="showTranslateManagePanel"
       v-model:show-replace-rule-panel="showReplaceRulePanel"
+      v-model:show-voice-read-speak-settings-panel="showVoiceReadSpeakSettingsPanel"
       v-model:add-bookmark-open="addBookmarkOpen"
       v-model:remove-bookmark-open="removeBookmarkOpen"
       v-model:bookmark-note-input="bookmarkNoteInput"
@@ -4369,6 +4422,7 @@ useAppShellThemeWatch({
       :dir-list-scanning="dirListScanning"
       :dir-list-current-name="dirListCurrentName"
       :ebook-parsing="ebookParsing"
+      :ebook-convert-progress-text="ebookConvertProgressText"
       :book-pack-unpacking="bookPackUnpacking"
       :shortcut-bindings="shortcutBindings"
       :default-shortcut-bindings="defaultShortcutBindings"

@@ -21,6 +21,8 @@ withDefaults(
      * 与 `primary` 互斥使用。
      */
     danger?: boolean;
+    /** 临时态（如按住 Alt 切换阅读交互模式）：图标为 warning 色 */
+    warning?: boolean;
   }>(),
   {
     active: false,
@@ -29,6 +31,7 @@ withDefaults(
     large: false,
     primary: false,
     danger: false,
+    warning: false,
   },
 );
 
@@ -39,7 +42,7 @@ defineEmits<{ click: [e: MouseEvent] }>();
   <button
     type="button"
     class="iconBtn"
-    :class="{ active, large, primary, danger }"
+    :class="{ active, large, primary, danger, warning }"
     :title="title"
     :aria-label="ariaLabel"
     :aria-pressed="pressed"
@@ -164,5 +167,12 @@ defineEmits<{ click: [e: MouseEvent] }>();
 }
 .iconBtn.danger.active .icon:not(.icon--multicolor) {
   color: var(--danger);
+}
+
+.iconBtn.warning .icon:not(.icon--multicolor) {
+  color: var(--warning);
+}
+.iconBtn.warning:hover:not(:disabled) .icon:not(.icon--multicolor) {
+  color: var(--warning);
 }
 </style>

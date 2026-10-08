@@ -172,6 +172,7 @@ export function readerMonacoThemeForAppTheme(themeName: string): string {
 
 /**
  * 注入阅读器 Monarch token 颜色；编辑器背景透明以透出 var(--reader-bg)。
+ * 圆角选区内角抠图另见 `readerMainMonaco.css`（`.cslr.monaco-editor-background`）。
  * 应在注册 Monarch 之后、setTheme 之前调用一次；调色板变更时可再调用。
  */
 export function ensureReaderSyntaxThemes(

@@ -49,6 +49,7 @@ import type {
 } from "@shared/aiTxt2ImgIpc";
 import type { VoiceReadEdgeTtsRequest } from "@shared/voiceReadEdgeIpc";
 import type {
+  VoiceReadCancelSynthesisPayload,
   VoiceReadHealthCheckIpcResult,
   VoiceReadHealthCheckPayload,
   VoiceReadListVoicesIpcResult,
@@ -57,6 +58,7 @@ import type {
   VoiceReadSynthesizePayload,
 } from "@shared/voiceReadSynthesisIpc";
 import {
+  VOICE_READ_IPC_CANCEL_SYNTHESIS,
   VOICE_READ_IPC_HEALTH_CHECK,
   VOICE_READ_IPC_LIST_VOICES,
   VOICE_READ_IPC_SYNTHESIZE,
@@ -213,6 +215,10 @@ const api = {
       VOICE_READ_IPC_SYNTHESIZE,
       payload,
     ) as Promise<VoiceReadSynthesizeIpcResult>,
+  voiceReadCancelSynthesis: (payload: VoiceReadCancelSynthesisPayload) =>
+    ipcRenderer.invoke(VOICE_READ_IPC_CANCEL_SYNTHESIS, payload) as Promise<{
+      ok: true;
+    }>,
   voiceReadListVoices: (payload: VoiceReadListVoicesPayload) =>
     ipcRenderer.invoke(
       VOICE_READ_IPC_LIST_VOICES,

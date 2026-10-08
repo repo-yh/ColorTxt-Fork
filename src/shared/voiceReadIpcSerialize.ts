@@ -9,6 +9,11 @@ import type {
   VoiceReadSynthesisRequest,
   VoiceReadSynthesisResult,
 } from "./voiceReadSynthesis";
+import {
+  normalizeVolcengineExplicitDialect,
+  normalizeVolcengineExplicitLanguage,
+  parseVolcengineSpeechSlot,
+} from "./voiceReadVolcengineAudio";
 
 export function toPlainVoiceReadEngineConfig(
   raw: unknown,
@@ -29,6 +34,15 @@ export function toPlainVoiceReadSynthesisRequest(
     emotion: req.emotion
       ? normalizeVoiceReadEmotion(req.emotion)
       : undefined,
+    volcengineSpeechSlot: parseVolcengineSpeechSlot(req.volcengineSpeechSlot),
+    volcengineLanguage:
+      req.volcengineLanguage === undefined
+        ? undefined
+        : normalizeVolcengineExplicitLanguage(req.volcengineLanguage),
+    volcengineDialect:
+      req.volcengineDialect === undefined
+        ? undefined
+        : normalizeVolcengineExplicitDialect(req.volcengineDialect),
     engineConfig: toPlainVoiceReadEngineConfig(req.engineConfig),
   };
 }

@@ -30,6 +30,10 @@ export type CharacterRosterEntry = {
   retrieveThinkingText: string;
   /** 朗读语音（当前引擎 voiceId；空=使用全局对白默认音色） */
   voiceReadVoiceId?: string;
+  /** 火山引擎专属音色的语种（`explicit_language`；空=中英混） */
+  voiceReadLanguage?: string;
+  /** 火山引擎专属音色的方言（`explicit_dialect`；空=默认） */
+  voiceReadDialect?: string;
   /** 音色试听：当前展示的台词（与检索列表独立，可手改） */
   voiceReadSampleLine?: string;
   /** AI 检索到的经典台词列表（只读缓存，供「换一句」覆盖当前台词） */

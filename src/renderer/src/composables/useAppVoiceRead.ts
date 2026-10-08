@@ -1,7 +1,17 @@
-import { computed, nextTick, ref, watch, type Ref } from "vue";
+import {
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  watch,
+  type Ref,
+} from "vue";
 import type { CharacterRosterEntry } from "@shared/characterTypes";
 import type ReaderMain from "../components/ReaderMain.vue";
 import type { VoiceReadProfile } from "@shared/voiceReadProfiles";
+import type { Chapter } from "../chapter";
+import { pickActiveChapterIdx } from "../reader/chapterIndex";
 import {
   clampVoiceReadRate,
   clampVoiceReadVolume,
@@ -12,12 +22,24 @@ import {
   type VoiceReadSettings,
 } from "../constants/voiceRead";
 import {
+  VOICE_READ_SPEAK_CHANGED_EVENT,
+  formatVoiceReadAutoPauseClock,
+  voiceReadFilterRulesFingerprint,
+  type VoiceReadSpeakSettings,
+} from "../constants/voiceReadSpeak";
+import {
   VoiceReadLinePlayer,
   type VoiceReadSpeakChunk,
 } from "../services/voiceRead/voiceReadLinePlayer";
 import { voiceReadRequiresSerialChunkFetch } from "../services/voiceRead/voiceReadEngineRouting";
-import { hasVoiceReadSpeakableText } from "../services/voiceRead/voiceReadTextChunks";
 import { buildLineSpeakChunks } from "../services/voiceRead/voiceReadLineBuild";
+import {
+  applyVoiceReadFilterRulesToLines,
+  filterVoiceReadSpeakChunks,
+} from "../services/voiceRead/voiceReadFilterApply";
+import { hasVoiceReadSpeakableText } from "../services/voiceRead/voiceReadTextChunks";
+import { getVoiceReadSpeakSettings } from "../services/voiceRead/voiceReadSpeakStore";
+import { appToast } from "../services/appToast";
 import type { VoiceReadQuoteCarry } from "../services/voiceRead/voiceReadSegments";
 import {
   attributeDialogueQuotes,
@@ -48,6 +70,8 @@ export function useAppVoiceRead(deps: {
   monacoSmoothScrolling: Ref<boolean>;
   aiFeaturesEnabled: Ref<boolean>;
   characterRoster: Ref<readonly CharacterRosterEntry[]>;
+  /** 主窗口侧栏章节列表；找书不传（按文档切换计章） */
+  chapters?: Ref<readonly Chapter[]>;
   /**
    * 找书等场景：当前章读完后自动续章（由 onDocumentEnd 加载下一章）。
    * 最后一章仍正常结束朗读。
@@ -65,6 +89,20 @@ export function useAppVoiceRead(deps: {
   const toolbarRate = ref(1);
   const toolbarVolume = ref(1);
   const player = new VoiceReadLinePlayer();
+  const speakSettings = ref<VoiceReadSpeakSettings>(getVoiceReadSpeakSettings());
+  let lastFilterFingerprint = voiceReadFilterRulesFingerprint(
+    speakSettings.value.filterRules,
+  );
+  let filteredLinesCache: string[] | null = null;
+  let filteredLinesCacheFp = "";
+  let filteredLinesCacheCount = -1;
+  const autoPauseAccumulatedMs = ref(0);
+  const autoPausePlayingSince = ref<number | null>(null);
+  const autoPauseChaptersConsumed = ref(1);
+  const autoPauseClockTick = ref(0);
+  let autoPauseLastChapterIdx = 0;
+  let autoPausedAwaitingNextDocument = false;
+  let durationTimer: ReturnType<typeof setInterval> | null = null;
   /** 批次构建（含 AI 引号分类）进行中的深度 */
   let prepareSynthesisDepth = 0;
   let playerSynthesisActive = false;
@@ -136,6 +174,28 @@ export function useAppVoiceRead(deps: {
       deps.readerRef.value?.closeFindWidgetIfRevealed?.();
       const w = resumeWaiters.splice(0, resumeWaiters.length);
       for (const fn of w) fn();
+      if (autoPausePlayingSince.value == null) {
+        autoPausePlayingSince.value = Date.now();
+      }
+      if (durationTimer == null) {
+        durationTimer = setInterval(() => {
+          if (mode.value !== "playing") return;
+          autoPauseClockTick.value += 1;
+          checkDurationAutoPause();
+        }, 1000);
+      }
+    } else {
+      if (m === "paused" && autoPausePlayingSince.value != null) {
+        autoPauseAccumulatedMs.value += Date.now() - autoPausePlayingSince.value;
+        autoPausePlayingSince.value = null;
+      } else if (m === "off") {
+        autoPausePlayingSince.value = null;
+        autoPausedAwaitingNextDocument = false;
+      }
+      if (durationTimer != null) {
+        clearInterval(durationTimer);
+        durationTimer = null;
+      }
     }
   });
 
@@ -154,6 +214,21 @@ export function useAppVoiceRead(deps: {
   const isVoiceReadHeaderLocked = computed(() => mode.value !== "off");
   /** 识别/合成/播放中：拦截侧栏跳转，避免与批次播放冲突 */
   const isVoiceReadNavigationBlocked = computed(() => mode.value === "playing");
+  const voiceReadFooterStatus = computed(() => {
+    if (mode.value !== "playing") return "";
+    const apMode = speakSettings.value.autoPauseMode;
+    if (apMode === "off") return "";
+    if (apMode === "chapters") {
+      const n = Math.max(1, speakSettings.value.autoPauseChapterCount);
+      const remaining = Math.max(0, n - autoPauseChaptersConsumed.value + 1);
+      return `语音朗读：${remaining}/${n}`;
+    }
+    void autoPauseClockTick.value;
+    const limitMs =
+      Math.max(1, speakSettings.value.autoPauseDurationMinutes) * 60 * 1000;
+    const remainingMs = Math.max(0, limitMs - currentAutoPauseElapsedMs());
+    return `语音朗读：${formatVoiceReadAutoPauseClock(remainingMs)}`;
+  });
 
   function getReaderLineContent(lineNo: number): string {
     return deps.readerRef.value?.getEditorLineContent?.(lineNo) ?? "";
@@ -188,12 +263,23 @@ export function useAppVoiceRead(deps: {
       settings,
       deps.aiFeaturesEnabled.value,
     );
+    const speakText = getFilteredLineContent(lineNo);
     const first = buildLineSpeakChunks(settings, rawLine, roster, {
       carry,
       aiFeaturesEnabled: aiOn,
     });
     if (!aiOn || first.dialogueSegments.length === 0) {
-      return first;
+      const spoken = buildLineSpeakChunks(settings, speakText, roster, {
+        carry,
+        aiFeaturesEnabled: false,
+      });
+      return {
+        ...spoken,
+        chunks: filterVoiceReadSpeakChunks(
+          spoken.chunks,
+          speakSettings.value.filterRules,
+        ),
+      };
     }
     const dialogueTexts = first.dialogueSegments.map((d) => d.text);
     const ctx = speakerContextForLine(settings, lineNo);
@@ -215,12 +301,19 @@ export function useAppVoiceRead(deps: {
       emotionOn,
       ctx,
     );
-    return buildLineSpeakChunks(settings, rawLine, roster, {
+    const built = buildLineSpeakChunks(settings, speakText, roster, {
       carry,
       quoteAttributions: quotes,
       narrationEmotion,
       aiFeaturesEnabled: aiOn,
     });
+    return {
+      ...built,
+      chunks: filterVoiceReadSpeakChunks(
+        built.chunks,
+        speakSettings.value.filterRules,
+      ),
+    };
   }
 
   function invalidateAiQuoteCacheForLine(lineNo: number, rawLine: string): void {
@@ -272,8 +365,7 @@ export function useAppVoiceRead(deps: {
     for (let L = fromLine; L <= toLine; L++) {
       if (shouldAbort?.()) break;
       const rawL = reader.getEditorLineContent?.(L) ?? "";
-      const t = rawL.replace(/\s+/g, " ").trim();
-      if (!hasVoiceReadSpeakableText(t)) continue;
+      if (!lineHasSpeakableContent(L)) continue;
       const built = await buildLineSpeakChunksWithSpeakers(
         settings,
         L,
@@ -332,6 +424,114 @@ export function useAppVoiceRead(deps: {
     currentChunkIndex = 0;
   }
 
+  function chapterIndexForLine(line: number): number {
+    const list = deps.chapters?.value;
+    if (!list || list.length === 0) return 0;
+    const idx = pickActiveChapterIdx(list, line);
+    return idx < 0 ? 0 : idx;
+  }
+
+  function resetAutoPauseCounters(line: number) {
+    autoPauseAccumulatedMs.value = 0;
+    autoPausePlayingSince.value = Date.now();
+    autoPauseChaptersConsumed.value = 1;
+    autoPauseLastChapterIdx = chapterIndexForLine(line);
+    autoPauseClockTick.value += 1;
+  }
+
+  function currentAutoPauseElapsedMs(): number {
+    let ms = autoPauseAccumulatedMs.value;
+    const since = autoPausePlayingSince.value;
+    if (since != null && mode.value === "playing") {
+      ms += Date.now() - since;
+    }
+    return ms;
+  }
+
+  function autoPauseNow() {
+    if (mode.value !== "playing") return;
+    if (autoPausePlayingSince.value != null) {
+      autoPauseAccumulatedMs.value += Date.now() - autoPausePlayingSince.value;
+      autoPausePlayingSince.value = null;
+    }
+    playbackLoopGen += 1;
+    player.onChunkChange = undefined;
+    resetSynthesizingState();
+    player.pausePlayback();
+    mode.value = "paused";
+    appToast("已自动暂停朗读", { kind: "info" });
+  }
+
+  function checkDurationAutoPause(): boolean {
+    if (speakSettings.value.autoPauseMode !== "duration") return false;
+    const limitMs =
+      Math.max(1, speakSettings.value.autoPauseDurationMinutes) * 60 * 1000;
+    const extra =
+      autoPausePlayingSince.value != null && mode.value === "playing"
+        ? Date.now() - autoPausePlayingSince.value
+        : 0;
+    if (autoPauseAccumulatedMs.value + extra < limitMs) return false;
+    autoPauseNow();
+    return true;
+  }
+
+  function firstLineThatShouldChapterPause(
+    fromLine: number,
+    toLine: number,
+  ): number | null {
+    if (speakSettings.value.autoPauseMode !== "chapters") return null;
+    if (deps.continueAtDocumentEnd) return null;
+    const n = Math.max(1, speakSettings.value.autoPauseChapterCount);
+    let consumed = autoPauseChaptersConsumed.value;
+    let lastIdx = autoPauseLastChapterIdx;
+    for (let L = fromLine; L <= toLine; L++) {
+      if (!lineHasSpeakableContent(L)) continue;
+      const idx = chapterIndexForLine(L);
+      if (idx === lastIdx) continue;
+      if (consumed >= n) return L;
+      consumed += 1;
+      lastIdx = idx;
+    }
+    return null;
+  }
+
+  function commitChapterProgress(fromLine: number, toLine: number) {
+    if (speakSettings.value.autoPauseMode !== "chapters") return;
+    if (deps.continueAtDocumentEnd) return;
+    for (let L = fromLine; L <= toLine; L++) {
+      if (!lineHasSpeakableContent(L)) continue;
+      const idx = chapterIndexForLine(L);
+      if (idx === autoPauseLastChapterIdx) continue;
+      autoPauseChaptersConsumed.value += 1;
+      autoPauseLastChapterIdx = idx;
+    }
+  }
+
+  function onSpeakSettingsChanged() {
+    const next = getVoiceReadSpeakSettings();
+    const fp = voiceReadFilterRulesFingerprint(next.filterRules);
+    speakSettings.value = next;
+    if (fp !== lastFilterFingerprint) {
+      lastFilterFingerprint = fp;
+      invalidateFilteredLinesCache();
+      player.clearSynthesisCache();
+    }
+  }
+
+  onMounted(() => {
+    window.addEventListener(VOICE_READ_SPEAK_CHANGED_EVENT, onSpeakSettingsChanged);
+  });
+  onBeforeUnmount(() => {
+    window.removeEventListener(
+      VOICE_READ_SPEAK_CHANGED_EVENT,
+      onSpeakSettingsChanged,
+    );
+    if (durationTimer != null) {
+      clearInterval(durationTimer);
+      durationTimer = null;
+    }
+  });
+
   function exitVoiceRead() {
     playbackLoopGen += 1;
     player.onChunkChange = undefined;
@@ -347,6 +547,15 @@ export function useAppVoiceRead(deps: {
     if (!deps.continueAtDocumentEnd || !deps.onDocumentEnd) return false;
     if (deps.canAdvanceToNextDocument && !deps.canAdvanceToNextDocument()) {
       return false;
+    }
+    if (speakSettings.value.autoPauseMode === "chapters") {
+      const n = Math.max(1, speakSettings.value.autoPauseChapterCount);
+      if (autoPauseChaptersConsumed.value >= n) {
+        autoPausedAwaitingNextDocument = true;
+        autoPauseNow();
+        return true;
+      }
+      autoPauseChaptersConsumed.value += 1;
     }
     playbackLoopGen += 1;
     player.onChunkChange = undefined;
@@ -382,6 +591,20 @@ export function useAppVoiceRead(deps: {
       ln,
       deps.monacoSmoothScrolling.value,
     );
+    noteChapterProgressForLine(ln);
+  }
+
+  /**
+   * 当前朗读行换章时立刻更新倒数（不要等整批播完）。
+   * 找书按文档计章，不在这里处理。
+   */
+  function noteChapterProgressForLine(line: number) {
+    if (speakSettings.value.autoPauseMode !== "chapters") return;
+    if (deps.continueAtDocumentEnd) return;
+    const idx = chapterIndexForLine(line);
+    if (idx === autoPauseLastChapterIdx) return;
+    autoPauseChaptersConsumed.value += 1;
+    autoPauseLastChapterIdx = idx;
   }
 
   /** 将锚点同步到批次内某段（段 → 模型行） */
@@ -443,8 +666,7 @@ export function useAppVoiceRead(deps: {
       for (let L = batchEnd + 1; L <= mCount; L++) {
         if (!isPlaybackAlive(gen, mode.value)) return;
         const rawAfter = reader.getEditorLineContent?.(L) ?? "";
-        const t = rawAfter.replace(/\s+/g, " ").trim();
-        if (!hasVoiceReadSpeakableText(t)) continue;
+        if (!lineHasSpeakableContent(L)) continue;
         const built = await buildLineSpeakChunksWithSpeakers(
           settings,
           L,
@@ -464,8 +686,7 @@ export function useAppVoiceRead(deps: {
     const reader = deps.readerRef.value;
     if (!reader || line < 1) return;
     const raw = reader.getEditorLineContent?.(line) ?? "";
-    const t = raw.replace(/\s+/g, " ").trim();
-    if (!hasVoiceReadSpeakableText(t)) return;
+    if (!lineHasSpeakableContent(line)) return;
     void buildLineSpeakChunksWithSpeakers(settings, line, raw, null).then(
       (built) => {
         if (!isVoiceReadActive.value) return;
@@ -497,6 +718,7 @@ export function useAppVoiceRead(deps: {
       exitVoiceRead();
       return;
     }
+    rebuildFilteredLinesCache();
     const startLn = clampPlaybackStartLine(startLine, mCount0);
     currentLine = startLn;
     if (startLn > mCount0) {
@@ -517,7 +739,15 @@ export function useAppVoiceRead(deps: {
       const ln = Math.max(1, Math.min(currentLine, mCount));
       currentLine = ln;
 
-      const batchEnd = Math.min(mCount, ln + VOICE_READ_BATCH_LINES - 1);
+      let batchEnd = Math.min(mCount, ln + VOICE_READ_BATCH_LINES - 1);
+      const chapterPauseLine = firstLineThatShouldChapterPause(ln, batchEnd);
+      if (chapterPauseLine === ln) {
+        autoPauseNow();
+        break;
+      }
+      if (chapterPauseLine != null) {
+        batchEnd = Math.max(ln, chapterPauseLine - 1);
+      }
       const settings = effectiveSettingsForSpeak();
 
       scrollAndHighlightLine(ln);
@@ -551,6 +781,12 @@ export function useAppVoiceRead(deps: {
       if (chunks.length === 0) {
         endTtsBridge();
         lastCompletedBatchEndLine = Math.max(lastCompletedBatchEndLine, batchEnd);
+        commitChapterProgress(ln, batchEnd);
+        if (checkDurationAutoPause()) break;
+        if (chapterPauseLine != null) {
+          autoPauseNow();
+          break;
+        }
         if (batchEnd >= mCount) {
           player.discardPrefetch();
           if (await handleDocumentEndReached()) break;
@@ -583,6 +819,12 @@ export function useAppVoiceRead(deps: {
       if (!isPlaybackAlive(gen, mode.value)) break;
 
       lastCompletedBatchEndLine = Math.max(lastCompletedBatchEndLine, batchEnd);
+      commitChapterProgress(ln, batchEnd);
+      if (checkDurationAutoPause()) break;
+      if (chapterPauseLine != null) {
+        autoPauseNow();
+        break;
+      }
 
       if (batchEnd >= mCount) {
         player.discardPrefetch();
@@ -617,6 +859,7 @@ export function useAppVoiceRead(deps: {
     );
     syncToolbarFromPersisted();
     lastCompletedBatchEndLine = 0;
+    resetAutoPauseCounters(ln);
     mode.value = "playing";
     void runPlaybackLoop(ln);
   }
@@ -668,13 +911,54 @@ export function useAppVoiceRead(deps: {
     return Math.max(1, Math.min(currentLine, mCount));
   }
 
+  function invalidateFilteredLinesCache() {
+    filteredLinesCache = null;
+    filteredLinesCacheCount = -1;
+    filteredLinesCacheFp = "";
+  }
+
+  function rebuildFilteredLinesCache() {
+    const fp = voiceReadFilterRulesFingerprint(speakSettings.value.filterRules);
+    const reader = deps.readerRef.value;
+    const count = reader?.getModelLineCount?.() ?? 0;
+    const rawLines: string[] = [];
+    for (let i = 1; i <= count; i++) {
+      rawLines.push(reader?.getEditorLineContent?.(i) ?? "");
+    }
+    filteredLinesCache = applyVoiceReadFilterRulesToLines(
+      rawLines,
+      speakSettings.value.filterRules,
+    );
+    filteredLinesCacheFp = fp;
+    filteredLinesCacheCount = rawLines.length;
+  }
+
+  function ensureFilteredLinesCache() {
+    const fp = voiceReadFilterRulesFingerprint(speakSettings.value.filterRules);
+    const count = deps.readerRef.value?.getModelLineCount?.() ?? 0;
+    if (
+      filteredLinesCache &&
+      filteredLinesCacheFp === fp &&
+      filteredLinesCacheCount === count
+    ) {
+      return;
+    }
+    rebuildFilteredLinesCache();
+  }
+
+  function getFilteredLineContent(lineNo: number): string {
+    ensureFilteredLinesCache();
+    return (
+      filteredLinesCache?.[lineNo - 1] ??
+      deps.readerRef.value?.getEditorLineContent?.(lineNo) ??
+      ""
+    );
+  }
+
   function lineHasSpeakableContent(line: number): boolean {
     const reader = deps.readerRef.value;
     if (!reader || line < 1) return false;
-    const t = (reader.getEditorLineContent?.(line) ?? "")
-      .replace(/\s+/g, " ")
-      .trim();
-    return hasVoiceReadSpeakableText(t);
+    return hasVoiceReadSpeakableText(getFilteredLineContent(line));
   }
 
   function findAdjacentSpeakableLine(line: number, delta: -1 | 1): number {
@@ -689,7 +973,7 @@ export function useAppVoiceRead(deps: {
   }
 
   /** 从指定行重新播（新批次）；用于跨行跳转、跨批或空行 */
-  function restartPlaybackFromLine(line: number) {
+  function restartPlaybackFromLine(line: number, resetAutoPause = false) {
     if (mode.value === "off") return;
     const reader = deps.readerRef.value;
     const mCount = reader?.getModelLineCount?.() ?? 0;
@@ -700,6 +984,8 @@ export function useAppVoiceRead(deps: {
     const ln = resolveSpeakableStartLine(
       Math.max(1, Math.min(Math.floor(line), mCount)),
     );
+
+    if (resetAutoPause) resetAutoPauseCounters(ln);
 
     playbackLoopGen += 1;
     player.onChunkChange = undefined;
@@ -721,7 +1007,7 @@ export function useAppVoiceRead(deps: {
       for (let i = currentChunkIndex - 1; i >= 0; i--) {
         const line = activeChunkToLine[i]!;
         if (line < anchorLine) {
-          restartPlaybackFromLine(line);
+          restartPlaybackFromLine(line, true);
           return;
         }
       }
@@ -729,7 +1015,7 @@ export function useAppVoiceRead(deps: {
 
     const ln = getPlaybackAnchorLine();
     if (ln <= 1) return;
-    restartPlaybackFromLine(findAdjacentSpeakableLine(ln, -1));
+    restartPlaybackFromLine(findAdjacentSpeakableLine(ln, -1), true);
   }
 
   function playNextLine() {
@@ -742,7 +1028,7 @@ export function useAppVoiceRead(deps: {
       for (let i = currentChunkIndex + 1; i < activeChunkToLine.length; i++) {
         const line = activeChunkToLine[i]!;
         if (line > anchorLine) {
-          restartPlaybackFromLine(line);
+          restartPlaybackFromLine(line, true);
           return;
         }
       }
@@ -750,7 +1036,7 @@ export function useAppVoiceRead(deps: {
 
     const ln = getPlaybackAnchorLine();
     if (ln >= mCount) return;
-    restartPlaybackFromLine(findAdjacentSpeakableLine(ln, 1));
+    restartPlaybackFromLine(findAdjacentSpeakableLine(ln, 1), true);
   }
 
   function regenerateCurrentLine() {
@@ -793,14 +1079,42 @@ export function useAppVoiceRead(deps: {
   /** 暂停后恢复：从视口中心行开播；有缓存则即时播放，无缓存则先合成 */
   function resumeFromPause() {
     if (mode.value !== "playing") return;
+    const awaitingNext = autoPausedAwaitingNextDocument;
+    autoPausedAwaitingNextDocument = false;
     const reader = deps.readerRef.value;
     const mCount = reader?.getModelLineCount?.() ?? 0;
-    if (!reader || mCount < 1) return;
+    if (!reader || mCount < 1) {
+      if (
+        awaitingNext &&
+        deps.continueAtDocumentEnd &&
+        deps.canAdvanceToNextDocument?.()
+      ) {
+        void (async () => {
+          await Promise.resolve(deps.onDocumentEnd?.());
+          resetAutoPauseCounters(1);
+          restartPlaybackFromLine(1);
+        })();
+      }
+      return;
+    }
+
+    if (
+      awaitingNext &&
+      deps.continueAtDocumentEnd &&
+      deps.canAdvanceToNextDocument?.()
+    ) {
+      void (async () => {
+        await Promise.resolve(deps.onDocumentEnd?.());
+        resetAutoPauseCounters(1);
+        restartPlaybackFromLine(1);
+      })();
+      return;
+    }
 
     const ln = resolveSpeakableStartLine(
       reader.getModelLineAtViewportCenter?.() ?? 1,
     );
-
+    resetAutoPauseCounters(ln);
     restartPlaybackFromLine(ln);
   }
 
@@ -831,6 +1145,7 @@ export function useAppVoiceRead(deps: {
   });
 
   watch(deps.currentFile, (file, prev) => {
+    invalidateFilteredLinesCache();
     player.clearSynthesisCache();
     clearVoiceReadSpeakerCache();
     // 找书续章：未缓存章会先清空 content key 再拉正文；由 loading watch 暂停/续播，勿退出朗读
@@ -882,6 +1197,7 @@ export function useAppVoiceRead(deps: {
           resetSynthesizingState();
           clearActiveBatch();
         } else {
+          invalidateFilteredLinesCache();
           void nextTick(() => {
             if (mode.value !== "playing" || deps.loading.value) return;
             restartPlaybackFromLine(1);
@@ -906,6 +1222,7 @@ export function useAppVoiceRead(deps: {
     isVoiceReadBlocksFind,
     isVoiceReadHeaderLocked,
     isVoiceReadNavigationBlocked,
+    voiceReadFooterStatus,
     toggleVoiceReadToolbar,
     togglePlayPause,
     restartFromViewportTopAfterNavigation,

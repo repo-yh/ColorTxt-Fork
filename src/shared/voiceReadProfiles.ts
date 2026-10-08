@@ -385,6 +385,7 @@ function stripVoiceReadProfileSettingsApiKeys(
       dashscopeApiKey: undefined,
       minimaxApiKey: undefined,
       mimoApiKey: undefined,
+      volcengineApiKey: undefined,
     },
   };
 }

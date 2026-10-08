@@ -65,6 +65,7 @@ import { useAppReaderChrome } from "../../composables/useAppReaderChrome";
 import { useAppFullscreenReaderLayout } from "../../composables/useAppFullscreenReaderLayout";
 import { useAppTimedScroll } from "../../composables/useAppTimedScroll";
 import { useAppVoiceRead } from "../../composables/useAppVoiceRead";
+import { useReaderClickModeAltHold } from "../../composables/useReaderClickModeAltHold";
 import { hasEscBeforeModalLayers } from "../../utils/modalStack";
 import { applyTextDisplayConverts } from "../../services/textConvertApply";
 import { applyAppShellTheme, type AppShellTheme } from "../../utils/appShellThemeSync";
@@ -132,6 +133,7 @@ const emit = defineEmits<{
   openTextReplace: [];
   /** 限定该书源搜索 */
   searchSource: [item: { bookSourceUrl: string; bookSourceName: string }];
+  openSpeakSettings: [];
 }>();
 
 const readerRef = ref<InstanceType<typeof ReaderMain> | null>(null);
@@ -230,7 +232,9 @@ const {
   mouseWheelScrollSensitivity,
   fastScrollSensitivity,
   stickyChapterTitleEnabled,
+  readerClickMode,
   chapterNavToolbarEnabled,
+  findBookChapterAdvanceEnabled,
   selectionToolbarButtons,
   dictionarySettings,
   webSearchSettings,
@@ -403,13 +407,111 @@ const readerPaneWrapRef = useTemplateRef<HTMLElement>("readerPaneWrapRef");
 const {
   fullscreenReaderPaneStyle,
   onLayoutMouseDown: onFullscreenLayoutMouseDown,
-  onLayoutWheel,
+  onLayoutContextMenu: onFullscreenLayoutContextMenu,
+  onLayoutWheel: onFullscreenLayoutWheel,
 } = useAppFullscreenReaderLayout({
   isFullscreenView,
   readerRef,
   fullscreenSidebarOverlayRef,
   fullscreenReaderWidthPercent,
   readerPaneWrapRef,
+});
+
+const CHAPTER_ADVANCE_WHEEL_THRESHOLD = 260;
+let chapterAdvanceLockTimer: number | null = null;
+let wheelDeltaResetTimer: number | null = null;
+let accumulatedWheelDelta = 0;
+let accumulatedWheelDirection: 1 | -1 | 0 = 0;
+
+function resetChapterAdvanceWheelAccumulation() {
+  if (wheelDeltaResetTimer !== null) {
+    window.clearTimeout(wheelDeltaResetTimer);
+    wheelDeltaResetTimer = null;
+  }
+  accumulatedWheelDelta = 0;
+  accumulatedWheelDirection = 0;
+}
+
+/**
+ * 已在章节边界时，用户再次向下/向上滚动或翻页则切章。
+ * 滚轮、空格、PageDown/PageUp、方向键共用；定时滚动和语音朗读仍走各自逻辑。
+ */
+function tryAdvanceChapterFromOverscroll(direction: 1 | -1): boolean {
+  if (!findBookChapterAdvanceEnabled.value) return false;
+  if (chapterAdvanceLockTimer !== null) return false;
+  if (
+    chapterContentBusy.value ||
+    readerEditMode.value ||
+    voiceRead.isVoiceReadNavigationBlocked.value
+  ) {
+    return false;
+  }
+  const goingDown = direction === 1;
+  const atBoundary = goingDown
+    ? viewportAtBottom.value && canGoNextChapter.value
+    : viewportTopLine.value <= 1 && canGoPrevChapter.value;
+  if (!atBoundary) return false;
+
+  chapterAdvanceLockTimer = window.setTimeout(() => {
+    chapterAdvanceLockTimer = null;
+  }, 80);
+  resetChapterAdvanceWheelAccumulation();
+  const targetIndex = displayIndexForReadingOrder(
+    currentReadingOrderIndex.value + direction,
+    displayChapters.value.length,
+    chapterSortDesc.value,
+  );
+  void loadChapterAtDisplayIndex(targetIndex, {
+    scrollTo: goingDown ? "top" : "bottom",
+  });
+  return true;
+}
+
+function onFindBookSpacePageDown(): boolean {
+  return tryAdvanceChapterFromOverscroll(1);
+}
+
+/**
+ * 书架在线阅读：正文已经到达本章边界后，用户再次滚动时进入邻章。
+ * 只处理正文区域，避免滚动章节侧栏时意外跳章。
+ */
+function onLayoutWheel(ev: WheelEvent) {
+  onFullscreenLayoutWheel(ev);
+  if (!readerPaneWrapRef.value || ev.deltaY === 0) return;
+  if (!(ev.target instanceof Node) || !readerPaneWrapRef.value.contains(ev.target)) return;
+  if (!findBookChapterAdvanceEnabled.value) return;
+  if (
+    chapterContentBusy.value ||
+    readerEditMode.value ||
+    voiceRead.isVoiceReadNavigationBlocked.value
+  ) {
+    return;
+  }
+
+  // 一个连续滚轮手势可能产生多个 wheel 事件，只允许合并后的动作触发一次。
+  if (chapterAdvanceLockTimer !== null) return;
+  const direction: 1 | -1 = ev.deltaY > 0 ? 1 : -1;
+  if (accumulatedWheelDirection !== direction) {
+    accumulatedWheelDirection = direction;
+    accumulatedWheelDelta = 0;
+  }
+  accumulatedWheelDelta += Math.abs(ev.deltaY);
+
+  if (wheelDeltaResetTimer !== null) window.clearTimeout(wheelDeltaResetTimer);
+  wheelDeltaResetTimer = window.setTimeout(() => {
+    wheelDeltaResetTimer = null;
+    accumulatedWheelDelta = 0;
+    accumulatedWheelDirection = 0;
+  }, 180);
+
+  // 小幅滚动只用于阅读，不触发章节切换；需要明显的大幅度连续滚动。
+  if (accumulatedWheelDelta < CHAPTER_ADVANCE_WHEEL_THRESHOLD) return;
+  tryAdvanceChapterFromOverscroll(direction);
+}
+
+onBeforeUnmount(() => {
+  if (chapterAdvanceLockTimer !== null) window.clearTimeout(chapterAdvanceLockTimer);
+  resetChapterAdvanceWheelAccumulation();
 });
 
 const sidebarShellVisible = computed(() =>
@@ -997,7 +1099,12 @@ const { shortcutBindings } = useFindBookReaderShortcuts({
   toggleFullscreen: () => void toggleFullscreen(),
   isVoiceReadScrollLocked,
   isVoiceReadBlocksFind,
+  isVoiceReadActive,
+  onVoiceReadTogglePlayPause: () => voiceRead.togglePlayPause(),
+  onVoiceReadPlayPrevLine: () => voiceRead.playPrevLine(),
+  onVoiceReadPlayNextLine: () => voiceRead.playNextLine(),
   toggleReaderEdit: onToggleReaderEdit,
+  tryAdvanceChapterOnScroll: tryAdvanceChapterFromOverscroll,
 });
 
 const isMacPlatform = /mac|iphone|ipad|ipod/i.test(navigator.platform || "");
@@ -1043,6 +1150,17 @@ stopTimedScroll = () => timedScroll.stopTimedScroll();
 
 const isTimedScrollActive = timedScroll.isTimedScrollActive;
 const canStartTimedScroll = timedScroll.canStartTimedScroll;
+
+function toggleReaderClickMode() {
+  readerClickMode.value = !readerClickMode.value;
+  persistReaderUiPrefs();
+}
+
+const { effectiveClickMode, clickModeAltHeld } = useReaderClickModeAltHold({
+  persistedClickMode: readerClickMode,
+  readerEditMode,
+  enabled: modelValue,
+});
 
 async function toggleCompressBlankLines() {
   if (readerEditMode.value) {
@@ -1908,6 +2026,8 @@ const modalRef = ref<InstanceType<typeof AppModal> | null>(null);
           :color-scheme-shortcut-label="colorSchemeShortcutLabel"
           :find-shortcut-label="findShortcutLabel"
           :reader-edit-mode="readerEditMode"
+          :reader-click-mode="effectiveClickMode"
+          :reader-click-mode-alt-held="clickModeAltHeld"
           :can-enter-reader-edit-mode="canEnterReaderEditMode"
           :reader-chapter-saving="readerChapterSaving"
           :text-replace-active="textReplaceActive"
@@ -1940,13 +2060,15 @@ const modalRef = ref<InstanceType<typeof AppModal> | null>(null);
           @toggle-bookshelf="onToggleBookshelf"
           @open-text-replace="onOpenTextReplace"
           @toggle-reader-edit="onToggleReaderEdit"
+          @toggle-reader-click-mode="toggleReaderClickMode"
           @save-reader-chapter="onSaveReaderChapter"
         />
       </div>
 
       <div
         class="findBookReaderBody"
-        @mousedown="onLayoutMouseDown"
+        @pointerdown="onLayoutMouseDown"
+        @contextmenu="onFullscreenLayoutContextMenu"
         @wheel.capture="onLayoutWheel"
       >
         <aside
@@ -2071,6 +2193,8 @@ const modalRef = ref<InstanceType<typeof AppModal> | null>(null);
             class="readerPane findBookReaderMain"
             :stream-loading="readerBootLoading || showChapterLoadingUi"
             :voice-read-scroll-locked="isVoiceReadScrollLocked"
+            :intercept-readonly-space-page-down="onFindBookSpacePageDown"
+            :intercept-readonly-page-step="tryAdvanceChapterFromOverscroll"
             :voice-read-paused="isVoiceReadActive && voiceRead.mode.value === 'paused'"
             :voice-read-blocks-find="isVoiceReadBlocksFind"
             @voice-read-resume="voiceRead.togglePlayPause"
@@ -2088,6 +2212,8 @@ const modalRef = ref<InstanceType<typeof AppModal> | null>(null);
             :mouse-wheel-scroll-sensitivity="mouseWheelScrollSensitivity"
             :fast-scroll-sensitivity="fastScrollSensitivity"
             :sticky-chapter-title-enabled="stickyChapterTitleEnabled"
+            :reader-click-mode="effectiveClickMode"
+            :reader-click-mode-alt-held="clickModeAltHeld"
             :selection-toolbar-buttons="selectionToolbarButtons"
             :dictionary-settings="dictionarySettings"
             :web-search-settings="webSearchSettings"
@@ -2140,6 +2266,7 @@ const modalRef = ref<InstanceType<typeof AppModal> | null>(null);
             @next-line="voiceRead.playNextLine"
             @regenerate="voiceRead.regenerateCurrentLine"
             @stop="voiceRead.exitVoiceRead"
+            @open-speak-settings="emit('openSpeakSettings')"
           />
           <ReaderChapterNavBar
             v-if="chapterNavUiVisible && !isFullscreenView"
@@ -2175,6 +2302,7 @@ const modalRef = ref<InstanceType<typeof AppModal> | null>(null);
           :reading-progress-detail-part="footerReadingProgress.detailPart"
           :reading-progress-placeholder="footerReadingProgress.placeholder"
           :reading-progress-complete="footerReadingProgress.complete"
+          :voice-read-footer-status="voiceRead.voiceReadFooterStatus.value"
           :chapter-char-count-text="footerChapterCharCountText"
           :pomodoro-enabled="pomodoroEnabled"
           :pomodoro-phase="pomodoroPhase"

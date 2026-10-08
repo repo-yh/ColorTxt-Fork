@@ -257,6 +257,8 @@ async function onRosterCardSpeak(entry: CharacterRosterEntry) {
       {
         gender: entry.gender,
         voiceReadVoiceId: entry.voiceReadVoiceId?.trim() || undefined,
+        voiceReadLanguage: entry.voiceReadLanguage,
+        voiceReadDialect: entry.voiceReadDialect,
         voiceReadSampleLine: text,
       },
     );

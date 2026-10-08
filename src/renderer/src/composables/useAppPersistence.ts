@@ -263,6 +263,7 @@ export function useAppPersistence(deps: {
   mouseWheelScrollSensitivity: Ref<number>;
   fastScrollSensitivity: Ref<number>;
   stickyChapterTitleEnabled: Ref<boolean>;
+  readerClickMode: Ref<boolean>;
   chapterNavToolbarEnabled: Ref<boolean>;
   readerEditShowLineNumbers: Ref<boolean>;
   readerEditMinimap: Ref<boolean>;
@@ -410,6 +411,7 @@ export function useAppPersistence(deps: {
       mouseWheelScrollSensitivity: deps.mouseWheelScrollSensitivity.value,
       fastScrollSensitivity: deps.fastScrollSensitivity.value,
       stickyChapterTitleEnabled: deps.stickyChapterTitleEnabled.value,
+      readerClickMode: deps.readerClickMode.value,
       chapterNavToolbarEnabled: deps.chapterNavToolbarEnabled.value,
       readerEditShowLineNumbers: deps.readerEditShowLineNumbers.value,
       readerEditMinimap: deps.readerEditMinimap.value,
@@ -769,9 +771,10 @@ export function useAppPersistence(deps: {
       return;
     }
     if (ev.key === persistKey) {
-      // 侧栏宽度、阅读/编辑/语音朗读相关 UI 按窗口独立；其它设置仍跨窗同步
+      // 侧栏开关/宽度、阅读/编辑/语音朗读相关 UI 按窗口独立；其它设置仍跨窗同步
       loadPersistedSettings({
         applySidebarWidth: false,
+        applyShowSidebar: false,
         applyReaderUiPrefs: false,
       });
     }
@@ -1116,6 +1119,8 @@ export function useAppPersistence(deps: {
   function loadPersistedSettings(options?: {
     /** 为 false 时不覆盖本窗口侧栏宽度（多窗口 storage 同步） */
     applySidebarWidth?: boolean;
+    /** 为 false 时不覆盖本窗口侧栏开关（多窗口 storage 同步） */
+    applyShowSidebar?: boolean;
     /**
      * 为 false 时不覆盖本窗口阅读/编辑/语音朗读相关 UI。
      * 多窗口 storage 同步时使用，避免「界面仍是本窗值、打开设置却是别窗刚存的值」。
@@ -1127,6 +1132,7 @@ export function useAppPersistence(deps: {
     characterPortraitCacheDirKeyPresent: boolean;
   } {
     const applySidebarWidth = options?.applySidebarWidth !== false;
+    const applyShowSidebar = options?.applyShowSidebar !== false;
     const applyReaderUiPrefs = options?.applyReaderUiPrefs !== false;
     const loaded = loadPersistedSettingsData(
       typeof window !== "undefined" ? window.localStorage : undefined,
@@ -1156,7 +1162,7 @@ export function useAppPersistence(deps: {
       deps.sidebarWidth.value = Math.max(0, Math.floor(data.sidebarWidth));
     }
 
-    if (typeof data.showSidebar === "boolean") {
+    if (applyShowSidebar && typeof data.showSidebar === "boolean") {
       deps.showSidebar.value = data.showSidebar;
     }
 
@@ -1325,6 +1331,9 @@ export function useAppPersistence(deps: {
       }
       if (typeof data.stickyChapterTitleEnabled === "boolean") {
         deps.stickyChapterTitleEnabled.value = data.stickyChapterTitleEnabled;
+      }
+      if (typeof data.readerClickMode === "boolean") {
+        deps.readerClickMode.value = data.readerClickMode;
       }
       if (typeof data.chapterNavToolbarEnabled === "boolean") {
         deps.chapterNavToolbarEnabled.value = data.chapterNavToolbarEnabled;
@@ -1541,8 +1550,13 @@ export function useAppPersistence(deps: {
 
     if (applyReaderUiPrefs) {
       captureSettingsPersistBaselineFromMemory();
-    } else if (applySidebarWidth) {
-      settingsPersistBaseline.sidebarWidth = deps.sidebarWidth.value;
+    } else {
+      if (applySidebarWidth) {
+        settingsPersistBaseline.sidebarWidth = deps.sidebarWidth.value;
+      }
+      if (applyShowSidebar) {
+        settingsPersistBaseline.showSidebar = deps.showSidebar.value;
+      }
     }
 
     return {
@@ -1691,6 +1705,12 @@ export function useAppPersistence(deps: {
       sessionStorage.getItem(skipUnloadPersistenceSessionKey) === "1"
     ) {
       return;
+    }
+    // 侧栏开关等已排队的设置须同步落盘；nextTick 在关窗路径上可能来不及跑
+    if (persistSettingsQueued || persistSettingsPending) {
+      persistSettingsQueued = false;
+      persistSettingsPending = false;
+      flushPersistSettings();
     }
     persistReadingSessionSnapshot();
     persistFileListCache({ force: true });

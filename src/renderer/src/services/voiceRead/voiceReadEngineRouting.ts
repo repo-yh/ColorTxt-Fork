@@ -4,6 +4,7 @@ import {
 } from "@shared/voiceReadMimoModels";
 import {
   getVoiceReadEngineMeta,
+  voiceReadEngineBakesSpeechRate,
   voiceReadEngineUsesPcmPlayback,
   type VoiceReadEngineId,
 } from "@shared/voiceReadEngines";
@@ -43,4 +44,14 @@ export function voiceReadRequiresSerialChunkFetch(
 
 export function voiceReadEdgeFetchBufferSize(settings: VoiceReadSettings): number {
   return voiceReadRequiresSerialChunkFetch(settings) ? 1 : 4;
+}
+
+/** PCM 引擎客户端播放速率：火山已在合成时写入 speech_rate，此处固定 1 */
+export function voiceReadPcmClientPlaybackRate(
+  engine: VoiceReadEngineId,
+  rate: number,
+): number {
+  if (voiceReadEngineBakesSpeechRate(engine)) return 1;
+  const n = Number.isFinite(rate) ? rate : 1;
+  return Math.max(0.5, Math.min(2, n));
 }

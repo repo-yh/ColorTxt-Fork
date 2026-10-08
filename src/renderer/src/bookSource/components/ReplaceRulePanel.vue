@@ -699,7 +699,7 @@ function displayReplaceRuleScope(rule: Pick<ReplaceRule, "scope">): string {
       <div class="replaceRuleFooter">
         <div class="replaceRuleFooterStart">
           <button class="btn" type="button" size="large" @click="openCreate">
-            添加替换规则
+            新增替换规则
           </button>
           <button
             class="btn success"

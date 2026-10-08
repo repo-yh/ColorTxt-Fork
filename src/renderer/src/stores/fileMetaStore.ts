@@ -10,6 +10,7 @@ import type {
   CharacterGender,
   CharacterRosterEntry,
 } from "@shared/characterTypes";
+import { normalizeVolcengineSpeechModePair } from "@shared/voiceReadVolcengineAudio";
 
 import type { ReaderSidebarTab } from "../constants/readerSidebarTab";
 import { VALID_SIDEBAR_TABS } from "../constants/readerSidebarTab";
@@ -324,6 +325,27 @@ function normalizeVoiceReadSampleQuotes(raw: unknown): string[] | undefined {
   return out.length > 0 ? out : undefined;
 }
 
+function normalizeCharacterVoiceReadSpeech(
+  o: Record<string, unknown>,
+  voiceId: string,
+): Pick<CharacterRosterEntry, "voiceReadLanguage" | "voiceReadDialect"> {
+  if (!voiceId.trim()) return {};
+  const mode = normalizeVolcengineSpeechModePair({
+    language:
+      typeof o.voiceReadLanguage === "string"
+        ? clampStr(o.voiceReadLanguage, 64)
+        : undefined,
+    dialect:
+      typeof o.voiceReadDialect === "string"
+        ? clampStr(o.voiceReadDialect, 64)
+        : undefined,
+  });
+  return {
+    voiceReadLanguage: mode.language || undefined,
+    voiceReadDialect: mode.dialect || undefined,
+  };
+}
+
 function normalizeCharacterRosterEntry(
   raw: unknown,
 ): CharacterRosterEntry | null {
@@ -336,6 +358,10 @@ function normalizeCharacterRosterEntry(
       ? clampStr(o.displayName, MAX_DISPLAY_NAME)
       : "";
   if (!id || !displayName) return null;
+  const voiceReadVoiceId =
+    typeof o.voiceReadVoiceId === "string"
+      ? clampStr(o.voiceReadVoiceId, 256)
+      : "";
   return {
     id,
     displayName,
@@ -368,10 +394,8 @@ function normalizeCharacterRosterEntry(
       typeof o.retrieveThinkingText === "string"
         ? clampStr(o.retrieveThinkingText, MAX_CHAR_FIELD)
         : "",
-    voiceReadVoiceId:
-      typeof o.voiceReadVoiceId === "string"
-        ? clampStr(o.voiceReadVoiceId, 256)
-        : "",
+    voiceReadVoiceId,
+    ...normalizeCharacterVoiceReadSpeech(o, voiceReadVoiceId),
     voiceReadSampleLine:
       typeof o.voiceReadSampleLine === "string"
         ? clampStr(o.voiceReadSampleLine, MAX_VOICE_SAMPLE_LINE) || undefined

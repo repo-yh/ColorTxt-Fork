@@ -125,6 +125,8 @@ import markdownIcon from "./assets/Markdown.svg?raw";
 import webDavIcon from "./assets/WebDAV.svg?raw";
 import webDavUploadIcon from "./assets/WebDAV_upload.svg?raw";
 import webDavDownloadIcon from "./assets/WebDAV_download.svg?raw";
+import selectModeIcon from "./assets/select_mode.svg?raw";
+import clickModeIcon from "./assets/click_mode.svg?raw";
 
 /** 角色卡「语音」播放动画帧：speak_0 → speak_1 → speak */
 export const speakIconAnimFrames = [
@@ -310,4 +312,8 @@ export const icons = {
   webDav: webDavIcon,
   webDavUpload: webDavUploadIcon,
   webDavDownload: webDavDownloadIcon,
+  /** 阅读器「可选模式」（可选中文本） */
+  selectMode: selectModeIcon,
+  /** 阅读器「点击模式」（左/右键翻页） */
+  clickMode: clickModeIcon,
 } as const;

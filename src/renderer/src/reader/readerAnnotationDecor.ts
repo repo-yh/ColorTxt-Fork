@@ -27,6 +27,9 @@ export type AnnotationCompactHit = {
 export const ANNOTATION_VIEWPORT_BUFFER_LINES = 80;
 export const ANNOTATION_VIEWPORT_SYNC_MS = 48;
 
+/** 与阅读器 Monaco 模型语言 `txtr-text` 一致 */
+const TXTR_TEXT_LANGUAGE_ID = "txtr-text";
+
 export function buildAnnotationHitsByDisplayLine(
   annotations: readonly ReaderAnnotationRecord[],
   physicalToDisplay: (physicalLine: number) => number,
@@ -42,8 +45,10 @@ export function buildAnnotationHitsByDisplayLine(
       physicalLine <= ann.endPhysicalLine;
       physicalLine += 1
     ) {
-      const displayLine = physicalToDisplay(physicalLine);
       const rawLine = getPhysicalLineContent(physicalLine);
+      // 压缩空行时空白物理行会映射到下一段正文展示行；再插 hit 会让原文/悬停重复
+      if (rawLine.trim().length === 0) continue;
+      const displayLine = physicalToDisplay(physicalLine);
       let startColumn = 1;
       let endColumnExclusive = Number.MAX_SAFE_INTEGER;
       if (physicalLine === ann.startPhysicalLine) {
@@ -61,6 +66,15 @@ export function buildAnnotationHitsByDisplayLine(
         );
       }
       const hits = map.get(displayLine) ?? [];
+      const existing = hits.find((h) => h.annotationId === ann.id);
+      if (existing) {
+        existing.startColumn = Math.min(existing.startColumn, startColumn);
+        existing.endColumnExclusive = Math.max(
+          existing.endColumnExclusive,
+          endColumnExclusive,
+        );
+        continue;
+      }
       const rawColorIndex = ann.lineation?.colorIndex;
       hits.push({
         annotationId: ann.id,
@@ -103,9 +117,7 @@ export function buildAnnotationDecorationsForViewport(
   hi: number,
   hitsByLine: Map<number, AnnotationCompactHit[]>,
   model: monaco.editor.ITextModel,
-  options?: { suppressNoteHoverForAnnotationId?: string | null },
 ): monaco.editor.IModelDeltaDecoration[] {
-  const suppressId = options?.suppressNoteHoverForAnnotationId ?? null;
   const decs: monaco.editor.IModelDeltaDecoration[] = [];
   for (let line = lo; line <= hi; line++) {
     if (line < 1 || line > model.getLineCount()) continue;
@@ -116,16 +128,10 @@ export function buildAnnotationDecorationsForViewport(
       const endCol = Math.min(h.endColumnExclusive, maxCol);
       const startCol = Math.min(h.startColumn, maxCol);
       if (startCol >= endCol) continue;
-      const showNoteHover =
-        !!h.noteContent &&
-        (!suppressId || h.annotationId !== suppressId);
       decs.push({
         range: new monaco.Range(line, startCol, line, endCol),
         options: {
           inlineClassName: annotationInlineClassName(h),
-          hoverMessage: showNoteHover
-            ? { value: h.noteContent! }
-            : undefined,
           stickiness:
             monaco.editor.TrackedRangeStickiness
               .NeverGrowsWhenTypingAtEdges,
@@ -134,6 +140,76 @@ export function buildAnnotationDecorationsForViewport(
     }
   }
   return decs;
+}
+
+/** 笔记悬停按纯文本转义，避免 `*` / `_` 被当成 Markdown */
+export function annotationNoteToHoverMarkdown(
+  note: string,
+): monaco.IMarkdownString {
+  const escaped = note.replace(/[\\`*_{}[\]()#+\-.!|]/g, "\\$&");
+  const value = escaped.replace(/\r\n|\r/g, "\n").replace(/\n/g, "  \n");
+  return { value, supportHtml: false };
+}
+
+export function annotationNotesAtColumn(
+  hits: readonly AnnotationCompactHit[] | undefined,
+  column: number,
+  maxColumn: number,
+  suppressAnnotationId: string | null,
+): { notes: string[] } | null {
+  if (!hits?.length) return null;
+  const notes: string[] = [];
+  const seen = new Set<string>();
+  for (const h of hits) {
+    if (!h.noteContent) continue;
+    if (suppressAnnotationId && h.annotationId === suppressAnnotationId) {
+      continue;
+    }
+    const start = Math.min(h.startColumn, maxColumn);
+    const end = Math.min(h.endColumnExclusive, maxColumn);
+    if (column < start || column >= end) continue;
+    if (seen.has(h.annotationId)) continue;
+    seen.add(h.annotationId);
+    notes.push(h.noteContent);
+  }
+  return notes.length > 0 ? { notes } : null;
+}
+
+type AnnotationNoteHoverQuery = (
+  model: monaco.editor.ITextModel,
+  position: monaco.Position,
+) => monaco.languages.Hover | null;
+
+const annotationNoteHoverQueries = new Set<AnnotationNoteHoverQuery>();
+let annotationNoteHoverProvider: monaco.IDisposable | null = null;
+
+/**
+ * 笔记悬停走 HoverProvider，而不是每行 decoration 的 hoverMessage。
+ * 折行时鼠标锚点常是整段 view line，窄 hoverMessage 会被滤掉或叠出多个框。
+ */
+export function registerAnnotationNoteHoverQuery(
+  query: AnnotationNoteHoverQuery,
+): monaco.IDisposable {
+  if (!annotationNoteHoverProvider) {
+    annotationNoteHoverProvider = monaco.languages.registerHoverProvider(
+      TXTR_TEXT_LANGUAGE_ID,
+      {
+        provideHover(model, position) {
+          for (const q of annotationNoteHoverQueries) {
+            const hover = q(model, position);
+            if (hover) return hover;
+          }
+          return null;
+        },
+      },
+    );
+  }
+  annotationNoteHoverQueries.add(query);
+  return {
+    dispose() {
+      annotationNoteHoverQueries.delete(query);
+    },
+  };
 }
 
 /** 笔记-only 虚线：1px、短间隔 dash，接近微信读书 */

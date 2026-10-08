@@ -97,6 +97,9 @@ function splitSegmentToSpeakChunks(
     text,
     voiceId: resolved.voiceId,
     emotion: resolved.emotion,
+    speechSlot: resolved.speechSlot,
+    volcengineLanguage: resolved.volcengineLanguage,
+    volcengineDialect: resolved.volcengineDialect,
   }));
 }
 
@@ -139,6 +142,7 @@ export function buildLineSpeakChunks(
       chunks: texts.map((text) => ({
         text,
         voiceId: voiceReadSingleVoiceId(settings),
+        speechSlot: "single" as const,
       })),
       carry: null,
       dialogueSegments: [],

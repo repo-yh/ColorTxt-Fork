@@ -7,6 +7,7 @@ import {
 } from "vue";
 import { icons } from "../icons";
 import IconButton from "./IconButton.vue";
+import LoadingDotsBounce from "./LoadingDotsBounce.vue";
 import VirtualList from "./VirtualList.vue";
 import { cssFontFamilyStack } from "../utils/fontFamilyCss";
 import {
@@ -328,7 +329,9 @@ watch(
           </button>
         </div>
 
-        <div v-if="systemFontsLoading" class="fontOtherLoading">加载中...</div>
+        <div v-if="systemFontsLoading" class="fontOtherLoading">
+          加载中<LoadingDotsBounce />
+        </div>
 
         <template v-else>
           <div class="fontOtherFilterRow">
@@ -628,6 +631,12 @@ watch(
   padding: 10px;
   color: var(--muted);
   font-size: 12px;
+}
+
+.fontOtherLoading {
+  display: flex;
+  align-items: center;
+  gap: 0.15em;
 }
 
 .fontOtherList {

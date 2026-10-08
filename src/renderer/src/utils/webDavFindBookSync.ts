@@ -49,6 +49,7 @@ const UI_READER_KEYS = [
   "mouseWheelScrollSensitivity",
   "fastScrollSensitivity",
   "stickyChapterTitleEnabled",
+  "readerClickMode",
   "chapterNavToolbarEnabled",
   "readerEditShowLineNumbers",
   "readerEditMinimap",

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import PomodoroFooterControl from "../../components/PomodoroFooterControl.vue";
+import LoadingDotsBounce from "../../components/LoadingDotsBounce.vue";
 import type {
   PomodoroDisplayMode,
   PomodoroPhase,
@@ -15,6 +16,8 @@ withDefaults(
     readingProgressPlaceholder: boolean;
     readingProgressComplete: boolean;
     chapterCharCountText: string;
+    /** 自动暂停开启且正在朗读：底栏「阅读进度」左侧倒计时 */
+    voiceReadFooterStatus?: string;
     pomodoroEnabled?: boolean;
     pomodoroPhase?: PomodoroPhase;
     pomodoroDisplayMode?: PomodoroDisplayMode;
@@ -26,6 +29,7 @@ withDefaults(
   {
     loading: false,
     hasContent: false,
+    voiceReadFooterStatus: "",
     pomodoroEnabled: false,
     pomodoroPhase: "idle",
     pomodoroDisplayMode: "pie",
@@ -62,8 +66,11 @@ defineEmits<{
       />
     </div>
     <div class="findBookReaderFooterRight">
-      <span v-if="loading" class="findBookReaderFooterLoading">加载中...</span>
+      <span v-if="loading" class="findBookReaderFooterLoading">
+        加载中<LoadingDotsBounce />
+      </span>
       <template v-else-if="hasContent">
+        <span v-if="voiceReadFooterStatus">{{ voiceReadFooterStatus }}</span>
         <span>
           阅读进度：<span
             class="findBookReaderFooterProgressPct"
@@ -119,6 +126,9 @@ defineEmits<{
 
 .findBookReaderFooterLoading {
   flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15em;
 }
 
 .findBookReaderFooterProgressPct {

@@ -220,6 +220,25 @@ export function useFindBookChapterSession(deps: FindBookChapterSessionDeps) {
     });
   }
 
+  async function ensureChapterScrollAtBottom() {
+    for (let i = 0; i < 30 && !deps.readerRef.value; i++) {
+      await nextTick();
+    }
+    const reader = deps.readerRef.value;
+    if (!reader) return;
+    reader.scrollToBottom?.(false);
+    await nextTick();
+    await new Promise<void>((resolve) => {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          reader.scrollToBottom?.(false);
+          reader.refreshChapterStickyScroll?.();
+          resolve();
+        });
+      });
+    });
+  }
+
   function stripLeadingChapterTitleFromBody(body: string, title: string): string {
     const rawTitle = title.trim();
     if (!rawTitle) return body;
@@ -519,7 +538,12 @@ export function useFindBookChapterSession(deps: FindBookChapterSessionDeps) {
 
   async function loadChapterAtDisplayIndex(
     index: number,
-    options?: { smoothScroll?: boolean; preferCache?: boolean },
+    options?: {
+      smoothScroll?: boolean;
+      preferCache?: boolean;
+      /** 切章后视口：默认顶部；上一章边界切章用底部且无过渡 */
+      scrollTo?: "top" | "bottom";
+    },
   ) {
     const ch = deps.displayChapters.value[index];
     if (!ch) return;
@@ -618,14 +642,20 @@ export function useFindBookChapterSession(deps: FindBookChapterSessionDeps) {
       // IPC 返回缓存/联网原文；文本替换在 renderChapterText 中与「转换」一并套用
       lastChapterTitle.value = displayTitle || ch.title;
       lastChapterBody.value = body;
-      await renderChapterText(lastChapterTitle.value, body);
+      await renderChapterText(lastChapterTitle.value, body, {
+        resetScroll: options?.scrollTo !== "bottom",
+      });
       if (deps.isInBookshelf(d.bookUrl, it.origin)) {
         deps.updateReadProgress(d.bookUrl, it.origin, contentIndex, ch.title);
       }
     } finally {
       loading.value = false;
       showChapterLoadingUi.value = false;
-      await ensureChapterScrollAtTop();
+      if (options?.scrollTo === "bottom") {
+        await ensureChapterScrollAtBottom();
+      } else {
+        await ensureChapterScrollAtTop();
+      }
     }
   }
 

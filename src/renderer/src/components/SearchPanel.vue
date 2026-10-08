@@ -90,11 +90,6 @@ function bindMorePanel(el: HTMLElement | null) {
   morePanelRef.value = el;
 }
 
-defineExpose({
-  openMoreMenu: toggleMoreMenu,
-  moreOpen,
-});
-
 const copyResultsDisabled = computed(
   () =>
     !props.currentFilePath ||
@@ -137,10 +132,19 @@ const searchInputRef = ref<HTMLInputElement | null>(null);
 function focusSearchInput() {
   void nextTick(() => {
     requestAnimationFrame(() => {
-      searchInputRef.value?.focus();
+      const el = searchInputRef.value;
+      if (!el) return;
+      el.focus();
+      el.select();
     });
   });
 }
+
+defineExpose({
+  openMoreMenu: toggleMoreMenu,
+  moreOpen,
+  focusSearchInput,
+});
 
 watch(
   () => props.active,

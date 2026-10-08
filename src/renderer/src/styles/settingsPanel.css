@@ -83,6 +83,17 @@
   max-width: 30%;
 }
 
+.settingsLabel.short.settingsLabel--nested {
+  padding-left: 16px;
+  box-sizing: border-box;
+}
+
+.settingsVoiceBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
 /** 右侧控件区：下拉、输入框、滑块容器等 */
 .settingsRowField,
 .settingsRowControl {

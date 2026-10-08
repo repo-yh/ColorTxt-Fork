@@ -22,6 +22,7 @@ import AiIndexProgressBanner from "./AiIndexProgressBanner.vue";
 import AiTokenUsageBanner from "./AiTokenUsageBanner.vue";
 import AppCustomSelect, { type CustomSelectItem } from "./AppCustomSelect.vue";
 import CharacterPortraitGenerateModal from "./CharacterPortraitGenerateModal.vue";
+import SettingsVolcengineVoiceSpeechMode from "./SettingsVolcengineVoiceSpeechMode.vue";
 import IconButton from "./IconButton.vue";
 import {
   defaultVoiceReadSettings,
@@ -29,6 +30,7 @@ import {
   type VoiceReadSettings,
 } from "../constants/voiceRead";
 import { speakCharacterVoiceSample } from "../services/voiceRead/voiceReadCharacterPreview";
+import { normalizeVolcengineSpeechModePair } from "@shared/voiceReadVolcengineAudio";
 import { fetchMinimaxVoiceCatalog } from "../services/voiceRead/minimaxVoiceCatalog";
 import { fetchWinSapiVoiceCatalog } from "../services/voiceRead/winSapiVoiceCatalog";
 import { VoiceReadLinePlayer } from "../services/voiceRead/voiceReadLinePlayer";
@@ -141,6 +143,8 @@ const draftRetrieveThinking = ref("");
 const draftStylePrefix = ref("");
 const draftStyleNote = ref("");
 const draftVoiceReadVoiceId = ref("");
+const draftVoiceReadLanguage = ref("");
+const draftVoiceReadDialect = ref("");
 const draftVoiceSampleLine = ref("");
 const draftVoiceSampleQuotes = ref<string[]>([]);
 const draftVoiceSampleQuoteIndex = ref(0);
@@ -286,6 +290,36 @@ function resetVoiceSampleDraft(): void {
   draftVoiceSampleQuoteIndex.value = 0;
 }
 
+function resetVoiceReadSpeechModeDraft(): void {
+  draftVoiceReadLanguage.value = "";
+  draftVoiceReadDialect.value = "";
+}
+
+function onCharVoiceReadVoiceIdChange(id: string): void {
+  if (id === draftVoiceReadVoiceId.value) return;
+  draftVoiceReadVoiceId.value = id;
+  resetVoiceReadSpeechModeDraft();
+}
+
+function voiceReadSpeechFieldsForSave(): Pick<
+  CharacterRosterEntry,
+  "voiceReadVoiceId" | "voiceReadLanguage" | "voiceReadDialect"
+> {
+  const voiceId = draftVoiceReadVoiceId.value.trim();
+  if (!voiceId) {
+    return { voiceReadVoiceId: undefined };
+  }
+  const mode = normalizeVolcengineSpeechModePair({
+    language: draftVoiceReadLanguage.value,
+    dialect: draftVoiceReadDialect.value,
+  });
+  return {
+    voiceReadVoiceId: voiceId,
+    voiceReadLanguage: mode.language || undefined,
+    voiceReadDialect: mode.dialect || undefined,
+  };
+}
+
 function loadVoiceSampleFromEntry(entry?: CharacterRosterEntry): void {
   const quotes = (entry?.voiceReadSampleQuotes ?? [])
     .map((q) => q.trim())
@@ -379,6 +413,8 @@ async function onCharVoicePreviewClick() {
       {
         gender: draftGender.value,
         voiceReadVoiceId: draftVoiceReadVoiceId.value.trim() || undefined,
+        voiceReadLanguage: draftVoiceReadLanguage.value,
+        voiceReadDialect: draftVoiceReadDialect.value,
         voiceReadSampleLine: text,
       },
     );
@@ -584,6 +620,7 @@ function openAddSlide() {
   draftStylePrefix.value = props.characterBookStyle?.stylePrefixZh ?? "";
   draftStyleNote.value = props.characterBookStyle?.styleNoteZh ?? "";
   draftVoiceReadVoiceId.value = "";
+  resetVoiceReadSpeechModeDraft();
   resetVoiceSampleDraft();
   drawerMediaTab.value = "portrait";
   resetDrawerVoicePreview();
@@ -615,6 +652,8 @@ function openEditSlide(entry: CharacterRosterEntry) {
   draftStylePrefix.value = props.characterBookStyle?.stylePrefixZh ?? "";
   draftStyleNote.value = props.characterBookStyle?.styleNoteZh ?? "";
   draftVoiceReadVoiceId.value = entry.voiceReadVoiceId?.trim() ?? "";
+  draftVoiceReadLanguage.value = entry.voiceReadLanguage?.trim() ?? "";
+  draftVoiceReadDialect.value = entry.voiceReadDialect?.trim() ?? "";
   loadVoiceSampleFromEntry(entry);
   drawerMediaTab.value = "portrait";
   resetDrawerVoicePreview();
@@ -658,6 +697,7 @@ function resetCharacterEditDrawerOnBookChange() {
   draftStylePrefix.value = "";
   draftStyleNote.value = "";
   draftVoiceReadVoiceId.value = "";
+  resetVoiceReadSpeechModeDraft();
   resetVoiceSampleDraft();
   drawerMediaTab.value = "portrait";
   slideError.value = "";
@@ -684,7 +724,7 @@ function buildEntryFromDraft(id: string): CharacterRosterEntry {
     promptZh: draftPromptZh.value.trim(),
     negativeZh: draftNegativeZh.value.trim(),
     retrieveThinkingText: draftRetrieveThinking.value.trim(),
-    voiceReadVoiceId: draftVoiceReadVoiceId.value.trim() || undefined,
+    ...voiceReadSpeechFieldsForSave(),
     ...voiceSampleFieldsForSave(),
   };
 }
@@ -1161,10 +1201,25 @@ defineExpose({
                   :scroll-items="charVoiceReadScrollItems"
                   :fixed-bottom-items="[]"
                   :scroll-max-height="charVoiceReadScrollMaxHeight"
+                  :searchable="voiceReadEngine === 'volcengine'"
+                  search-placeholder="搜索音色名称或 ID"
                   ariaLabel="朗读语音"
-                  @update:model-value="draftVoiceReadVoiceId = $event"
+                  @update:model-value="onCharVoiceReadVoiceIdChange"
                 />
               </div>
+              <SettingsVolcengineVoiceSpeechMode
+                v-if="
+                  voiceReadEngine === 'volcengine' &&
+                  draftVoiceReadVoiceId.trim()
+                "
+                layout="drawer"
+                slot-label="角色"
+                :voice-id="draftVoiceReadVoiceId"
+                :language="draftVoiceReadLanguage"
+                :dialect="draftVoiceReadDialect"
+                @update:language="draftVoiceReadLanguage = $event"
+                @update:dialect="draftVoiceReadDialect = $event"
+              />
               <label class="drawerVoiceRow drawerVoiceRow--stack">
                 <span class="drawerVoiceRowLabel">台词</span>
                 <textarea

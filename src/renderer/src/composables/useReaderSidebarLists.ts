@@ -46,6 +46,14 @@ type SidebarBookmarkItem = {
   content: string;
 };
 
+export type ReaderSidebarListOptions = {
+  /**
+   * 章节列表折叠后，虚拟列表下标与 `chaptersVisible` 不一致。
+   * 返回展示行下标；面板未挂载时返回 `undefined` 则回退到全表下标。
+   */
+  resolveDisplayedChapterIndex?: () => number | undefined;
+};
+
 export type ReaderSidebarListProps = Readonly<{
   activeTab: import("../constants/readerSidebarTab").ReaderSidebarTab;
   chapters: Chapter[];
@@ -210,6 +218,7 @@ function sortFileList(
 export function useReaderSidebarLists(
   props: ReaderSidebarListProps,
   emit: (e: "jumpToChapter", chapter: Chapter) => void,
+  opts?: ReaderSidebarListOptions,
 ) {
   const chapterListRef = ref<InstanceType<typeof VirtualList> | null>(null);
   const fileListRef = ref<InstanceType<typeof VirtualList> | null>(null);
@@ -436,6 +445,8 @@ export function useReaderSidebarLists(
   }
 
   function resolveActiveChapterVisibleIndex(): number {
+    const fromPanel = opts?.resolveDisplayedChapterIndex?.();
+    if (typeof fromPanel === "number") return fromPanel;
     const visible = chaptersVisible.value;
     if (visible.length === 0) return -1;
     const full = props.chapters;

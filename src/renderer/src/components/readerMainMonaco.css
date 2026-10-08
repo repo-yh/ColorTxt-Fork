@@ -44,6 +44,16 @@
 }
 
 /*
+ * 圆角选区内角：Monaco 在列重叠的多行选区旁多铺 10px `.selected-text`，
+ * 再用 `.cslr.monaco-editor-background` 按编辑器底色抠出内凹圆角。
+ * 阅读器 `editor.background` 为透明（透出 `--reader-bg`），抠图层也透明，
+ * 内角切不掉，选区会连成一块。只给这块 overlay 铺阅读底色，不要改整个编辑器背景。
+ */
+.monaco-editor .lines-content .cslr.monaco-editor-background {
+  background-color: var(--reader-bg) !important;
+}
+
+/*
  * ReaderMain：Monaco 全局覆盖（非 scoped，需命中编辑器内部 DOM）。
  * `lines-content` 内顺序为 overlays → view-zones → view-lines；抬高 view-zones 便于插图命中。
  */

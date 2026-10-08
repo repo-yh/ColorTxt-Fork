@@ -10,6 +10,7 @@ export type VoiceReadSynthesisResult = {
 };
 
 import type { VoiceReadEmotionId } from "./voiceReadEmotion";
+import type { VolcengineSpeechSlot } from "./voiceReadVolcengineAudio";
 
 export type VoiceReadSynthesisRequest = {
   engine: VoiceReadEngineId;
@@ -20,6 +21,12 @@ export type VoiceReadSynthesisRequest = {
   engineConfig: VoiceReadEngineConfig;
   /** 朗读情绪；auto 或未设置时不传给引擎 */
   emotion?: VoiceReadEmotionId;
+  /** 火山引擎按槽位读取语种/方言 */
+  volcengineSpeechSlot?: VolcengineSpeechSlot;
+  /** 角色专属音色等：覆盖槽位上的语种 */
+  volcengineLanguage?: string;
+  /** 角色专属音色等：覆盖槽位上的方言 */
+  volcengineDialect?: string;
 };
 
 export type VoiceReadVoiceOption = {

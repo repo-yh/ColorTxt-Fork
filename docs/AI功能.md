@@ -65,7 +65,7 @@
 - **工具调用轮数**：**`chat.maxToolRounds`**（设置页 **工具调用轮数**，默认见 **`DEFAULT_MAX_TOOL_ROUNDS`**）限制单次 Agent 提问内模型↔工具往返次数；复杂任务可适当调高。
 - **未单独适配**：仍可使用对话与 Agent 工具，但不保证思考开关与思考流展示正常；自定义地址若与上表某行 **Base URL 一致**，保存后会自动匹配为对应预设项。
 - **向量嵌入**另有一套来源（**设置 → 向量模型 → 内置本地 / 远程 API**），见下节「内置向量模型与缓存目录」；**不**使用上表对话服务商下拉。
-- **文生图**（本地 A1111 / ComfyUI 与云端图像 API）与 **语音朗读**（Edge TTS / 系统语音 / 通义 Qwen3-TTS / MiniMax TTS / **小米 MiMo TTS**，见 **「语音朗读」**）为独立配置，亦不在上表；文生图预设见下节。
+- **文生图**（本地 A1111 / ComfyUI 与云端图像 API）与 **语音朗读**（Edge TTS / 系统语音 / 通义 Qwen3-TTS / MiniMax TTS / **小米 MiMo TTS** / **火山引擎豆包语音合成大模型 2.0**，见 **「语音朗读」**）为独立配置，亦不在上表；文生图预设见下节。火山朗读 engine id 为 **`volcengine`**，使用新版 **`X-Api-Key`** + **`X-Api-Resource-Id: seed-tts-2.0`** 鉴权、官方 **444 个音色**（2.0 主表 293 + 多语种 151，含中文、英文及其他多语种）与默认 **24 kHz PCM**（可改）；官方无单独鉴权探测，连接测试会合成一个汉字并产生极少量用量。
 
 ### 文生图服务商
 
@@ -323,7 +323,7 @@ cardShellWrap（悬停抬高 z-index）
 | **`ai.embedding.apiKey`** | 向量嵌入远程 API 单密钥（非按方案） |
 | **`ai.chatProfileKeys`** | 对话方案密钥 JSON：`{ [profileId]: apiKey }` |
 | **`ai.txt2imgProfileKeys`** | 文生图方案密钥 JSON：`{ [profileId]: apiKey }` |
-| **`voiceRead.profileKeys`** | 朗读方案密钥 JSON：`{ [profileId]: { dashscopeApiKey?, minimaxApiKey?, mimoApiKey? } }` |
+| **`voiceRead.profileKeys`** | 朗读方案密钥 JSON：`{ [profileId]: { dashscopeApiKey?, minimaxApiKey?, mimoApiKey?, volcengineApiKey? } }` |
 | **`translation.providerKeys`** | 选区翻译服务凭证 JSON（DeepL / 百度 / 有道 / 腾讯 / 火山 / 阿里等密钥与签名用标识；AI 翻译为 **`aiProfileKeys`** 按方案映射；见 [基础功能.md](./基础功能.md) →「选区翻译」） |
 
 **已废弃 slot**（仅启动迁移时 **`getDeprecatedSecret`** 读一次，迁入 profile 映射后 **`purgeDeprecatedSecretSlots`** 删除，不再写入）：
@@ -343,14 +343,14 @@ cardShellWrap（悬停抬高 z-index）
 | 选区翻译 | 翻译设置变更 / 设置 **确定** → **`persistTranslationSecretsToVault`**（**`secrets:setTranslationSecrets`**）；启动 **`hydrateTranslationSecretsFromVault`** |
 | 启动灌回 | **`hydrateApiKeysFromVault`**（AI）、**`hydrateVoiceReadSecretsFromVault`**（语音）、**`hydrateTranslationSecretsFromVault`**（翻译）；若 profile id 与映射不对齐，**`reconcileOrphanProfileKeys`** 将孤儿密钥挂回当前活跃方案 |
 
-**localStorage**：**`colorTxt.ui.settings`** 中 **`voiceRead`** 及各方案 **`engineConfig`** **不含**密钥明文；根级 **`engineConfig`** 亦经 **`stripVoiceReadSettingsApiKeysForDisk`** 剥除。运行时内存中保留密钥供合成/对话使用。
+**localStorage**：**`colorTxt.ui.settings`** 中 **`voiceRead`** 及各方案 **`engineConfig`** **不含**密钥明文；根级 **`engineConfig`** 亦经 **`stripVoiceReadSettingsApiKeysForDisk`** 剥除。火山 `volcengineApiKey` 与其他朗读密钥一样进入系统凭据库，运行时才灌回内存供合成使用，**不会写入 `localStorage`**。
 
 **多方案与多密钥**：同一 slot 内的 JSON 按 **方案 id** 索引，**不是**按服务商；同服务商多套方案、多套密钥可并存，互不同步覆盖。
 
 ### `localStorage` 与 `file.meta` 中的 AI 相关键
 
-- **`colorTxt.ui.settings`**：**`aiSkillsEnabled`**、**`aiSkillOverrides`**、**`aiCustomSkills`**、**`aiAssistantDeepThinking`**、**`aiAssistantSpoilerSafe`**；**`voiceRead`**（引擎、朗读方案、单/多音色、**emotionEnabled** 等，见 **「语音朗读」**）；**`timedScroll`**（定时滚动，见 [基础功能.md](./基础功能.md) → **「定时滚动」**）；**`aiSmartFormat`**（编辑模式智能排版开关组，见 **「AI 智能排版」**）；**`textConvertZh`**、**`textConvertLetter`**、**`textConvertDigit`**（顶栏「转换」阅读模式展示层，见 [基础功能.md](./基础功能.md) → **「简繁与全半角转换」**）；**`characterPortraitCacheDir`**（空串表示使用默认 `userData/CharacterPortrait`）；**`characterCardTextureEffect`**（角色卡闪卡纹理 id，默认 **`soft`**，见 **「角色卡 3D 倾斜与闪卡纹理」**）；**`wordcloudFontFamily`**、**`wordcloudAngleMode`**、**`wordcloudPaletteId`**（词云全屏 UI 偏好，见 **「词云图」**）。其余界面与阅读字段仍见 [基础功能.md](./基础功能.md) → **「数据存储说明」**中的 `PersistedSettingsData` / `cacheStore.ts`。
-- **`colorTxt.file.meta`**：**`characterRoster`**、**`characterBookStyle`**、角色 **`voiceReadVoiceId`** 等（类型见 `@shared/characterTypes`），与书签、阅读进度、电子书转换路径等字段并列，详见 `FileMetaRecord` / `fileMetaStore.ts`。
+- **`colorTxt.ui.settings`**：**`aiSkillsEnabled`**、**`aiSkillOverrides`**、**`aiCustomSkills`**、**`aiAssistantDeepThinking`**、**`aiAssistantSpoilerSafe`**；**`voiceRead`**（引擎、朗读方案、单/多音色、**emotionEnabled** 等，见 **「语音朗读」**）；**`timedScroll`**（定时滚动，见 [基础功能.md](./基础功能.md) → **「定时滚动」**）；**`aiSmartFormat`**（编辑模式智能排版开关组，见 **「AI 智能排版」**）；**`textConvertZh`**、**`textConvertLetter`**、**`textConvertDigit`**（顶栏「转换」阅读模式展示层，见 [基础功能.md](./基础功能.md) → **「简繁与全半角转换」**）；**`characterPortraitCacheDir`**（空串表示使用默认 `userData/CharacterPortrait`）；**`characterCardTextureEffect`**（角色卡闪卡纹理 id，默认 **`soft`**，见 **「角色卡 3D 倾斜与闪卡纹理」**）；**`wordcloudFontFamily`**、**`wordcloudAngleMode`**、**`wordcloudPaletteId`**（词云全屏 UI 偏好，见 **「词云图」**）。朗读过滤 / 自动暂停另存 **`colortxt:voiceReadSpeak`**（见 [语音朗读](./语音朗读.md)）。其余界面与阅读字段仍见 [基础功能.md](./基础功能.md) → **「数据存储说明」**中的 `PersistedSettingsData` / `cacheStore.ts`。
+- **`colorTxt.file.meta`**：**`characterRoster`**、**`characterBookStyle`**、角色 **`voiceReadVoiceId`** / **`voiceReadLanguage`** / **`voiceReadDialect`** 等（类型见 `@shared/characterTypes`），与书签、阅读进度、电子书转换路径等字段并列，详见 `FileMetaRecord` / `fileMetaStore.ts`。
 
 ### 主要 Vue 组件（AI / 角色与相关设置）
 
@@ -371,8 +371,9 @@ cardShellWrap（悬停抬高 z-index）
 | `SettingsTxt2ImgPanel.vue` | 「角色卡」：服务商 + 地址（含 **MiniMax** `minimax_images`）；云端 Key/**测试连接**/模型建议；**固定尺寸**或 **自由宽高**；OpenAI 画质；A1111/Comfy 参数；**立绘缓存目录** |
 | `AppConnectionTestButton.vue` | 设置页共用测试连接按钮（`useConnectionTest`） |
 | `SettingsSkillsPanel.vue` | 「技能」：内置技能开关与覆盖、自定义技能列表；footer「添加技能」打开 **`SettingsSkillEditModal`** |
-| `SettingsVoiceReadPanel.vue` | 「语音朗读」：朗读方案、引擎（含 **MiMo**）、单/多音色、AI 识别、**情绪标注**、通义/MiniMax/MiMo 密钥与测试连接；见 **「语音朗读」** |
-| `VoiceReadToolbar.vue` | 顶栏朗读控制条（含 **音量** 滑块；设置内 **音调** 为合成参数）；与 **定时滚动** 互斥 |
+| `SettingsVoiceReadPanel.vue` | 「语音朗读」：朗读方案、引擎（含 **MiMo**、**火山引擎 `volcengine`**）、单/多音色、AI 识别、**情绪标注**、通义/MiniMax/MiMo/火山密钥与测试连接；火山接入豆包语音合成大模型 2.0、444 个官方音色与默认可改的 24 kHz PCM，各槽位可选手动语种/方言，连接测试会合成一个汉字并产生极少量用量；页底 **朗读设置**（过滤 / 自动暂停，见 [语音朗读](./语音朗读.md)） |
+| `SettingsVolcengineVoiceSpeechMode.vue` | 火山语种/方言下拉（设置页槽位 / 角色卡抽屉共用） |
+| `VoiceReadToolbar.vue` | 顶栏朗读控制条（含 **音量** 滑块与左侧 **朗读设置** 齿轮；设置内 **音调** 为合成参数）；与 **定时滚动** 互斥 |
 | `SettingsSkillEditModal.vue` | 自定义技能新建/编辑弹窗 |
 | `AppPullFlashButton.vue` | 设置面板内刷新模型/采样器列表等，完成态闪光反馈 |
 | `PathPickerInput.vue` | 目录选择（含 **角色立绘缓存根目录** 等） |
@@ -382,7 +383,7 @@ cardShellWrap（悬停抬高 z-index）
 | `AiToolFoldBody.vue` | 工具折叠正文；超长章压缩进度中 **`当前进度：M/N`** 高亮（`utils/aiToolFoldBody.ts`） |
 | `AiMarkdown.vue` | 助手回复 Markdown（`aiMarkdownMarkedSetup` / `Prep`、`aiMarkdownChapterRef`） |
 | `CharacterSidebarPanel.vue` | 侧栏「角色」编排根：角色卡网格、**拖动排序**、**`popoverCardId`** 原位放大、导入/导出包；立绘 FS 经 **`useCharacterPortraitFs`**；编辑经 **`CharacterEditDrawer`**；下发 **`characterCardTextureEffect`** / **`aiConfigSyncNonce`** |
-| `CharacterEditDrawer.vue` | 角色编辑/新建抽屉：草稿保存删除、语音试听、立绘上传；挂载 **`useCharacterPortraitRetrieve`** 与 **`CharacterPortraitGenerateModal`** |
+| `CharacterEditDrawer.vue` | 角色编辑/新建抽屉：草稿保存删除、语音试听、立绘上传；火山专属音色可再选语种/方言；挂载 **`useCharacterPortraitRetrieve`** 与 **`CharacterPortraitGenerateModal`** |
 | `CharacterPortraitGenerateModal.vue` | 立绘 txt2img：预览、生成/中止/应用、提示词持久化 |
 | `CharacterRosterCard.vue` | 角色卡（2:3、3D 翻转、全息层、倾斜、原位放大）；背面滚动边界不带动外层列表 |
 | `SettingsEditPanel.vue` | 「编辑」：**显示行号**、**启用小地图**、**自动刷新章节列表**；**AI 智能排版**开关组（`aiSmartFormat`） |

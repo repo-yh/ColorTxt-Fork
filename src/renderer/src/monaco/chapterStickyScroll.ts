@@ -1,5 +1,5 @@
 import type * as monaco from "monaco-editor";
-import { Emitter } from "monaco-editor";
+import { Emitter, editor as monacoEditor } from "monaco-editor";
 import { chapterTitleForDisplay } from "../chapter";
 
 /** 与 `setChapters` / 粘性滚动大纲一致的单条章节信息 */
@@ -52,6 +52,16 @@ export function ensureStickyChapterBarClickDisabled(): void {
 `;
 }
 
+/** 当前覆盖正文的 Monaco 粘性章节条高度。 */
+export function getStickyChapterScrollHeight(
+  editor: monaco.editor.ICodeEditor,
+): number {
+  const widget = editor
+    .getDomNode()
+    ?.querySelector<HTMLElement>(".sticky-widget");
+  return widget?.clientHeight ?? 0;
+}
+
 export type ChapterStickyScrollProvidersHandle = {
   disposable: monaco.IDisposable;
   /**
@@ -100,6 +110,68 @@ function rangeEndLineForTocIndex(
     }
   }
   return maxLine;
+}
+
+/** Monaco 只为至少跨三行的 DocumentSymbol 创建 sticky candidate。 */
+function isMonacoStickyCandidateRange(start: number, end: number): boolean {
+  return end > start + 1;
+}
+
+/**
+ * `lineNumber` 成为章节条下方第一行时，预测会保持粘性的章节层数。
+ * 范围边界与 `buildChapterDocumentSymbols` 一致，并对齐 Monaco 的 candidate 规则。
+ */
+function countStickyChapterRowsForLine(
+  chapters: readonly ChapterStickyLine[],
+  lineNumber: number,
+  maxLine: number,
+): number {
+  const sorted = sortChaptersByTocOrder(
+    chapters.filter((c) => c.lineNumber >= 1 && c.lineNumber <= maxLine),
+  );
+  let rows = 0;
+  const countedStartLines = new Set<number>();
+  for (let i = 0; i < sorted.length; i++) {
+    const start = sorted[i]!.lineNumber;
+    if (start >= lineNumber || countedStartLines.has(start)) continue;
+    const end = rangeEndLineForTocIndex(sorted, i, maxLine);
+    if (isMonacoStickyCandidateRange(start, end) && lineNumber <= end) {
+      countedStartLines.add(start);
+      rows++;
+    }
+  }
+  return rows;
+}
+
+/**
+ * 预测指定行成为正文首行时，Monaco 粘性章节条的稳定高度。
+ * 可能与真实 DOM 差一行；翻页后应用 `getStickyChapterScrollHeight` 再校正。
+ */
+export function predictStickyChapterScrollHeight(
+  editor: monaco.editor.ICodeEditor,
+  chapters: readonly ChapterStickyLine[],
+  lineNumber: number,
+): number {
+  const stickyOption = editor.getOption(
+    monacoEditor.EditorOption.stickyScroll,
+  );
+  if (!stickyOption.enabled) return 0;
+
+  const maxLine = editor.getModel()?.getLineCount() ?? 0;
+  if (maxLine < 1) return 0;
+
+  const lineHeight = Math.max(
+    1,
+    editor.getOption(monacoEditor.EditorOption.lineHeight),
+  );
+  const viewportHeight = Math.max(1, editor.getLayoutInfo().height);
+  const rows = countStickyChapterRowsForLine(chapters, lineNumber, maxLine);
+  // Monaco 将 sticky 行数限制为 maxLineCount 与视口行数约 25% 的较小值。
+  const maxRows = Math.min(
+    stickyOption.maxLineCount,
+    Math.round((viewportHeight / lineHeight) * 0.25),
+  );
+  return Math.min(rows, Math.max(0, maxRows)) * lineHeight;
 }
 
 function buildChapterDocumentSymbols(

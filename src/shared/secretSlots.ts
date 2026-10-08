@@ -5,7 +5,7 @@ export const SECRET_SLOT_AI_EMBEDDING_API_KEY = "ai.embedding.apiKey";
 export const SECRET_SLOT_AI_CHAT_PROFILE_KEYS = "ai.chatProfileKeys";
 /** 文生图配置方案 API 密钥映射（JSON：profileId → apiKey） */
 export const SECRET_SLOT_AI_TXT2IMG_PROFILE_KEYS = "ai.txt2imgProfileKeys";
-/** 语音朗读配置方案密钥映射（JSON：profileId → { dashscopeApiKey?, minimaxApiKey?, mimoApiKey? }） */
+/** 语音朗读配置方案密钥映射（JSON：profileId → 各 Provider API Key） */
 export const SECRET_SLOT_VOICE_READ_PROFILE_KEYS = "voiceRead.profileKeys";
 /** WebDAV 密码 */
 export const SECRET_SLOT_WEBDAV_PASSWORD = "webdav.password";

@@ -47,6 +47,7 @@ export function useAppReaderAnnotations(deps: {
   compressBlankLines: Ref<boolean>;
   persistFileMeta: () => void;
   isVoiceReadNavigationBlocked: Ref<boolean>;
+  ensurePinBeforeRevealFindWidget: () => void;
 }) {
   const currentFileAnnotations = computed(
     () => {
@@ -244,6 +245,7 @@ export function useAppReaderAnnotations(deps: {
 
   function onJumpToReaderAnnotation(ann: ReaderAnnotationRecord) {
     if (deps.isVoiceReadNavigationBlocked.value) return;
+    deps.ensurePinBeforeRevealFindWidget();
     deps.readerRef.value?.jumpToAnnotationRange?.(ann, { smooth: true });
   }
 

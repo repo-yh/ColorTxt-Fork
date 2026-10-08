@@ -5,9 +5,12 @@ import type { LineationLastColorPrefs } from "../constants/annotationColors";
 import {
   ANNOTATION_VIEWPORT_BUFFER_LINES,
   ANNOTATION_VIEWPORT_SYNC_MS,
+  annotationNoteToHoverMarkdown,
+  annotationNotesAtColumn,
   buildAnnotationDecorationsForViewport,
   buildAnnotationHitsByDisplayLine,
   monacoRangeFromAnnotation,
+  registerAnnotationNoteHoverQuery,
   type AnnotationCompactHit,
 } from "../reader/readerAnnotationDecor";
 import type {
@@ -154,6 +157,7 @@ export function useReaderAnnotations(opts: {
   let annotationViewportDecorLastKey = "";
   let annotationViewportDecorLastCount = 0;
   let annotationScrollDisposable: monaco.IDisposable | null = null;
+  let annotationNoteHoverQueryDisposable: monaco.IDisposable | null = null;
   let annotationViewportSyncRetry = 0;
   const ANNOTATION_VIEWPORT_SYNC_MAX_RETRY = 40;
   const ANNOTATION_VIEWPORT_SYNC_RETRY_MS = 50;
@@ -277,7 +281,7 @@ export function useReaderAnnotations(opts: {
       range,
       physicalToDisplay,
       columnMap(),
-    ).trim();
+    );
   }
 
   function createAnnotationTextsFromRange(range: AnnotationRange): {
@@ -288,20 +292,18 @@ export function useReaderAnnotations(opts: {
       opts.getPhysicalLineContent,
       range,
       "physical",
-    ).trim();
+    );
     const m = opts.model.value;
     let displayText = "";
     if (m && !opts.readerEditMode()) {
-      displayText = m
-        .getValueInRange(
-          physicalRangeToMonacoRange(
-            range,
-            physicalToDisplay,
-            opts.getPhysicalLineContent,
-            columnMap(),
-          ),
-        )
-        .trim();
+      displayText = m.getValueInRange(
+        physicalRangeToMonacoRange(
+          range,
+          physicalToDisplay,
+          opts.getPhysicalLineContent,
+          columnMap(),
+        ),
+      );
     } else {
       displayText = getTextInDisplayRangeFromStoredRange(
         opts.getDisplayLineContent,
@@ -309,7 +311,7 @@ export function useReaderAnnotations(opts: {
         range,
         physicalToDisplay,
         columnMap(),
-      ).trim();
+      );
     }
     return displayText === text ? { text } : { text, displayText };
   }
@@ -1082,6 +1084,7 @@ export function useReaderAnnotations(opts: {
       return;
     }
 
+    bindAnnotationNoteHoverQuery();
     annotationHitsByLine.value = buildAnnotationHitsByDisplayLine(
       list,
       physicalToDisplay,
@@ -1125,6 +1128,34 @@ export function useReaderAnnotations(opts: {
     return toolbarVisible.value && activeAnnotationId.value
       ? activeAnnotationId.value
       : null;
+  }
+
+  function bindAnnotationNoteHoverQuery() {
+    if (annotationNoteHoverQueryDisposable) return;
+    annotationNoteHoverQueryDisposable = registerAnnotationNoteHoverQuery(
+      (model, position) => {
+        if (opts.readerEditMode()) return null;
+        if (model !== opts.model.value) return null;
+        const maxCol = model.getLineMaxColumn(position.lineNumber);
+        const found = annotationNotesAtColumn(
+          annotationHitsByLine.value.get(position.lineNumber),
+          position.column,
+          maxCol,
+          noteHoverSuppressId(),
+        );
+        if (!found) return null;
+        return {
+          // 覆盖整行，折行后鼠标锚点是整段 view line 时仍视为同一悬停
+          range: new monaco.Range(
+            position.lineNumber,
+            1,
+            position.lineNumber,
+            maxCol,
+          ),
+          contents: found.notes.map(annotationNoteToHoverMarkdown),
+        };
+      },
+    );
   }
 
   function dismissEditorContentHover() {
@@ -1180,8 +1211,7 @@ export function useReaderAnnotations(opts: {
     }
     lo = Math.max(1, lo - ANNOTATION_VIEWPORT_BUFFER_LINES);
     hi = hi + ANNOTATION_VIEWPORT_BUFFER_LINES;
-    const suppressId = noteHoverSuppressId();
-    const key = `${lo}:${hi}:${suppressId ?? ""}`;
+    const key = `${lo}:${hi}`;
     if (
       key === annotationViewportDecorLastKey &&
       annotationViewportDecorLastCount > 0
@@ -1193,7 +1223,6 @@ export function useReaderAnnotations(opts: {
       hi,
       annotationHitsByLine.value,
       m,
-      { suppressNoteHoverForAnnotationId: suppressId },
     );
     annotationViewportDecorLastKey = key;
     annotationViewportDecorLastCount = decs.length;
@@ -1234,6 +1263,8 @@ export function useReaderAnnotations(opts: {
     annotationsById.value = new Map();
     annotationScrollDisposable?.dispose();
     annotationScrollDisposable = null;
+    annotationNoteHoverQueryDisposable?.dispose();
+    annotationNoteHoverQueryDisposable = null;
   }
 
   function prepareLineationTargetAnnotation(): ReaderAnnotationRecord | null {
@@ -1447,8 +1478,6 @@ export function useReaderAnnotations(opts: {
   });
 
   watch([toolbarVisible, activeAnnotationId], () => {
-    annotationViewportDecorLastKey = "";
-    scheduleAnnotationViewportSync(true);
     if (toolbarVisible.value) {
       dismissEditorContentHover();
       syncPickerFromSelection(false);

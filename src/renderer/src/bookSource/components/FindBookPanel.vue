@@ -12,6 +12,7 @@ import { icons } from "../../icons";
 import { useAnchoredAppShellMenu } from "../../composables/useAnchoredAppShellMenu";
 import BookSourcePanel from "./BookSourcePanel.vue";
 import ReplaceRulePanel from "./ReplaceRulePanel.vue";
+import VoiceReadSpeakSettingsPanel from "../../components/VoiceReadSpeakSettingsPanel.vue";
 import BookDetailPanel from "./BookDetailPanel.vue";
 import FindBookReaderPanel from "./FindBookReaderPanel.vue";
 import FindDiscoverPanel from "./FindDiscoverPanel.vue";
@@ -378,6 +379,7 @@ const bookSourcePanelRef = ref<InstanceType<typeof BookSourcePanel> | null>(
   null,
 );
 const showReplaceRulePanel = ref(false);
+const showVoiceReadSpeakSettingsPanel = ref(false);
 const showBookDetail = ref(false);
 const showBookReader = ref(false);
 const bookDetailPanelRef = ref<InstanceType<typeof BookDetailPanel> | null>(null);
@@ -2067,12 +2069,14 @@ function onBack() {
       @toc-refreshed="onReaderTocRefreshed"
       @open-text-replace="onOpenReplaceRules"
       @search-source="onSearchFromSource"
+      @open-speak-settings="showVoiceReadSpeakSettingsPanel = true"
     />
 
     <FindBookSettingsPanel
       v-model="showSettingsPanel"
       :initial-tab="settingsInitialTab"
       @chapter-cache-cleared="onChapterCacheCleared"
+      @open-speak-settings="showVoiceReadSpeakSettingsPanel = true"
     />
 
     <ColorSchemePanel
@@ -2114,6 +2118,7 @@ function onBack() {
       :scope-book-origin="selectedBook?.origin || ''"
       @apply-format="onApplyReplaceRuleFormat"
     />
+    <VoiceReadSpeakSettingsPanel v-model="showVoiceReadSpeakSettingsPanel" />
   </AppModal>
 </template>
 

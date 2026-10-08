@@ -41,10 +41,10 @@ export const defaultReaderOpenHint = "（拖放文件到这里）";
 /** 已打开但解码后无正文的文件（如 0 字节） */
 export const emptyFileHintText = "文件已打开，但没有内容";
 
-/** 阅读区居中：电子书转 `{原名}.txt` 阶段 */
-export const readerEbookConvertingHintText = "转换中…";
-/** 彩读书包 ZIP 解析 / 解压阶段 */
-export const readerBookPackUnpackingHintText = "解包中…";
+/** 阅读区居中：电子书转 `{原名}.txt` 阶段（后接弹跳 loading） */
+export const readerEbookConvertingHintText = "转换中";
+/** 彩读书包 ZIP 解析 / 解压阶段（后接弹跳 loading） */
+export const readerBookPackUnpackingHintText = "解包中";
 /** 阅读区居中：正文流式读入且尚未写入任何行时 */
 export const readerTxtLoadingHintText = "加载中";
 
@@ -225,7 +225,7 @@ export const defaultRestoreSessionOnStartup = true;
 export const defaultSyncCurrentFile = false;
 export const defaultMonacoAdvancedWrapping = false;
 /**
- * 简单换行下将 ——/…… 等按全角估算（Vite 包装 Monaco isFullWidthCharacter）。
+ * 简单换行下将 ——/……/♡/※/`=`/`→` 等按全角估算（Vite 包装 Monaco isFullWidthCharacter）。
  * 开启高级换行时运行时自动停用。
  */
 export const defaultMonacoCjkWrapOptimize = true;
@@ -258,6 +258,15 @@ export function clampFastScrollSensitivity(n: number): number {
 
 /** 阅读区顶部是否显示粘性章节标题（Monaco stickyScroll + outlineModel） */
 export const defaultStickyChapterTitleEnabled = true;
+/**
+ * 阅读器交互模式：false = 可选模式（默认可选中文本），true = 点击模式（左键下一屏、右键上一屏）。
+ * 仅只读阅读生效；编辑模式始终可选。
+ */
+export const defaultReaderClickMode = false;
+export const readerSelectModeButtonTitle =
+  "当前为「可选模式」，点击切换「点击模式」\n\n可选模式：可选中文本进行标记、记笔记等操作\n点击模式：左键下一屏，右键上一屏，按下可拖动\n\n按住 Alt 可临时切换模式";
+export const readerClickModeButtonTitle =
+  "当前为「点击模式」，点击切换「可选模式」\n\n可选模式：可选中文本进行标记、记笔记等操作\n点击模式：左键下一屏，右键上一屏，按下可拖动\n\n按住 Alt 可临时切换模式";
 /** 主界面阅读区底部「上一章 / 下一章」工具栏（默认关闭） */
 export const defaultChapterNavToolbarEnabled = false;
 /** 编辑模式下 Monaco 是否显示行号（只读模式始终关闭） */

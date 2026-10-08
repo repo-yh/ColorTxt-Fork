@@ -2,7 +2,7 @@ export type Chapter = {
   title: string;
   lineNumber: number;
   charCount: number;
-  /** 1 = 顶栏；子级递增。侧栏缩进 = (headingLevel - 1) * 10px */
+  /** 1 = 顶栏；子级递增。侧栏缩进 = (headingLevel - 1) * 10px；有子级时可折叠 */
   headingLevel?: number;
   /** 嵌入目录写入顺序（侧栏与粘性大纲用，勿按展示行号重排） */
   tocOrder?: number;

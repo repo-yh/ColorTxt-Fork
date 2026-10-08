@@ -63,6 +63,7 @@ const props = withDefaults(
     draftFastScrollSensitivity: number;
     draftStickyChapterTitleEnabled: boolean;
     draftChapterNavToolbarEnabled: boolean;
+    draftFindBookChapterAdvanceEnabled?: boolean;
     draftChapterTitleBlankMode: ChapterTitleBlankMode;
     draftCompressBlankKeepOneBlank: boolean;
     draftTxtrDelimitedMatchCrossLine: boolean;
@@ -85,11 +86,15 @@ const props = withDefaults(
     showAnnotationTools?: boolean;
     /** 工具条预览是否展示「问 AI」；找书窗口为 false */
     showAskAi?: boolean;
+    /** 找书窗口显示「边界滚动切章」；主界面不展示 */
+    showFindBookChapterAdvanceOption?: boolean;
   }>(),
   {
     showFindTargetOption: true,
     showAnnotationTools: true,
     showAskAi: true,
+    draftFindBookChapterAdvanceEnabled: true,
+    showFindBookChapterAdvanceOption: false,
   },
 );
 
@@ -106,6 +111,7 @@ defineEmits<{
   "update:draftFastScrollSensitivity": [v: number];
   "update:draftStickyChapterTitleEnabled": [v: boolean];
   "update:draftChapterNavToolbarEnabled": [v: boolean];
+  "update:draftFindBookChapterAdvanceEnabled": [v: boolean];
   "update:draftChapterTitleBlankMode": [v: ChapterTitleBlankMode];
   "update:draftCompressBlankKeepOneBlank": [v: boolean];
   "update:draftTxtrDelimitedMatchCrossLine": [v: boolean];
@@ -289,6 +295,22 @@ const selectListsEmpty: CustomSelectItem[] = [];
         </div>
         <p class="settingsHint">
           在阅读区底部显示「上一章 / 下一章」快捷跳转；仅一章或无章节时不显示。
+        </p>
+      </div>
+
+      <div v-if="showFindBookChapterAdvanceOption" class="settingsRow">
+        <div class="settingsRowMain">
+          <span class="settingsLabel">边界滚动切章</span>
+          <SwitchToggle
+            :model-value="draftFindBookChapterAdvanceEnabled"
+            aria-label="边界滚动切章"
+            @update:model-value="
+              $emit('update:draftFindBookChapterAdvanceEnabled', $event)
+            "
+          />
+        </div>
+        <p class="settingsHint">
+          阅读到章节边界后再次滚动（滚轮、空格、<code>PageUp</code> / <code>PageDown</code>、方向键）时跳转到邻章。
         </p>
       </div>
     </div>

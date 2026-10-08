@@ -3,6 +3,7 @@ import type { AITokenPricePerMillion } from "@shared/aiTypes";
 import type { AITokenUsageTotals } from "@shared/aiTokenUsage";
 import AiTokenUsageBanner from "./AiTokenUsageBanner.vue";
 import AppModal from "./AppModal.vue";
+import LoadingDotsBounce from "./LoadingDotsBounce.vue";
 
 const open = defineModel<boolean>({ default: false });
 
@@ -30,7 +31,7 @@ const emit = defineEmits<{
     :show-close-button="false"
   >
     <div class="body">
-      <p class="status">正在处理…</p>
+      <p class="status">正在处理<LoadingDotsBounce /></p>
       <p v-if="total > 1" class="progress">
         当前进度：<span class="progressValue">{{ current }}/{{ total }}</span>
       </p>
@@ -69,6 +70,9 @@ const emit = defineEmits<{
   margin: 0;
   font-size: 14px;
   color: var(--fg);
+  display: flex;
+  align-items: center;
+  gap: 0.15em;
 }
 
 .progress {

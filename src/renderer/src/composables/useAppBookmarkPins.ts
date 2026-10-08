@@ -317,6 +317,7 @@ export function useAppBookmarkPins(deps: {
   }
 
   function jumpToBookmark(line: number) {
+    ensurePinBeforeRevealFindWidget();
     const displayLine = deps.readerEditMode.value
       ? Math.max(1, Math.floor(line))
       : deps.stream.physicalLineToDisplayForReader(line);

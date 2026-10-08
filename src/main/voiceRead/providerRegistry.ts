@@ -10,6 +10,7 @@ import { dashscopeTtsProvider } from "./providers/dashscopeProvider";
 import { edgeTtsProvider } from "./providers/edgeProvider";
 import { mimoTtsProvider } from "./providers/mimoProvider";
 import { minimaxTtsProvider } from "./providers/minimaxProvider";
+import { volcengineTtsProvider } from "./providers/volcengineProvider";
 import { winSapiTtsProvider } from "./providers/winSapiProvider";
 import type { VoiceReadTtsProvider } from "./providers/types";
 
@@ -18,6 +19,7 @@ const PROVIDERS: VoiceReadTtsProvider[] = [
   dashscopeTtsProvider,
   minimaxTtsProvider,
   mimoTtsProvider,
+  volcengineTtsProvider,
   ...(process.platform === "win32" ? [winSapiTtsProvider] : []),
 ];
 

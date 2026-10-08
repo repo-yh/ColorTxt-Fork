@@ -744,7 +744,7 @@ async function walkMobiBlock(
       continue;
     }
     if (tag === "br" || tag === "hr") {
-      acc.text += " ";
+      await flushParagraph(acc, out);
       continue;
     }
     if (tag === "a") {

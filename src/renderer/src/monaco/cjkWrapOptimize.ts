@@ -1,7 +1,7 @@
 /**
  * 简单换行（wrappingStrategy: simple）下的中文换行优化：
- * - 将 General Punctuation 等网文常用标点按全角列宽估算（包装 `isFullWidthCharacter` /
- *   `computeCharWidth`；`、。「」` 等本就在 CJK/全角区，无需补）
+ * - 将网文常用、中文字体里接近全角宽、但 Monaco 默认当半角估算的符号按全角列宽
+ *   （包装 `isFullWidthCharacter` / `computeCharWidth`；`、。「」` 等本就在 CJK/全角区）
  * - 全角样字改为「汉」（见 electron.vite Monaco transform）
  * 不改 canBreak（曾用 break-all 会导致 ，。？ 等出现在行首）。
  * 高级换行开启时由 ReaderMain 关闭此开关。
@@ -18,24 +18,47 @@ export function isCjkWrapOptimizeEnabled(): boolean {
 }
 
 /**
- * Monaco 默认 `isFullWidthCharacter` 不含 General Punctuation（U+2000–206F），
- * 弯引号/破折号/省略号等会被当成半角，比例中文字体下易行尾溢出。
+ * Monaco 默认 `isFullWidthCharacter` 从 CJK 部首 U+2E80 起算，不含：
+ * ASCII 运算/标记符、箭头、General Punctuation、拉丁文 ·×、几何/杂项符号（♡♥☆※ 等）。
+ * 中文字体里这些常占约 1em，半角估算会让简单换行右侧溢出。
  */
 export function isCjkWrapOptimizeFullWidthCodePoint(charCode: number): boolean {
+  // # % + - / <=> @ ~
+  if (charCode < 0x80) {
+    return (
+      charCode === 0x23 ||
+      charCode === 0x25 ||
+      charCode === 0x2b ||
+      charCode === 0x2d ||
+      charCode === 0x2f ||
+      (charCode >= 0x3c && charCode <= 0x3e) ||
+      charCode === 0x40 ||
+      charCode === 0x7e
+    );
+  }
+  // · × ÷（拉丁-1，中文排版常按全角）
+  if (
+    charCode === 0x00b7 ||
+    charCode === 0x00d7 ||
+    charCode === 0x00f7
+  ) {
+    return true;
+  }
   // ‐-‒–—―
   if (charCode >= 0x2010 && charCode <= 0x2015) return true;
   // ‘’‚‛“”„‟
   if (charCode >= 0x2018 && charCode <= 0x201f) return true;
-  // • ‥ … ⋯
-  if (
-    charCode === 0x2022 ||
-    charCode === 0x2025 ||
-    charCode === 0x2026 ||
-    charCode === 0x22ef
-  ) {
-    return true;
-  }
-  // ‹›
-  if (charCode === 0x2039 || charCode === 0x203a) return true;
+  // †‡•‣․‥…
+  if (charCode >= 0x2020 && charCode <= 0x2026) return true;
+  // ‰‱′″‴‵※‼‾ 及 ‹›
+  if (charCode >= 0x2030 && charCode <= 0x203e) return true;
+  // ←↑→↓
+  if (charCode >= 0x2190 && charCode <= 0x2193) return true;
+  // ⋯ √
+  if (charCode === 0x22ef || charCode === 0x221a) return true;
+  // 盒线 / 方块 / 几何 / 杂项符号（♡♥☆★）/ Dingbats（✲❈✔✘）
+  if (charCode >= 0x2500 && charCode <= 0x27bf) return true;
+  // 竖排标点、CJK 兼容形式（Monaco 默认忽略 FE10–FE4F）
+  if (charCode >= 0xfe10 && charCode <= 0xfe4f) return true;
   return false;
 }

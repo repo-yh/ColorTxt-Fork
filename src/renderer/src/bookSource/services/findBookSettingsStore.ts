@@ -27,6 +27,7 @@ import {
   defaultReaderHorizontalInsetPx,
   clampReaderHorizontalInsetPx,
   defaultStickyChapterTitleEnabled,
+  defaultReaderClickMode,
   defaultTxtrDelimitedMatchCrossLine,
   FIND_BOOK_SIDEBAR_MIN_WIDTH,
   normalizeLineHeightMultiple,
@@ -58,6 +59,7 @@ import type { TranslationSettings } from "@shared/translationTypes";
 import type { DictionarySettings } from "@shared/dictionaryTypes";
 import type { WebSearchSettings } from "@shared/webSearchTypes";
 import { READER_EDITOR_DEFAULT_FONT_FAMILY } from "../../monaco/readerEditorOptions";
+import { DEFAULT_FIND_BOOK_CHAPTER_ADVANCE_ENABLED } from "../../constants/findBookChapterAdvance";
 import {
   resolveDefaultBookSourceDownloadDirSync,
   resolveDefaultBookSourceChapterCacheDirSync,
@@ -202,7 +204,9 @@ export type SharedReaderSettingsSnapshot = {
   mouseWheelScrollSensitivity: number;
   fastScrollSensitivity: number;
   stickyChapterTitleEnabled: boolean;
+  readerClickMode: boolean;
   chapterNavToolbarEnabled: boolean;
+  findBookChapterAdvanceEnabled: boolean;
   readerEditShowLineNumbers: boolean;
   readerEditMinimap: boolean;
   fullscreenReaderWidthPercent: number;
@@ -300,10 +304,18 @@ export function sharedReaderSettingsFromMainData(
       typeof data.stickyChapterTitleEnabled === "boolean"
         ? data.stickyChapterTitleEnabled
         : defaultStickyChapterTitleEnabled,
+    readerClickMode:
+      typeof data.readerClickMode === "boolean"
+        ? data.readerClickMode
+        : defaultReaderClickMode,
     chapterNavToolbarEnabled:
       typeof data.chapterNavToolbarEnabled === "boolean"
         ? data.chapterNavToolbarEnabled
         : defaultChapterNavToolbarEnabled,
+    findBookChapterAdvanceEnabled:
+      typeof data.findBookChapterAdvanceEnabled === "boolean"
+        ? data.findBookChapterAdvanceEnabled
+        : DEFAULT_FIND_BOOK_CHAPTER_ADVANCE_ENABLED,
     readerEditShowLineNumbers:
       typeof data.readerEditShowLineNumbers === "boolean"
         ? data.readerEditShowLineNumbers
@@ -359,7 +371,9 @@ export function snapshotSharedReaderSettingsForMain(
     mouseWheelScrollSensitivity: state.mouseWheelScrollSensitivity,
     fastScrollSensitivity: state.fastScrollSensitivity,
     stickyChapterTitleEnabled: state.stickyChapterTitleEnabled,
+    readerClickMode: state.readerClickMode,
     chapterNavToolbarEnabled: state.chapterNavToolbarEnabled,
+    findBookChapterAdvanceEnabled: state.findBookChapterAdvanceEnabled,
     readerEditShowLineNumbers: state.readerEditShowLineNumbers,
     readerEditMinimap: state.readerEditMinimap,
     fullscreenReaderWidthPercent: state.fullscreenReaderWidthPercent,

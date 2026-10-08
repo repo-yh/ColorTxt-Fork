@@ -1,9 +1,24 @@
-import { readFileSync } from "node:fs";
+import {
+  createReadStream,
+  existsSync,
+  readFileSync,
+  statSync,
+  cpSync,
+} from "node:fs";
 import { defineConfig } from "electron-vite";
 import vue from "@vitejs/plugin-vue";
 import monacoEditorPluginPkg from "vite-plugin-monaco-editor";
-import { dirname, join, resolve } from "node:path";
+import {
+  dirname,
+  extname,
+  isAbsolute,
+  join,
+  relative,
+  resolve,
+} from "node:path";
 import { fileURLToPath } from "node:url";
+import type { IncomingMessage, ServerResponse } from "node:http";
+import type { Plugin } from "vite";
 
 const __electronViteConfigDir = dirname(fileURLToPath(import.meta.url));
 const packageJsonPath = resolve(__electronViteConfigDir, "package.json");
@@ -199,7 +214,7 @@ function monacoCjkWrapStringsPlugin() {
 
 /**
  * 简单换行优化（仅 renderer）：
- * - computeCharWidth：省略号/破折号强制全角列宽
+ * - computeCharWidth：省略号/破折号/♡※ 等强制全角列宽
  * - fontMeasurements：用「汉」测全角宽（避免 \uff4d ｍ 缺字回退估窄）
  * （不再改 canBreak：break-all 会把 ，。？ 等送到行首）
  */
@@ -254,6 +269,99 @@ function monacoCjkWrapOptimizePlugin() {
         patched = optimizeImport + patched;
       }
       return { code: patched, map: null };
+    },
+  };
+}
+
+/** pdfjs-dist 需随页面同源提供的静态资源（CMap / wasm / 标准字体 / ICC） */
+const PDFJS_ASSET_DIRS = [
+  "cmaps",
+  "wasm",
+  "standard_fonts",
+  "iccs",
+] as const;
+
+const PDFJS_DIST_ROOT = resolve(
+  __electronViteConfigDir,
+  "node_modules/pdfjs-dist",
+);
+
+function mimeForPdfjsAsset(filePath: string): string {
+  switch (extname(filePath).toLowerCase()) {
+    case ".wasm":
+      return "application/wasm";
+    case ".js":
+      return "text/javascript; charset=utf-8";
+    default:
+      return "application/octet-stream";
+  }
+}
+
+function isPathInside(parent: string, child: string): boolean {
+  const rel = relative(parent, child);
+  return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
+}
+
+function copyPdfjsAssetsTo(destRoot: string): void {
+  for (const dir of PDFJS_ASSET_DIRS) {
+    const from = join(PDFJS_DIST_ROOT, dir);
+    if (!existsSync(from)) continue;
+    cpSync(from, join(destRoot, dir), { recursive: true });
+  }
+}
+
+function tryServePdfjsAsset(
+  req: IncomingMessage,
+  res: ServerResponse,
+  next: () => void,
+): void {
+  const raw = (req.url ?? "").split("?")[0] ?? "";
+  if (!raw.startsWith("/pdfjs/")) {
+    next();
+    return;
+  }
+  let rel = decodeURIComponent(raw.slice("/pdfjs/".length));
+  rel = rel.replace(/\\/g, "/");
+  const top = rel.split("/")[0] ?? "";
+  if (
+    !rel ||
+    rel.includes("..") ||
+    !(PDFJS_ASSET_DIRS as readonly string[]).includes(top)
+  ) {
+    res.statusCode = 400;
+    res.end();
+    return;
+  }
+  const file = resolve(PDFJS_DIST_ROOT, rel);
+  if (
+    !isPathInside(PDFJS_DIST_ROOT, file) ||
+    !existsSync(file) ||
+    !statSync(file).isFile()
+  ) {
+    res.statusCode = 404;
+    res.end();
+    return;
+  }
+  res.setHeader("Content-Type", mimeForPdfjsAsset(file));
+  createReadStream(file).pipe(res);
+}
+
+/**
+ * 开发态把 `/pdfjs/*` 映射到 `node_modules/pdfjs-dist`；
+ * 生产构建拷到 `dist/renderer/pdfjs/`（与 `document.baseURI` 相对路径一致）。
+ */
+function pdfjsAssetsPlugin(): Plugin {
+  return {
+    name: "pdfjs-assets",
+    configureServer(server) {
+      server.middlewares.use(tryServePdfjsAsset);
+    },
+    configurePreviewServer(server) {
+      server.middlewares.use(tryServePdfjsAsset);
+    },
+    writeBundle(options) {
+      if (!options.dir) return;
+      copyPdfjsAssetsTo(join(options.dir, "pdfjs"));
     },
   };
 }
@@ -348,6 +456,7 @@ export default defineConfig({
       monacoCjkWrapStringsPlugin(),
       monacoCjkWrapOptimizePlugin(),
       monacoLineSpacingPlugin(),
+      pdfjsAssetsPlugin(),
       {
         name: "inject-app-display-name-in-html",
         transformIndexHtml(html: string) {

@@ -65,7 +65,7 @@
 
 ### 关于「其他电子书格式」的支持
 
-支持打开 `.md` 文件，章节按 ATX `#` 标题识别，章节列表按标题层级缩进。
+支持打开 `.md` 文件，章节按 ATX `#` 标题识别，章节列表按标题层级缩进，父级可折叠。
 
 > [!NOTE]
 > 只支持标题、链接、图片等少量 Markdown 语法，服务于小说文本。
@@ -153,10 +153,13 @@
 | Qwen3-TTS | 阿里云通义（DashScope） |                                                 |
 | MiniMax   | MiniMax                 |                                                 |
 | 小米 MiMo | MiMo                    | 支持 **音色定制** 和 **音色克隆**，**目前限免** |
+| 豆包语音合成大模型 2.0 | 火山引擎 | 内置官方 **444 个音色**，可切换方言 |
 
 支持「单音色」或「旁白/对白多音色」。
 
 启用「AI 阅读助手」时，多音色可区分「男声」「女声」，也可以在「角色卡」中给角色设置专属音色。
+
+支持「朗读过滤」（朗读时忽略特定内容）和「自动暂停」（朗读指定的章节数或时长后自动暂停）。
 
 ### 关于「AI」功能
 
@@ -316,12 +319,14 @@ ColorTxt/
 - 基于 [libmspack](https://github.com/kyz/libmspack) 移植了一套 JavaScript 实现，以支持对 `.chm` 格式的解析
 - 其他电子书格式的解析，主要参考 [foliate-js](https://github.com/johnfactotum/foliate-js) 的实现
 - AI 阅读助手和语音朗读的基础功能，参考了 [ReadAny](https://github.com/codedogQBY/ReadAny) 的实现
+- 词典功能参考了 [readest](https://github.com/readest/readest)
 - 角色卡 3D 卡片效果的实现思路及部分样式、贴图资源来源于 [pokemon-cards-css](https://github.com/simeydotme/pokemon-cards-css)
 - 基于 [@node-rs/jieba](https://github.com/napi-rs/node-rs/tree/main/packages/jieba) 实现中文分词，以支持词云生成
 - 基于 [OpenCC](https://github.com/byvoid/opencc) 实现简繁互转
 - 划线/笔记功能的交互，参考了 [微信读书网页版](https://weread.qq.com/)
 - 书源解析逻辑参考：[legado-E（阅读Sigma）](https://github.com/Luoyacheng/legado-E)
 
-## 其他
+## 链接
 
-- [LINUX DO](https://linux.do/)
+- [科技爱好者周刊](https://github.com/ruanyf/weekly/issues/10004)
+- [LINUX DO](https://linux.do/t/topic/2772329)

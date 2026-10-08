@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import AppCheckbox from "./AppCheckbox.vue";
 import ApiEndpointInput from "./ApiEndpointInput.vue";
 import AppCustomSelect, { type CustomSelectItem } from "./AppCustomSelect.vue";
+import SettingsVolcengineVoiceSpeechMode from "./SettingsVolcengineVoiceSpeechMode.vue";
 import AppConnectionTestButton from "./AppConnectionTestButton.vue";
 import PathPickerInput from "./PathPickerInput.vue";
 import IconButton from "./IconButton.vue";
@@ -47,6 +48,18 @@ import {
   isMimoTtsVoiceDesignModel,
   normalizeMimoTtsModel,
 } from "@shared/voiceReadMimoModels";
+import {
+  formatVolcenginePitchLabel,
+  formatVolcengineTtsSampleRateLabel,
+  normalizeVolcenginePitch,
+  normalizeVolcengineTtsSampleRate,
+  storedVolcengineSlotSpeechMode,
+  upsertVolcengineSlotSpeechMode,
+  VOLCENGINE_PITCH_MAX,
+  VOLCENGINE_PITCH_MIN,
+  VOLCENGINE_TTS_SAMPLE_RATES,
+  type VolcengineSpeechSlot,
+} from "@shared/voiceReadVolcengineAudio";
 import { healthCheckVoiceReadViaIpc } from "../services/voiceRead/voiceReadSynthesisClient";
 import {
   fetchMinimaxVoiceCatalog,
@@ -64,6 +77,11 @@ import type { ConnectionTestResult } from "../composables/useConnectionTest";
 import { appAlert } from "../services/appDialog";
 import type { ColorTxtOpenDialogOptions } from "@shared/colorTxtOpenSaveDialog";
 import { buildLineSpeakChunks } from "../services/voiceRead/voiceReadLineBuild";
+import {
+  applyVoiceReadFilterRules,
+  filterVoiceReadSpeakChunks,
+} from "../services/voiceRead/voiceReadFilterApply";
+import { getVoiceReadSpeakSettings } from "../services/voiceRead/voiceReadSpeakStore";
 import {
   buildDialogueAiPreviewSpeakChunks,
   buildMultiVoicePreviewSpeakChunks,
@@ -99,6 +117,10 @@ const activeProfileId = defineModel<string>("activeProfileId", { required: true 
 const props = defineProps<{
   aiEnabled?: boolean;
   characterRoster?: readonly CharacterRosterEntry[];
+}>();
+
+const emit = defineEmits<{
+  openSpeakSettings: [];
 }>();
 
 const voiceReadProfileDraft = useVoiceReadProfileDraft(
@@ -295,6 +317,21 @@ async function runMimoConnectionTest(): Promise<ConnectionTestResult | null> {
     : { ok: false, error: r.result.message ?? "连接失败" };
 }
 
+async function runVolcengineConnectionTest(): Promise<ConnectionTestResult | null> {
+  if (!draft.value.engineConfig.volcengineApiKey?.trim()) {
+    await appAlert("请先填写火山引擎 API Key");
+    return null;
+  }
+  const r = await healthCheckVoiceReadViaIpc(
+    "volcengine",
+    draft.value.engineConfig,
+  );
+  if (!r.ok) return { ok: false, error: r.error };
+  return r.result.ok
+    ? { ok: true }
+    : { ok: false, error: r.result.message ?? "连接失败" };
+}
+
 const previewText = ref(VOICE_READ_DIALOGUE_GENDER_PREVIEW_DEFAULT);
 
 type PreviewPhase = "idle" | "ai" | "synthesizing" | "playing";
@@ -305,6 +342,7 @@ const previewDownload = ref<VoiceReadPreviewDownload | null>(null);
 const showDashScopeKey = ref(false);
 const showMiniMaxKey = ref(false);
 const showMimoKey = ref(false);
+const showVolcengineKey = ref(false);
 
 const minimaxConnectionFingerprint = computed(
   () => draft.value.engineConfig.minimaxApiKey?.trim() ?? "",
@@ -317,6 +355,9 @@ const dashscopeConnectionFingerprint = computed(
     draft.value.engineConfig.dashscopeApiKey?.trim() ??
     draft.value.dashscopeApiKey?.trim() ??
     "",
+);
+const volcengineConnectionFingerprint = computed(
+  () => draft.value.engineConfig.volcengineApiKey?.trim() ?? "",
 );
 const previewPlayer = new VoiceReadLinePlayer();
 let previewRunId = 0;
@@ -544,6 +585,29 @@ function patchEngineConfig(
   });
 }
 
+function volcengineSlotLanguage(slot: VolcengineSpeechSlot): string {
+  return storedVolcengineSlotSpeechMode(draft.value.engineConfig, slot)
+    .language;
+}
+
+function volcengineSlotDialect(slot: VolcengineSpeechSlot): string {
+  return storedVolcengineSlotSpeechMode(draft.value.engineConfig, slot)
+    .dialect;
+}
+
+function patchVolcengineSlot(
+  slot: VolcengineSpeechSlot,
+  partial: { language?: string; dialect?: string },
+) {
+  patchEngineConfig({
+    volcengineSlotSpeechModes: upsertVolcengineSlotSpeechMode(
+      draft.value.engineConfig.volcengineSlotSpeechModes,
+      slot,
+      partial,
+    ),
+  });
+}
+
 const dashscopeApiKeyModel = computed({
   get: () =>
     draft.value.engineConfig.dashscopeApiKey ??
@@ -567,6 +631,54 @@ const mimoApiKeyModel = computed({
     patchEngineConfig({ mimoApiKey: value });
   },
 });
+
+const volcengineApiKeyModel = computed({
+  get: () => draft.value.engineConfig.volcengineApiKey ?? "",
+  set: (value: string) => {
+    patchEngineConfig({ volcengineApiKey: value });
+  },
+});
+
+const volcengineSampleRateScrollItems: CustomSelectItem[] =
+  VOLCENGINE_TTS_SAMPLE_RATES.map((rate) => ({
+    kind: "item",
+    id: String(rate),
+    label: formatVolcengineTtsSampleRateLabel(rate),
+  }));
+
+const volcengineSampleRateModel = computed({
+  get: () =>
+    String(
+      normalizeVolcengineTtsSampleRate(
+        draft.value.engineConfig.volcengineSampleRate,
+      ),
+    ),
+  set: (value: string) => {
+    patchEngineConfig({
+      volcengineSampleRate: normalizeVolcengineTtsSampleRate(value),
+    });
+  },
+});
+
+const volcenginePitchModel = computed({
+  get: () =>
+    normalizeVolcenginePitch(draft.value.engineConfig.volcenginePitch),
+  set: (value: number) => {
+    patchEngineConfig({ volcenginePitch: normalizeVolcenginePitch(value) });
+  },
+});
+
+const volcenginePitchDisplayLabel = computed(() =>
+  formatVolcenginePitchLabel(volcenginePitchModel.value),
+);
+
+const volcengineSampleRateDisplayLabel = computed(() =>
+  formatVolcengineTtsSampleRateLabel(
+    normalizeVolcengineTtsSampleRate(
+      draft.value.engineConfig.volcengineSampleRate,
+    ),
+  ),
+);
 
 const mimoVoiceDescriptionModel = computed({
   get: () => draft.value.engineConfig.mimoVoiceDescription ?? "",
@@ -602,6 +714,15 @@ function cancelPreview() {
   previewError.value = "";
 }
 
+function applySavedSpeakFilters(
+  chunks: VoiceReadSpeakChunk[],
+): VoiceReadSpeakChunk[] {
+  return filterVoiceReadSpeakChunks(
+    chunks,
+    getVoiceReadSpeakSettings().filterRules,
+  );
+}
+
 function buildPreviewSpeakChunks(
   settings: VoiceReadSettings,
   text: string,
@@ -612,7 +733,9 @@ function buildPreviewSpeakChunks(
     scheme: "single",
     single: { ...settings.single, voiceId },
   };
-  return buildLineSpeakChunks(previewSettings, text, []).chunks;
+  return applySavedSpeakFilters(
+    buildLineSpeakChunks(previewSettings, text, []).chunks,
+  );
 }
 
 function schedulePreviewDownload(
@@ -682,6 +805,7 @@ async function onPreview() {
     } else {
       speakChunks = buildPreviewSpeakChunks(settings, text, voiceId);
     }
+    speakChunks = applySavedSpeakFilters(speakChunks);
 
     if (runId !== previewRunId) return;
     if (needsAi) {
@@ -698,7 +822,11 @@ async function onPreview() {
         scheme: "single",
         single: { ...settings.single, voiceId },
       };
-      await previewPlayer.speakLine(previewSettings, text);
+      const filteredText = applyVoiceReadFilterRules(
+        text,
+        getVoiceReadSpeakSettings().filterRules,
+      );
+      await previewPlayer.speakLine(previewSettings, filteredText || text);
     }
     if (runId !== previewRunId) return;
   } catch (e) {
@@ -765,8 +893,13 @@ watch(
 const rateDisabled = computed(
   () => !voiceReadEngineSupportsRate(draft.value.engine),
 );
-const showPitchControl = computed(() =>
-  voiceReadEngineSupportsPitch(draft.value.engine),
+const showPitchControl = computed(
+  () =>
+    voiceReadEngineSupportsPitch(draft.value.engine) &&
+    draft.value.engine !== "volcengine",
+);
+const showVolcenginePitchControl = computed(
+  () => draft.value.engine === "volcengine",
 );
 
 const showEmotionToggle = computed(
@@ -1094,6 +1227,70 @@ onUnmounted(() => {
             每次合成都会上传参考音频，长文连读可能较慢。
           </p>
         </div>
+        <div v-if="draft.engine === 'volcengine'" class="settingsRow">
+          <div class="settingsRowMain settingsRowMain--baseline">
+            <span class="settingsLabel short">API Key</span>
+            <div class="aiRowField">
+              <div class="settingsPasswordRow aiPasswordRow">
+                <input
+                  v-model="volcengineApiKeyModel"
+                  class="settingsStretchInput settingsPasswordRow__input"
+                  :type="showVolcengineKey ? 'text' : 'password'"
+                  autocomplete="off"
+                  spellcheck="false"
+                />
+                <button
+                  type="button"
+                  class="btn iconOnly"
+                  :title="showVolcengineKey ? '隐藏' : '显示'"
+                  :aria-label="
+                    showVolcengineKey ? '隐藏 API Key' : '显示 API Key'
+                  "
+                  @click="showVolcengineKey = !showVolcengineKey"
+                >
+                  <span
+                    class="iconSvg"
+                    v-html="showVolcengineKey ? icons.view : icons.viewOff"
+                  />
+                </button>
+                <AppConnectionTestButton
+                  :fingerprint="volcengineConnectionFingerprint"
+                  :on-test="runVolcengineConnectionTest"
+                  title="合成极短测试音频以校验 API Key，可能产生少量费用"
+                />
+              </div>
+            </div>
+          </div>
+          <p class="settingsHint">{{ secretStorageHint }}</p>
+          <p class="settingsHint">
+            使用
+            <a
+              href="https://console.volcengine.com/speech/new/setting/apikeys?projectName=default"
+              target="_blank"
+              rel="noreferrer"
+            >语音技术控制台</a>
+            创建的新版 API Key。
+          </p>
+        </div>
+        <div v-if="draft.engine === 'volcengine'" class="settingsRow">
+          <div class="settingsRowMain settingsRowMain--baseline">
+            <span class="settingsLabel short">采样率</span>
+            <AppCustomSelect
+              class="settingsRowControl"
+              :model-value="volcengineSampleRateModel"
+              :display-label="volcengineSampleRateDisplayLabel"
+              :fixed-top-items="selectListsEmpty"
+              :scroll-items="volcengineSampleRateScrollItems"
+              :fixed-bottom-items="selectListsEmpty"
+              :scroll-max-height="220"
+              ariaLabel="火山引擎采样率"
+              @update:model-value="volcengineSampleRateModel = $event"
+            />
+          </div>
+          <p class="settingsHint">
+            默认 24 kHz。更高采样率音质更好，音频也更大。
+          </p>
+        </div>
       </template>
 
       <div class="settingsRowMain">
@@ -1123,6 +1320,22 @@ onUnmounted(() => {
             :show-percent="false"
             aria-label="音调"
             @update:model-value="patchDraft({ pitch: $event })"
+          />
+        </div>
+      </div>
+
+      <div v-if="showVolcenginePitchControl" class="settingsRowMain">
+        <span class="settingsLabel short"
+          >音调（{{ volcenginePitchDisplayLabel }}）</span
+        >
+        <div class="settingsRowField">
+          <RangeSlider
+            v-model="volcenginePitchModel"
+            :min="VOLCENGINE_PITCH_MIN"
+            :max="VOLCENGINE_PITCH_MAX"
+            :step="1"
+            :show-percent="false"
+            aria-label="音调"
           />
         </div>
       </div>
@@ -1175,41 +1388,69 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <div
-          v-if="showMimoPresetVoicePicker"
-          class="settingsRowMain settingsRowMain--baseline"
-        >
-          <span class="settingsLabel short">旁白</span>
-          <AppCustomSelect
-            class="settingsRowControl"
-            :model-value="draft.multi.narrationVoiceId"
-            :display-label="narrationVoiceDisplayLabel"
-            :placeholder="voiceScrollHasOptions ? '' : '暂无可用语音'"
-            :fixed-top-items="selectListsEmpty"
-            :scroll-items="voiceScrollItems"
-            :fixed-bottom-items="selectListsEmpty"
-            :scroll-max-height="voiceScrollMaxHeight"
-            ariaLabel="旁白语音"
-            @update:model-value="patchMultiVoice({ narrationVoiceId: $event })"
+        <div v-if="showMimoPresetVoicePicker" class="settingsVoiceBlock">
+          <div class="settingsRowMain settingsRowMain--baseline">
+            <span class="settingsLabel short">旁白</span>
+            <AppCustomSelect
+              class="settingsRowControl"
+              :model-value="draft.multi.narrationVoiceId"
+              :display-label="narrationVoiceDisplayLabel"
+              :placeholder="voiceScrollHasOptions ? '' : '暂无可用语音'"
+              :fixed-top-items="selectListsEmpty"
+              :scroll-items="voiceScrollItems"
+              :fixed-bottom-items="selectListsEmpty"
+              :scroll-max-height="voiceScrollMaxHeight"
+              :searchable="draft.engine === 'volcengine'"
+              search-placeholder="搜索音色名称或 ID"
+              ariaLabel="旁白语音"
+              @update:model-value="patchMultiVoice({ narrationVoiceId: $event })"
+            />
+          </div>
+          <SettingsVolcengineVoiceSpeechMode
+            v-if="draft.engine === 'volcengine'"
+            slot-label="旁白"
+            :voice-id="draft.multi.narrationVoiceId"
+            :language="volcengineSlotLanguage('narration')"
+            :dialect="volcengineSlotDialect('narration')"
+            @update:language="
+              patchVolcengineSlot('narration', { language: $event })
+            "
+            @update:dialect="
+              patchVolcengineSlot('narration', { dialect: $event })
+            "
           />
         </div>
 
-        <div
-          v-if="showMimoPresetVoicePicker"
-          class="settingsRowMain settingsRowMain--baseline"
-        >
-          <span class="settingsLabel short">对白</span>
-          <AppCustomSelect
-            class="settingsRowControl"
-            :model-value="draft.multi.dialogueVoiceId"
-            :display-label="dialogueVoiceDisplayLabel"
-            :placeholder="voiceScrollHasOptions ? '' : '暂无可用语音'"
-            :fixed-top-items="selectListsEmpty"
-            :scroll-items="voiceScrollItems"
-            :fixed-bottom-items="selectListsEmpty"
-            :scroll-max-height="voiceScrollMaxHeight"
-            ariaLabel="对白语音"
-            @update:model-value="patchMultiVoice({ dialogueVoiceId: $event })"
+        <div v-if="showMimoPresetVoicePicker" class="settingsVoiceBlock">
+          <div class="settingsRowMain settingsRowMain--baseline">
+            <span class="settingsLabel short">对白</span>
+            <AppCustomSelect
+              class="settingsRowControl"
+              :model-value="draft.multi.dialogueVoiceId"
+              :display-label="dialogueVoiceDisplayLabel"
+              :placeholder="voiceScrollHasOptions ? '' : '暂无可用语音'"
+              :fixed-top-items="selectListsEmpty"
+              :scroll-items="voiceScrollItems"
+              :fixed-bottom-items="selectListsEmpty"
+              :scroll-max-height="voiceScrollMaxHeight"
+              :searchable="draft.engine === 'volcengine'"
+              search-placeholder="搜索音色名称或 ID"
+              ariaLabel="对白语音"
+              @update:model-value="patchMultiVoice({ dialogueVoiceId: $event })"
+            />
+          </div>
+          <SettingsVolcengineVoiceSpeechMode
+            v-if="draft.engine === 'volcengine'"
+            slot-label="对白"
+            :voice-id="draft.multi.dialogueVoiceId"
+            :language="volcengineSlotLanguage('dialogue')"
+            :dialect="volcengineSlotDialect('dialogue')"
+            @update:language="
+              patchVolcengineSlot('dialogue', { language: $event })
+            "
+            @update:dialect="
+              patchVolcengineSlot('dialogue', { dialect: $event })
+            "
           />
         </div>
 
@@ -1246,63 +1487,101 @@ onUnmounted(() => {
         </p>
 
         <template v-if="showDialogueGenderVoices">
-          <div
-            v-if="showMimoPresetVoicePicker"
-            class="settingsRowMain settingsRowMain--baseline"
-          >
-            <span class="settingsLabel short">男声</span>
-            <AppCustomSelect
-              class="settingsRowControl"
-              :model-value="draft.multi.dialogueMaleVoiceId"
-              :display-label="dialogueMaleVoiceDisplayLabel"
-              :placeholder="voiceScrollHasOptions ? '' : '暂无可用语音'"
-              :fixed-top-items="selectListsEmpty"
-              :scroll-items="voiceScrollItems"
-              :fixed-bottom-items="selectListsEmpty"
-              :scroll-max-height="voiceScrollMaxHeight"
-              ariaLabel="对白男声"
-              @update:model-value="patchMultiVoice({ dialogueMaleVoiceId: $event })"
+          <div v-if="showMimoPresetVoicePicker" class="settingsVoiceBlock">
+            <div class="settingsRowMain settingsRowMain--baseline">
+              <span class="settingsLabel short">男声</span>
+              <AppCustomSelect
+                class="settingsRowControl"
+                :model-value="draft.multi.dialogueMaleVoiceId"
+                :display-label="dialogueMaleVoiceDisplayLabel"
+                :placeholder="voiceScrollHasOptions ? '' : '暂无可用语音'"
+                :fixed-top-items="selectListsEmpty"
+                :scroll-items="voiceScrollItems"
+                :fixed-bottom-items="selectListsEmpty"
+                :scroll-max-height="voiceScrollMaxHeight"
+                :searchable="draft.engine === 'volcengine'"
+                search-placeholder="搜索音色名称或 ID"
+                ariaLabel="对白男声"
+                @update:model-value="patchMultiVoice({ dialogueMaleVoiceId: $event })"
+              />
+            </div>
+            <SettingsVolcengineVoiceSpeechMode
+              v-if="draft.engine === 'volcengine'"
+              slot-label="男声"
+              :voice-id="draft.multi.dialogueMaleVoiceId"
+              :language="volcengineSlotLanguage('dialogueMale')"
+              :dialect="volcengineSlotDialect('dialogueMale')"
+              @update:language="
+                patchVolcengineSlot('dialogueMale', { language: $event })
+              "
+              @update:dialect="
+                patchVolcengineSlot('dialogueMale', { dialect: $event })
+              "
             />
           </div>
-          <div
-            v-if="showMimoPresetVoicePicker"
-            class="settingsRowMain settingsRowMain--baseline"
-          >
-            <span class="settingsLabel short">女声</span>
-            <AppCustomSelect
-              class="settingsRowControl"
-              :model-value="draft.multi.dialogueFemaleVoiceId"
-              :display-label="dialogueFemaleVoiceDisplayLabel"
-              :placeholder="voiceScrollHasOptions ? '' : '暂无可用语音'"
-              :fixed-top-items="selectListsEmpty"
-              :scroll-items="voiceScrollItems"
-              :fixed-bottom-items="selectListsEmpty"
-              :scroll-max-height="voiceScrollMaxHeight"
-              ariaLabel="对白女声"
-              @update:model-value="
-                patchMultiVoice({ dialogueFemaleVoiceId: $event })
+          <div v-if="showMimoPresetVoicePicker" class="settingsVoiceBlock">
+            <div class="settingsRowMain settingsRowMain--baseline">
+              <span class="settingsLabel short">女声</span>
+              <AppCustomSelect
+                class="settingsRowControl"
+                :model-value="draft.multi.dialogueFemaleVoiceId"
+                :display-label="dialogueFemaleVoiceDisplayLabel"
+                :placeholder="voiceScrollHasOptions ? '' : '暂无可用语音'"
+                :fixed-top-items="selectListsEmpty"
+                :scroll-items="voiceScrollItems"
+                :fixed-bottom-items="selectListsEmpty"
+                :scroll-max-height="voiceScrollMaxHeight"
+                :searchable="draft.engine === 'volcengine'"
+                search-placeholder="搜索音色名称或 ID"
+                ariaLabel="对白女声"
+                @update:model-value="
+                  patchMultiVoice({ dialogueFemaleVoiceId: $event })
+                "
+              />
+            </div>
+            <SettingsVolcengineVoiceSpeechMode
+              v-if="draft.engine === 'volcengine'"
+              slot-label="女声"
+              :voice-id="draft.multi.dialogueFemaleVoiceId"
+              :language="volcengineSlotLanguage('dialogueFemale')"
+              :dialect="volcengineSlotDialect('dialogueFemale')"
+              @update:language="
+                patchVolcengineSlot('dialogueFemale', { language: $event })
+              "
+              @update:dialect="
+                patchVolcengineSlot('dialogueFemale', { dialect: $event })
               "
             />
           </div>
         </template>
       </template>
 
-      <div
-        v-else-if="showMimoPresetVoicePicker"
-        class="settingsRowMain settingsRowMain--baseline"
-      >
-        <span class="settingsLabel short">音色</span>
-        <AppCustomSelect
-          class="settingsRowControl"
-          :model-value="draft.single.voiceId"
-          :display-label="voiceDisplayLabel"
-          :placeholder="voiceScrollHasOptions ? '' : '暂无可用音色'"
-          :fixed-top-items="selectListsEmpty"
-          :scroll-items="voiceScrollItems"
-          :fixed-bottom-items="selectListsEmpty"
-          :scroll-max-height="voiceScrollMaxHeight"
-          ariaLabel="音色"
-          @update:model-value="patchSingleVoice({ voiceId: $event })"
+      <div v-else-if="showMimoPresetVoicePicker" class="settingsVoiceBlock">
+        <div class="settingsRowMain settingsRowMain--baseline">
+          <span class="settingsLabel short">音色</span>
+          <AppCustomSelect
+            class="settingsRowControl"
+            :model-value="draft.single.voiceId"
+            :display-label="voiceDisplayLabel"
+            :placeholder="voiceScrollHasOptions ? '' : '暂无可用音色'"
+            :fixed-top-items="selectListsEmpty"
+            :scroll-items="voiceScrollItems"
+            :fixed-bottom-items="selectListsEmpty"
+            :scroll-max-height="voiceScrollMaxHeight"
+            :searchable="draft.engine === 'volcengine'"
+            search-placeholder="搜索音色名称或 ID"
+            ariaLabel="音色"
+            @update:model-value="patchSingleVoice({ voiceId: $event })"
+          />
+        </div>
+        <SettingsVolcengineVoiceSpeechMode
+          v-if="draft.engine === 'volcengine'"
+          slot-label="音色"
+          :voice-id="draft.single.voiceId"
+          :language="volcengineSlotLanguage('single')"
+          :dialect="volcengineSlotDialect('single')"
+          @update:language="patchVolcengineSlot('single', { language: $event })"
+          @update:dialect="patchVolcengineSlot('single', { dialect: $event })"
         />
       </div>
 
@@ -1316,6 +1595,7 @@ onUnmounted(() => {
         <button
           type="button"
           class="btn voiceReadPreviewRestoreBtn"
+          size="large"
           @click="restoreDefaultPreviewText"
         >
           恢复默认试听内容
@@ -1332,12 +1612,14 @@ onUnmounted(() => {
             v-if="previewDownload"
             class="voiceReadPreviewDownloadBtn"
             :icon-html="icons.download"
+            large
             title="保存试听音频"
             aria-label="保存试听音频"
             @click="onPreviewDownload"
           />
           <button
             type="button"
+            size="large"
             class="btn voiceReadPreviewBtn"
             :class="[previewButtonClass]"
             :disabled="previewDisabled"
@@ -1347,6 +1629,23 @@ onUnmounted(() => {
             {{ previewButtonLabel }}
           </button>
         </div>
+      </div>
+    </section>
+
+    <section class="aiSection aiSection--compact">
+      <div class="settingsRow">
+        <div class="settingsRowMain">
+          <span class="settingsLabel short settingsLabel--strong">朗读设置</span>
+          <button
+            class="btn"
+            type="button"
+            size="large"
+            @click="emit('openSpeakSettings')"
+          >
+            设置
+          </button>
+        </div>
+        <p class="settingsHint">朗读过滤与自动暂停</p>
       </div>
     </section>
   </div>
@@ -1416,6 +1715,13 @@ onUnmounted(() => {
 
 .settingsLabel--strong {
   font-weight: 600;
+}
+
+.settingsHint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--muted);
 }
 
 .settingsHintWarn {

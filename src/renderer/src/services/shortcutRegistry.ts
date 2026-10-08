@@ -17,6 +17,7 @@ export type ShortcutActionId =
   | "decreaseLineHeight"
   | "increaseLineHeight"
   | "toggleFind"
+  | "openSidebarSearch"
   | "toggleReaderEdit"
   | "editSelectedText"
   | "openChapterRules"
@@ -48,6 +49,7 @@ const FIND_BOOK_PANEL_HIDDEN_ACTION_IDS = new Set<ShortcutActionId>([
   "pickTxtDirectory",
   "openChapterRules",
   "toggleBookmark",
+  "openSidebarSearch",
 ]);
 
 export const SHORTCUT_ACTIONS: ShortcutActionDef[] = [
@@ -109,6 +111,12 @@ export const SHORTCUT_ACTIONS: ShortcutActionDef[] = [
     handlerKey: "increaseLineHeight",
   },
   { id: "toggleFind", scope: "window", desc: "查找", handlerKey: "toggleFind" },
+  {
+    id: "openSidebarSearch",
+    scope: "window",
+    desc: "搜索",
+    handlerKey: "openSidebarSearch",
+  },
   {
     id: "toggleReaderEdit",
     scope: "window",
@@ -210,6 +218,7 @@ export function createDefaultShortcutBindings(isMac: boolean): ShortcutBindingMa
     decreaseLineHeight: `${accel}+[`,
     increaseLineHeight: `${accel}+]`,
     toggleFind: `${accel}+F`,
+    openSidebarSearch: `${accel}+Shift+F`,
     toggleReaderEdit: `${accel}+/`,
     editSelectedText: `${accel}+E`,
     openChapterRules: `${accel}+R`,

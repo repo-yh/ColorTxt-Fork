@@ -1,6 +1,7 @@
 import { engineConfigFingerprint } from "@shared/voiceReadEngineConfig";
 import { voiceReadEmotionCacheToken } from "@shared/voiceReadEmotion";
 import type { VoiceReadEmotionId } from "@shared/voiceReadEmotion";
+import type { VolcengineSpeechSlot } from "@shared/voiceReadVolcengineAudio";
 import type { VoiceReadSettings } from "../../constants/voiceRead";
 import type { VoiceReadSynthesisResult } from "@shared/voiceReadSynthesis";
 
@@ -17,11 +18,17 @@ export function voiceReadChunkCacheKey(
   chunkText: string,
   voiceId: string,
   emotion?: VoiceReadEmotionId,
+  speechSlot?: VolcengineSpeechSlot,
+  language?: string,
+  dialect?: string,
 ): string {
   const t = normalizeLineText(chunkText);
   return [
     settings.engine,
     voiceId.trim(),
+    speechSlot ?? "",
+    language ?? "",
+    dialect ?? "",
     settings.rate,
     settings.pitch,
     engineConfigFingerprint(settings.engineConfig),

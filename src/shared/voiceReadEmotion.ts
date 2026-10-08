@@ -99,6 +99,7 @@ const EMOTION_ENGINE_SUPPORT = new Set<VoiceReadEngineId>([
   "minimax",
   "dashscope",
   "mimo",
+  "volcengine",
 ]);
 
 export function voiceReadEngineSupportsEmotion(
@@ -140,7 +141,31 @@ const DASHSCOPE_EMOTION_INSTRUCTIONS: Record<VoiceReadEmotionLabel, string> = {
   whisper: "语气低语、轻声，像在说悄悄话。",
 };
 
-/** 将情绪转为通义 instruct / MiMo 等自然语言引擎可用的 instructions */
+/** 豆包 2.0 `additions.context_texts`：对话式语音指令（官方示例风格） */
+const VOLCENGINE_EMOTION_INSTRUCTIONS: Record<VoiceReadEmotionLabel, string> = {
+  happy: "你可以用特别开心、轻松愉快的语气说话吗？",
+  sad: "你可以用特别悲伤、低沉、带点压抑的语气说话吗？",
+  worried: "你可以用关切、略带担忧的语气，稍微说慢一点吗？",
+  angry: "你可以用愤怒、强硬、情绪外露的语气说话吗？",
+  fearful: "你可以用害怕、紧张、略显颤抖的语气说话吗？",
+  disgusted: "你可以用厌恶、不屑、带点排斥的语气说话吗？",
+  surprised: "你可以用惊讶、意外、情绪起伏明显的语气说话吗？",
+  calm: "你可以用平静、自然、不夸张的语气说话吗？",
+  fluent: "你可以用生动、富有表现力、节奏流畅的语气说话吗？",
+  whisper: "你能用低语、轻声、像说悄悄话的语气来说吗？",
+};
+
+function wrapVolcengineContextText(raw: string): string | undefined {
+  const t = raw.trim().replace(/[。．.！!]+$/u, "");
+  if (!t) return undefined;
+  if (/^(你|请用|嗯)/u.test(t) || /[吗？?]$/u.test(t)) return t;
+  let core = t.replace(/^语气/u, "").trim();
+  core = core.replace(/的语气$/u, "").trim();
+  if (!core) return undefined;
+  return `你可以用${core}的语气说话吗？`;
+}
+
+/** 将情绪转为支持自然语言语音指令的引擎可用文本 */
 export function mapEmotionForNaturalLanguageEngine(
   emotion: VoiceReadEmotionId | undefined,
 ): string | undefined {
@@ -155,6 +180,17 @@ export function mapEmotionForDashScope(
   emotion: VoiceReadEmotionId | undefined,
 ): string | undefined {
   return mapEmotionForNaturalLanguageEngine(emotion);
+}
+
+/** 火山 2.0：写入 `additions.context_texts`，不用 `audio_params.emotion` */
+export function mapEmotionForVolcengine(
+  emotion: VoiceReadEmotionId | undefined,
+): string | undefined {
+  if (!emotion || emotion === VOICE_READ_EMOTION_AUTO) return undefined;
+  if (isVoiceReadEmotionEnumLabel(emotion)) {
+    return VOLCENGINE_EMOTION_INSTRUCTIONS[emotion];
+  }
+  return wrapVolcengineContextText(emotion);
 }
 
 function voiceReadEmotionToMiniMaxEnum(

@@ -596,6 +596,8 @@ const BLOCK_INNER =
 
 function hasBlockStructureInside(el: Element): boolean {
   if (el.querySelector(BLOCK_INNER) !== null) return true;
+  /** `<br>` 是软换行，textContent 不含换行；合成一行会把 Foliate 里的分行全部粘掉 */
+  if (el.querySelector("br, hr") !== null) return true;
   /** 仅含插图、无 p/h* 的容器若走「合成一行」分支会漏掉 img（textContent 为空） */
   if (el.querySelector("img, image") !== null) return true;
   /**
@@ -630,6 +632,7 @@ async function walkInlineNodes(
   htmlDirInZip: string,
   currentDocZipPath: string,
   ctx: EpubImageContext,
+  onBreak: () => void,
 ): Promise<void> {
   for (const node of parent.childNodes) {
     if (node.nodeType === Node.TEXT_NODE) {
@@ -640,7 +643,7 @@ async function walkInlineNodes(
     const el = node as Element;
     const tag = el.tagName.toLowerCase();
     if (tag === "br" || tag === "hr") {
-      acc.text += " ";
+      onBreak();
       continue;
     }
     /** 注音/括注：不并入正文，避免「第一折」旁多出拼音或半角括号 */
@@ -694,7 +697,14 @@ async function walkInlineNodes(
     const epubType =
       el.getAttribute("epub:type") || el.getAttributeNS(epubNs, "type");
     if (epubType === "noteref") {
-      await walkInlineNodes(el, acc, htmlDirInZip, currentDocZipPath, ctx);
+      await walkInlineNodes(
+        el,
+        acc,
+        htmlDirInZip,
+        currentDocZipPath,
+        ctx,
+        onBreak,
+      );
       continue;
     }
     if (
@@ -728,7 +738,14 @@ async function walkInlineNodes(
       tag === "data" ||
       tag === "time"
     ) {
-      await walkInlineNodes(el, acc, htmlDirInZip, currentDocZipPath, ctx);
+      await walkInlineNodes(
+        el,
+        acc,
+        htmlDirInZip,
+        currentDocZipPath,
+        ctx,
+        onBreak,
+      );
     }
   }
 }
@@ -795,7 +812,7 @@ async function paragraphToLines(
       return;
     }
     if (tag === "br" || tag === "hr") {
-      acc.text += " ";
+      flushTextLines();
       return;
     }
     if (tag === "a") {
@@ -845,12 +862,26 @@ async function paragraphToLines(
     const epubType =
       el.getAttribute("epub:type") || el.getAttributeNS(epubNs, "type");
     if (epubType === "noteref") {
-      await walkInlineNodes(el, acc, htmlDirInZip, currentDocZipPath, ctx);
+      await walkInlineNodes(
+        el,
+        acc,
+        htmlDirInZip,
+        currentDocZipPath,
+        ctx,
+        flushTextLines,
+      );
       return;
     }
     const nestedImg = el.querySelector("img, image");
     if (!nestedImg) {
-      await walkInlineNodes(el, acc, htmlDirInZip, currentDocZipPath, ctx);
+      await walkInlineNodes(
+        el,
+        acc,
+        htmlDirInZip,
+        currentDocZipPath,
+        ctx,
+        flushTextLines,
+      );
       return;
     }
     for (const c of el.childNodes) {
@@ -1001,6 +1032,10 @@ async function emitFlowBlock(
   const tag = el.tagName.toLowerCase();
 
   if (tag === "script" || tag === "style" || tag === "noscript") {
+    return;
+  }
+
+  if (tag === "br" || tag === "hr") {
     return;
   }
 

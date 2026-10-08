@@ -632,6 +632,7 @@ export function getAnnotationQuoteFromHits(
   const lineCount = model.getLineCount();
   if (lineCount <= 0) return null;
   const parts: string[] = [];
+  const seenDisplayLines = new Set<number>();
   for (
     let physicalLine = ann.startPhysicalLine;
     physicalLine <= ann.endPhysicalLine;
@@ -639,9 +640,11 @@ export function getAnnotationQuoteFromHits(
   ) {
     const displayLine = Math.max(1, Math.floor(physicalToDisplay(physicalLine)));
     if (displayLine < 1 || displayLine > lineCount) return null;
+    if (seenDisplayLines.has(displayLine)) continue;
     const hits = hitsByLine.get(displayLine);
     const hit = hits?.find((h) => h.annotationId === ann.id);
-    if (!hit) return null;
+    if (!hit) continue;
+    seenDisplayLines.add(displayLine);
     let line: string;
     try {
       line = model.getLineContent(displayLine);
@@ -674,6 +677,7 @@ export type AnnotationDisplayQuoteContext = {
 /**
  * 标注引用原文（侧栏 / 导出 / 存盘 displayText）。
  * 优先级：hits 表 → Monaco 区间 → 展示行数组 → 物理 text。
+ * 不 trim：选区内的行首全角缩进等空白须原样保留。
  */
 export function resolveAnnotationDisplayQuote(
   ann: ReaderAnnotationRecord,
@@ -685,7 +689,7 @@ export function resolveAnnotationDisplayQuote(
         ctx.getPhysicalLineContent,
         annotationPhysicalRange(ann),
         "physical",
-      ).trim() || ann.text
+      ) || ann.text
     );
   }
   if (ann.stale) return annotationQuoteText(ann);
@@ -701,7 +705,7 @@ export function resolveAnnotationDisplayQuote(
           ctx.physicalToDisplay,
           ctx.hitsByLine,
         );
-        if (fromHits && fromHits.trim().length > 0) return fromHits.trim();
+        if (fromHits && fromHits.length > 0) return fromHits;
       }
       const fromRange = getTextInPhysicalRange(
         model,
@@ -709,7 +713,7 @@ export function resolveAnnotationDisplayQuote(
         ctx.physicalToDisplay,
         ctx.getPhysicalLineContent,
         ctx.columnMap,
-      ).trim();
+      );
       if (fromRange.length > 0) return fromRange;
     } catch {
       /* Monaco 尚未就绪或行号越界 */
@@ -723,7 +727,7 @@ export function resolveAnnotationDisplayQuote(
       annotationPhysicalRange(ann),
       ctx.physicalToDisplay,
       ctx.columnMap,
-    ).trim();
+    );
     if (live.length > 0) return live;
   } catch {
     /* fall through */
