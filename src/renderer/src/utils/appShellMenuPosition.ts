@@ -80,3 +80,16 @@ export function computeAnchoredMenuPosition(
 
   return clampRectInViewport(left, top, w, h, margin);
 }
+
+/** 垂直翻转 above ↔ below；beside / 其它原样返回 */
+export function flipAnchoredMenuVertical(
+  placement: AnchoredMenuPlacement,
+): AnchoredMenuPlacement {
+  if (placement.startsWith("below")) {
+    return placement.replace("below", "above") as AnchoredMenuPlacement;
+  }
+  if (placement.startsWith("above")) {
+    return placement.replace("above", "below") as AnchoredMenuPlacement;
+  }
+  return placement;
+}

@@ -48,6 +48,12 @@ export const WINDOW_LOCAL_MAIN_SETTING_KEYS: ReadonlySet<string> = new Set([
   "fastScrollSensitivity",
   "stickyChapterTitleEnabled",
   "readerClickMode",
+  "readingRulerEnabled",
+  "readingRulerFocusLines",
+  "readingRulerDimOpacity",
+  "readingRulerDimStickyTitle",
+  "readingRulerTransitionEnabled",
+  "markdownImageHeightPx",
   "chapterNavToolbarEnabled",
   "readerEditShowLineNumbers",
   "readerEditMinimap",
@@ -64,6 +70,7 @@ export const WINDOW_LOCAL_MAIN_SETTING_KEYS: ReadonlySet<string> = new Set([
   "voiceRead",
   "sidebarWidth",
   "showSidebar",
+  "isMinimalistView",
 ]);
 
 export function readPersistedMainSettingsObject(): Record<string, unknown> {
@@ -116,6 +123,12 @@ export function mergeLocalPatchOntoDiskSettings(options: {
     next[key] = value;
     writtenKeys.push(key);
   }
+
+  delete next.readerPaletteColorEnabledOverridesLight;
+  delete next.readerPaletteColorEnabledOverridesDark;
+  delete next.readerPaletteSelectedPresetId;
+  delete next.readerPaletteOverridesLight;
+  delete next.readerPaletteOverridesDark;
 
   return { next, writtenKeys };
 }

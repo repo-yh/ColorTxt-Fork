@@ -16,19 +16,31 @@ export type ShortcutActionId =
   | "increaseFontSize"
   | "decreaseLineHeight"
   | "increaseLineHeight"
+  | "decreaseLetterSpacing"
+  | "increaseLetterSpacing"
+  | "decreaseParagraphSpacing"
+  | "increaseParagraphSpacing"
+  | "decreaseHorizontalInset"
+  | "increaseHorizontalInset"
   | "toggleFind"
   | "openSidebarSearch"
+  | "openSidebarFiles"
+  | "openSidebarChapters"
+  | "openSidebarAiAssistant"
   | "toggleReaderEdit"
   | "editSelectedText"
   | "openChapterRules"
   | "toggleBookmark"
   | "toggleSidebar"
+  | "toggleMinimalistView"
   | "toggleFullscreen"
+  | "toggleTheme"
   | "openSettings"
   | "openColorScheme"
   | "openFindBook"
   | "openBookSource"
   | "openNewWindow"
+  | "enterStealthReader"
   | "toggleAllWindowsVisibility";
 
 type ShortcutActionDef = {
@@ -50,6 +62,9 @@ const FIND_BOOK_PANEL_HIDDEN_ACTION_IDS = new Set<ShortcutActionId>([
   "openChapterRules",
   "toggleBookmark",
   "openSidebarSearch",
+  "openSidebarFiles",
+  "openSidebarChapters",
+  "openSidebarAiAssistant",
 ]);
 
 export const SHORTCUT_ACTIONS: ShortcutActionDef[] = [
@@ -110,12 +125,66 @@ export const SHORTCUT_ACTIONS: ShortcutActionDef[] = [
     desc: "加大行间距",
     handlerKey: "increaseLineHeight",
   },
+  {
+    id: "decreaseLetterSpacing",
+    scope: "window",
+    desc: "减小字间距",
+    handlerKey: "decreaseLetterSpacing",
+  },
+  {
+    id: "increaseLetterSpacing",
+    scope: "window",
+    desc: "加大字间距",
+    handlerKey: "increaseLetterSpacing",
+  },
+  {
+    id: "decreaseParagraphSpacing",
+    scope: "window",
+    desc: "减小段间距",
+    handlerKey: "decreaseParagraphSpacing",
+  },
+  {
+    id: "increaseParagraphSpacing",
+    scope: "window",
+    desc: "加大段间距",
+    handlerKey: "increaseParagraphSpacing",
+  },
+  {
+    id: "decreaseHorizontalInset",
+    scope: "window",
+    desc: "减小左右边距",
+    handlerKey: "decreaseHorizontalInset",
+  },
+  {
+    id: "increaseHorizontalInset",
+    scope: "window",
+    desc: "加大左右边距",
+    handlerKey: "increaseHorizontalInset",
+  },
   { id: "toggleFind", scope: "window", desc: "查找", handlerKey: "toggleFind" },
   {
     id: "openSidebarSearch",
     scope: "window",
-    desc: "搜索",
+    desc: "侧边栏：搜索",
     handlerKey: "openSidebarSearch",
+  },
+  {
+    id: "openSidebarFiles",
+    scope: "window",
+    desc: "侧边栏：文件",
+    handlerKey: "openSidebarFiles",
+  },
+  {
+    id: "openSidebarChapters",
+    scope: "window",
+    desc: "侧边栏：章节",
+    handlerKey: "openSidebarChapters",
+  },
+  {
+    id: "openSidebarAiAssistant",
+    scope: "window",
+    desc: "侧边栏：AI 阅读助手",
+    handlerKey: "openSidebarAiAssistant",
   },
   {
     id: "toggleReaderEdit",
@@ -148,10 +217,10 @@ export const SHORTCUT_ACTIONS: ShortcutActionDef[] = [
     handlerKey: "toggleSidebar",
   },
   {
-    id: "toggleFullscreen",
+    id: "toggleTheme",
     scope: "window",
-    desc: "进入/退出全屏阅读",
-    handlerKey: "toggleFullscreen",
+    desc: "切换主题色",
+    handlerKey: "toggleTheme",
   },
   { id: "openSettings", scope: "window", desc: "设置", handlerKey: "openSettings" },
   {
@@ -171,6 +240,24 @@ export const SHORTCUT_ACTIONS: ShortcutActionDef[] = [
     scope: "window",
     desc: "书源管理",
     handlerKey: "openBookSource",
+  },
+  {
+    id: "enterStealthReader",
+    scope: "window",
+    desc: "进入/退出摸鱼模式",
+    handlerKey: "enterStealthReader",
+  },
+  {
+    id: "toggleMinimalistView",
+    scope: "window",
+    desc: "进入/退出极简视图",
+    handlerKey: "toggleMinimalistView",
+  },
+  {
+    id: "toggleFullscreen",
+    scope: "window",
+    desc: "进入/退出全屏阅读",
+    handlerKey: "toggleFullscreen",
   },
   {
     id: "openNewWindow",
@@ -217,19 +304,31 @@ export function createDefaultShortcutBindings(isMac: boolean): ShortcutBindingMa
     increaseFontSize: `${accel}+=`,
     decreaseLineHeight: `${accel}+[`,
     increaseLineHeight: `${accel}+]`,
+    decreaseLetterSpacing: `${accel}+Shift+[`,
+    increaseLetterSpacing: `${accel}+Shift+]`,
+    decreaseParagraphSpacing: `${accel}+;`,
+    increaseParagraphSpacing: `${accel}+'`,
+    decreaseHorizontalInset: `${accel}+Shift+,`,
+    increaseHorizontalInset: `${accel}+Shift+.`,
     toggleFind: `${accel}+F`,
     openSidebarSearch: `${accel}+Shift+F`,
+    openSidebarFiles: `${accel}+Shift+E`,
+    openSidebarChapters: `${accel}+Shift+C`,
+    openSidebarAiAssistant: `${accel}+Shift+A`,
     toggleReaderEdit: `${accel}+/`,
     editSelectedText: `${accel}+E`,
     openChapterRules: `${accel}+R`,
     toggleBookmark: `${accel}+D`,
     toggleSidebar: `${accel}+B`,
+    toggleMinimalistView: "F10",
     toggleFullscreen: "F11",
+    toggleTheme: "F2",
     openSettings: "F5",
     openColorScheme: "F6",
     openFindBook: "F7",
     openBookSource: "F8",
     openNewWindow: `${accel}+Shift+N`,
+    enterStealthReader: "F9",
     toggleAllWindowsVisibility: "Control+`",
   };
 }

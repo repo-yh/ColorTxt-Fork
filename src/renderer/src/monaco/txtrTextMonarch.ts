@@ -13,9 +13,11 @@ export type { TxtrMonarchHighlightOptions };
 /**
  * 不含成对括号开符（由 root 中优先匹配并进入 string/bracket 状态）。
  * 保留闭符与独立标点，便于未配对时在 root 仍显示为标点。
- * 半角 < > 仅作标点（比较符）；全角 ＜ 为开符、未配对的 ＞ 作标点
+ * 半角 < > 仅作标点（比较符）；全角 ＜ 为开符、未配对的 ＞ 作标点。
+ * ‹› 〈〉 «» ﹝﹞ 〔〕 ［］ 与语音朗读过滤一致，按括号配对。
  */
-const PUNCTUATION_CLASS = /[,，.。!！?？:：;；、）\]\}｝】〗》＞><…—\-]/;
+const PUNCTUATION_CLASS =
+  /[,，.。!！?？:：;；、）\]\}｝】〗》＞>〉›»﹞〕］<…—\-]/;
 
 /**
  * BMP 拉丁字母：ASCII、全角拉丁、Latin-1 字母段（跳过 × U+00D7、÷ U+00F7）、Latin Extended-A/B（含拼音 ā/ō/ē/ǎ/ǖ 等）。
@@ -34,8 +36,48 @@ const LATIN_WORD = new RegExp(
   `(?:[${LATIN_LETTERS_BMP}][${COMBINING_DIACRITIC_BMP}]*)+`,
 );
 
-const NUMBER = /[0-9０-９]+/;
-const SPECIAL_MARKERS = /[·•▪*＊✲❈※☆♡♥○●√✔☑×✘☒]/;
+/** ASCII / 全角数字，圈号/括注/罗马数字，以及上标、下标、分数 */
+const NUMBER = new RegExp(
+  "[0-9\\uFF10-\\uFF19" +
+    "\\u00B2\\u00B3\\u00B9\\u00BA\\u00BC-\\u00BE" + // ²³¹º¼½¾
+    "\\u2070\\u2074-\\u2079\\u207F" + // ⁰⁴⁻⁹ⁿ
+    "\\u2080-\\u2089" + // ₀-₉
+    "\\u2150-\\u215E" + // ⅐⅑⅒⅓⅔⅕…⅞
+    "\\u2160-\\u216B" + // Ⅰ-Ⅻ
+    "\\u2170-\\u2179" + // ⅰ-ⅹ
+    "\\u2460-\\u249B" + // ①-⑳⑴-⒇⒈-⒛
+    "\\u2776-\\u277F" + // ❶-❿
+    "\\u3220-\\u3229" + // ㈠-㈩
+    "]+",
+);
+/**
+ * 网文分隔/装饰符号（几何、花色、星月、勾叉、花号、音符、圈字、箭头、斜线/竖线等），
+ * 以及单位、货币、百分、比较/运算符号。
+ * 不含成对引号/括号开闭符（走标点与子状态）。
+ * `ml` / `mol` 仍走字母，避免 html / molecule 被切开。
+ */
+const SPECIAL_MARKERS = new RegExp(
+  "[" +
+    "·•▪‥∷*＊✲❈※✿❀" +
+    "△▲▽▼○●◇◆□■☆★▷▶◁◀◎◈▣◐◑◮◪" +
+    "♤♠♡♥❤❥ღ♢♦♧♣" +
+    "☀☽☾♀♂☥☯" +
+    "☑☒√×✔✘✖✚" +
+    "♩♪♫♬♭♯♮§¶‖" +
+    "®©™№㊤㊥㊦㊧㊨㊣✪㈱㏂㏘" +
+    "↑↗→↘↓↙←↖↕↔➷➹✉" +
+    "/|\\\\／｜＼" +
+    "′″°℃℉%‰％$¥￥£€￠฿￡" +
+    "㎎㎏㎜㎝㎞㎡㏄㏕㏒㏑μ" +
+    "∶∵∴∑∏∅⊙≤≦≥≧≠≡≈≮≯＋－÷＝±" +
+    "]",
+);
+
+function specialMarkerRules(
+  token: string,
+): monaco.languages.IMonarchLanguageRule[] {
+  return [[/μm/, token], [/m\u00B3/, token], [SPECIAL_MARKERS, token]];
+}
 
 /** 在否定字符类中需要转义的闭括号字符 */
 function escapeForNegatedClass(closeChar: string): string {
@@ -57,7 +99,9 @@ function innerRestRe(
   stopBeforeBracketOpeners: boolean,
 ): RegExp {
   const e = escapeForNegatedClass(closeChar);
-  const noBracketOpen = stopBeforeBracketOpeners ? "《＜（【〖｛\\[\\(\\{" : "";
+  const noBracketOpen = stopBeforeBracketOpeners
+    ? "《＜（【〖｛\\[\\(\\{‹〈«﹝〔［"
+    : "";
   return new RegExp(`[^${e}\\r\\n0-9${LATIN_LETTERS_BMP}${noBracketOpen}]`);
 }
 
@@ -66,9 +110,15 @@ function bracketOpenerRules(): monaco.languages.IMonarchLanguageRule[] {
   return [
     [/《/, { token: "txtr.punctuation", next: "bracketBook" }],
     [/＜/, { token: "txtr.punctuation", next: "bracketAngleFull" }],
+    [/〈/, { token: "txtr.punctuation", next: "bracketAngleCjk" }],
+    [/«/, { token: "txtr.punctuation", next: "bracketGuillemet" }],
+    [/‹/, { token: "txtr.punctuation", next: "bracketAngleQuoteSingle" }],
     [/\(/, { token: "txtr.punctuation", next: "bracketParenAscii" }],
     [/（/, { token: "txtr.punctuation", next: "bracketParenFull" }],
+    [/〔/, { token: "txtr.punctuation", next: "bracketTortoise" }],
+    [/﹝/, { token: "txtr.punctuation", next: "bracketOrnateParen" }],
     [/\[/, { token: "txtr.punctuation", next: "bracketSquareAscii" }],
+    [/［/, { token: "txtr.punctuation", next: "bracketSquareFull" }],
     [/【/, { token: "txtr.punctuation", next: "bracketCjk" }],
     [/〖/, { token: "txtr.punctuation", next: "bracketFancy" }],
     [/\{/, { token: "txtr.punctuation", next: "bracketCurlyAscii" }],
@@ -102,14 +152,13 @@ function rulesInsideDelimited(
     ...highlightRules,
     ...(bracketOpenersInQuote ? bracketOpenerRules() : []),
     [closeMatch, { token: "txtr.punctuation", next: "@pop" }],
-    [
-      SPECIAL_MARKERS,
+    ...specialMarkerRules(
       tokenInsideDelimited(
         innerToken,
         "txtr.specialMarker",
         colorEnabled.txtrSpecialMarker,
       ),
-    ],
+    ),
     [
       NUMBER,
       tokenInsideDelimited(innerToken, "txtr.number", colorEnabled.txtrNumber),
@@ -170,7 +219,7 @@ export function createTxtrTextMonarchLanguage(
         [/\u201C/, { token: "txtr.punctuation", next: "stringLdquo" }],
         [/\u2018/, { token: "txtr.punctuation", next: "stringLsquo" }],
         ...hlRules,
-        [SPECIAL_MARKERS, "txtr.specialMarker"],
+        ...specialMarkerRules("txtr.specialMarker"),
         [NUMBER, "txtr.number"],
         [LATIN_WORD, "txtr.english"],
         [PUNCTUATION_CLASS, "txtr.punctuation"],
@@ -247,6 +296,30 @@ export function createTxtrTextMonarchLanguage(
         insideColor,
       ),
 
+      bracketAngleCjk: rulesInsideDelimited(
+        /〉/,
+        "〉",
+        "txtr.bracketInner",
+        hlRules,
+        insideColor,
+      ),
+
+      bracketGuillemet: rulesInsideDelimited(
+        /»/,
+        "»",
+        "txtr.bracketInner",
+        hlRules,
+        insideColor,
+      ),
+
+      bracketAngleQuoteSingle: rulesInsideDelimited(
+        /›/,
+        "›",
+        "txtr.bracketInner",
+        hlRules,
+        insideColor,
+      ),
+
       bracketParenAscii: rulesInsideDelimited(
         /\)/,
         ")",
@@ -263,9 +336,33 @@ export function createTxtrTextMonarchLanguage(
         insideColor,
       ),
 
+      bracketTortoise: rulesInsideDelimited(
+        /〕/,
+        "〕",
+        "txtr.bracketInner",
+        hlRules,
+        insideColor,
+      ),
+
+      bracketOrnateParen: rulesInsideDelimited(
+        /﹞/,
+        "﹞",
+        "txtr.bracketInner",
+        hlRules,
+        insideColor,
+      ),
+
       bracketSquareAscii: rulesInsideDelimited(
         /\]/,
         "]",
+        "txtr.bracketInner",
+        hlRules,
+        insideColor,
+      ),
+
+      bracketSquareFull: rulesInsideDelimited(
+        /］/,
+        "］",
         "txtr.bracketInner",
         hlRules,
         insideColor,

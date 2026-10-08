@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import AppModal from "./AppModal.vue";
 import {
   shortcutActionsForPanel,
@@ -7,6 +7,7 @@ import {
   type ShortcutBindingMap,
   type ShortcutPanelContext,
 } from "../services/shortcutRegistry";
+import { setWindowShortcutRecordingHandler } from "../services/shortcutService";
 import {
   acceleratorToDisplayKeys,
   acceleratorToDisplayText,
@@ -83,12 +84,14 @@ const pendingRecordedDisplayText = computed(() => {
 });
 
 async function openEditModal(id: ShortcutActionId) {
-  if (editingId.value === null) {
-    await window.colorTxt.suspendGlobalShortcutsForRecording();
-  }
+  const firstOpen = editingId.value === null;
   editingId.value = id;
   pendingRecordedAccel.value = "";
   recordError.value = "";
+  if (firstOpen) {
+    setWindowShortcutRecordingHandler(onRecordInputKeydown);
+    await window.colorTxt.suspendGlobalShortcutsForRecording();
+  }
   void nextTick(() => {
     recordInputRef.value?.focus();
   });
@@ -96,6 +99,9 @@ async function openEditModal(id: ShortcutActionId) {
 
 async function closeEditModal() {
   const wasOpen = editingId.value !== null;
+  if (wasOpen) {
+    setWindowShortcutRecordingHandler(null);
+  }
   editingId.value = null;
   pendingRecordedAccel.value = "";
   recordError.value = "";
@@ -104,18 +110,24 @@ async function closeEditModal() {
   }
 }
 
+onBeforeUnmount(() => {
+  void closeEditModal();
+});
+
 async function onRecordInputKeydown(ev: KeyboardEvent) {
   const action = editingAction.value;
   if (!action) return;
   if (ev.isComposing || ev.key === "Process" || ev.key === "Dead") {
     ev.preventDefault();
     ev.stopPropagation();
+    ev.stopImmediatePropagation();
     return;
   }
 
   if (ev.key === "Enter") {
     ev.preventDefault();
     ev.stopPropagation();
+    ev.stopImmediatePropagation();
     const nextAccel = normalizeAccelerator(pendingRecordedAccel.value);
     if (!nextAccel) {
       void closeEditModal();
@@ -143,6 +155,7 @@ async function onRecordInputKeydown(ev: KeyboardEvent) {
     if (pendingRecordedAccel.value) {
       ev.preventDefault();
       ev.stopPropagation();
+      ev.stopImmediatePropagation();
       pendingRecordedAccel.value = "";
       recordError.value = "";
     }
@@ -152,6 +165,7 @@ async function onRecordInputKeydown(ev: KeyboardEvent) {
 
   ev.preventDefault();
   ev.stopPropagation();
+  ev.stopImmediatePropagation();
   pendingRecordedAccel.value = accelFromKeyEvent(ev);
   const preview = { ...draft.value, [action.id]: pendingRecordedAccel.value };
   const conflicts = collectShortcutConflicts(preview);

@@ -101,6 +101,7 @@ import { useAppReaderAnnotations } from "./composables/useAppReaderAnnotations";
 import { useAppReaderChrome } from "./composables/useAppReaderChrome";
 import { useAppReadingProgress } from "./composables/useAppReadingProgress";
 import { useAppReaderUiPrefs } from "./composables/useAppReaderUiPrefs";
+import { useReaderHudTip } from "./composables/useReaderHudTip";
 import { useAppShellThemeWatch } from "./composables/useAppShellThemeWatch";
 import { useAppSidebarSearch } from "./composables/useAppSidebarSearch";
 import { useAppSyncCurrentFileWatch } from "./composables/useAppSyncCurrentFileWatch";
@@ -130,6 +131,7 @@ import {
 } from "./stores/fileMetaStore";
 import {
   applyReaderSurfaceToDocument,
+  applyReaderBackgroundForPalettes,
   defaultCompressBlankKeepOneBlank,
   defaultChapterTitleBlankMode,
   defaultCompressBlankLines,
@@ -150,6 +152,15 @@ import {
   clampFastScrollSensitivity,
   defaultStickyChapterTitleEnabled,
   defaultReaderClickMode,
+  defaultReadingRulerEnabled,
+  defaultReadingRulerFocusLines,
+  defaultReadingRulerDimOpacity,
+  defaultReadingRulerDimStickyTitle,
+  defaultReadingRulerTransitionEnabled,
+  clampReadingRulerFocusLines,
+  clampReadingRulerDimOpacity,
+  defaultMarkdownImageHeightPx,
+  clampMarkdownImageHeightPx,
   defaultChapterNavToolbarEnabled,
   defaultReaderEditShowLineNumbers,
   defaultReaderEditMinimap,
@@ -165,17 +176,14 @@ import {
   clampLetterSpacingPx,
   defaultReaderHorizontalInsetPx,
   clampReaderHorizontalInsetPx,
-  defaultReaderPaletteDark,
-  defaultReaderPaletteLight,
+  defaultReaderBackgroundState,
+  cloneReaderBackgroundState,
   defaultReaderTheme,
   defaultRecentFilesHistoryLimit,
   defaultDragDropAction,
   type DragDropAction,
   defaultWebDisplayEnabled,
   mergeReaderPaletteColorEnabled,
-  mergeReaderSurfacePalette,
-  overridesFromColorEnabled,
-  overridesFromFullPalette,
   resolveEffectiveReaderPalette,
   defaultRestoreSessionOnStartup,
   defaultSyncCurrentFile,
@@ -200,8 +208,12 @@ import {
   APP_DISPLAY_NAME,
   type ChapterTitleBlankMode,
   type ReaderSurfaceColorEnabled,
-  type ReaderSurfacePalette,
 } from "./constants/appUi";
+import {
+  toPersistedReaderPaletteState,
+  resolveReaderPaletteBySelectedId,
+  type ReaderPalettePreset,
+} from "./constants/readerPalettePresets";
 import {
   type TextConvertWidthMode,
   type TextConvertZhMode,
@@ -250,6 +262,7 @@ import { appToast } from "./services/appToast";
 import { appLoading } from "./services/appLoading";
 import { appAlert, appConfirm } from "./services/appDialog";
 import { mergeShortcutBindings } from "./services/shortcutUtils";
+import { loadStealthReaderSettings } from "./utils/stealthReaderSettings";
 import {
   syncTxtFilesCategoriesAfterCatalogEdit,
   type TxtFileItem,
@@ -267,6 +280,7 @@ import {
 } from "./constants/fileCategories";
 
 const readerRef = ref<InstanceType<typeof ReaderMain> | null>(null);
+const readerEditMode = ref(false);
 /** 全屏侧栏文件列表 Teleport 弹层（分类/筛选下拉、右键菜单等） */
 const fullscreenFileListPopoversOpen = ref(false);
 /** AI 阅读助手：历史/导出/模型菜单等 Teleport；与文件列表合并后交给全屏侧栏收起逻辑 */
@@ -281,17 +295,25 @@ const fullscreenSidebarPopoversSuppressCollapse = computed(
     fullscreenCharacterDrawerOpen.value ||
     fullscreenCharacterPopoversOpen.value,
 );
-/** 全屏下打开设置/配色弹框期间，禁用左缘感应自动唤起侧栏 */
-const suppressFullscreenSidebarHover = ref(false);
 const chrome = useAppReaderChrome({
   readerRef,
   fullscreenSidebarPopoversSuppressCollapse,
-  suppressFullscreenSidebarHover,
+  readerEditMode,
 });
 const {
+  readerHudTipVisible,
+  readerHudTipFading,
+  readerHudTipText,
+  showReaderHudTip,
+} = useReaderHudTip();
+const {
   isFullscreenView,
+  isMinimalistView,
+  chromeAutoHide,
+  toggleMinimalistView,
   showFullscreenTip,
   fullscreenTipFading,
+  fullscreenTipText,
   showFullscreenHeader,
   fullscreenHeaderOverlayRef,
   showFullscreenFooter,
@@ -316,6 +338,8 @@ const {
   dismissFullscreenPanelsOnLayoutPointerDown,
   endSidebarResize,
   dismissFullscreenChromeForNativeExit,
+  handleReaderChromeEscape,
+  revealFullscreenSidebar,
   fullscreenCursorHidden,
   bumpFullscreenCursorIdle,
   recordFullscreenPointer,
@@ -353,19 +377,6 @@ const showSettingsPanel = ref(false);
 const showColorSchemePanel = ref(false);
 const showWebDavPanel = ref(false);
 const appOverlaysRef = ref<InstanceType<typeof AppOverlays> | null>(null);
-watch(
-  () =>
-    [
-      showSettingsPanel.value,
-      showColorSchemePanel.value,
-      showWebDavPanel.value,
-    ] as const,
-  ([settingsOpen, colorOpen, webDavOpen]) => {
-    suppressFullscreenSidebarHover.value =
-      settingsOpen || colorOpen || webDavOpen;
-  },
-  { immediate: true },
-);
 const showChapterRulePanel = ref(false);
 const showReplaceRulePanel = ref(false);
 const showReplaceFileModal = ref(false);
@@ -421,6 +432,8 @@ function onReplaceRulesChanged() {
   refreshReplaceRulesCache();
   reformatReaderDisplayPreservingViewport();
 }
+
+let offStealthOwnerProgress: (() => void) | undefined;
 
 const currentFile = ref<string | null>(null);
 const loading = ref(false);
@@ -767,10 +780,17 @@ onMounted(() => {
   };
   // 主窗口推送找书/设置共用的 HTTP 代理（词典等网络请求依赖主进程默认代理）
   syncPersistedFindBookProxyToMain();
+  offStealthOwnerProgress = window.colorTxt.onStealthOwnerProgress((payload) => {
+    // 摸鱼期间不同步；仅退出时 focus=true 跳回主阅读器行号
+    if (payload.focus) {
+      readerRef.value?.jumpToLine(payload.line, false);
+    }
+  });
 });
 
 onBeforeUnmount(() => {
   window.removeEventListener(appReplaceRulesChangedEvent, onReplaceRulesChanged);
+  offStealthOwnerProgress?.();
   endWebDavBookPackProgress();
 });
 
@@ -827,13 +847,13 @@ const showReaderEmptyHint = computed(
     !readerEditMode.value &&
     totalCharCount.value === 0,
 );
-/** 非全屏：侧栏壳（含活动栏）始终占位；全屏：仅浮动展开时显示整块 */
+/** 非自动隐藏：侧栏壳（含活动栏）始终占位；全屏 / 极简：仅浮动展开时显示整块 */
 const sidebarShellVisible = computed(
-  () => !isFullscreenView.value || showFullscreenSidebar.value,
+  () => !chromeAutoHide.value || showFullscreenSidebar.value,
 );
-/** 非全屏且收起面板时仅活动栏宽度；其余与 `sidebarWidthForLayout` 一致 */
+/** 自动隐藏时用完整侧栏宽；窗口态收起面板时仅活动栏宽度 */
 const sidebarPaneLayoutWidth = computed(() => {
-  if (isFullscreenView.value) return sidebarWidthForLayout.value;
+  if (chromeAutoHide.value) return sidebarWidthForLayout.value;
   if (!showSidebar.value) return SIDEBAR_ACTIVITY_BAR_WIDTH;
   return sidebarWidthForLayout.value;
 });
@@ -916,6 +936,14 @@ const fastScrollSensitivity = ref(defaultFastScrollSensitivity);
 /** 阅读区顶部粘性章节标题 */
 const stickyChapterTitleEnabled = ref(defaultStickyChapterTitleEnabled);
 const readerClickMode = ref(defaultReaderClickMode);
+const readingRulerEnabled = ref(defaultReadingRulerEnabled);
+const readingRulerFocusLines = ref(defaultReadingRulerFocusLines);
+const readingRulerDimOpacity = ref(defaultReadingRulerDimOpacity);
+const readingRulerDimStickyTitle = ref(defaultReadingRulerDimStickyTitle);
+const readingRulerTransitionEnabled = ref(
+  defaultReadingRulerTransitionEnabled,
+);
+const markdownImageHeightPx = ref(defaultMarkdownImageHeightPx);
 const chapterNavToolbarEnabled = ref(defaultChapterNavToolbarEnabled);
 const readerEditShowLineNumbers = ref(defaultReaderEditShowLineNumbers);
 const readerEditMinimap = ref(defaultReaderEditMinimap);
@@ -1017,45 +1045,45 @@ const ebookConversionSourcePath = ref<string | null>(null);
 /** PDF 转换页进度（底栏 / 蒙层「转换中 12/480」） */
 const ebookConvertProgressText = ref("");
 
-const readerPaletteOverridesLight = ref<Partial<ReaderSurfacePalette>>({});
-const readerPaletteOverridesDark = ref<Partial<ReaderSurfacePalette>>({});
-const readerPaletteColorEnabledOverridesLight = ref<
+const readerPaletteColorEnabledOverrides = ref<
   Partial<ReaderSurfaceColorEnabled>
 >({});
-const readerPaletteColorEnabledOverridesDark = ref<
-  Partial<ReaderSurfaceColorEnabled>
->({});
+const readerPaletteUserPresets = ref<ReaderPalettePreset[]>([]);
+const readerPaletteSelectedIdLight = ref("");
+const readerPaletteSelectedIdDark = ref("");
+const readerBackground = ref(
+  cloneReaderBackgroundState(defaultReaderBackgroundState),
+);
 
 const readerSurfaceLight = computed(() =>
-  mergeReaderSurfacePalette(
-    defaultReaderPaletteLight,
-    readerPaletteOverridesLight.value,
+  resolveReaderPaletteBySelectedId(
+    readerPaletteSelectedIdLight.value,
+    "light",
+    readerPaletteUserPresets.value,
   ),
 );
 const readerSurfaceDark = computed(() =>
-  mergeReaderSurfacePalette(
-    defaultReaderPaletteDark,
-    readerPaletteOverridesDark.value,
+  resolveReaderPaletteBySelectedId(
+    readerPaletteSelectedIdDark.value,
+    "dark",
+    readerPaletteUserPresets.value,
   ),
 );
 
-const readerPaletteColorEnabledLight = computed(() =>
-  mergeReaderPaletteColorEnabled(readerPaletteColorEnabledOverridesLight.value),
-);
-const readerPaletteColorEnabledDark = computed(() =>
-  mergeReaderPaletteColorEnabled(readerPaletteColorEnabledOverridesDark.value),
+const readerPaletteColorEnabled = computed(() =>
+  mergeReaderPaletteColorEnabled(readerPaletteColorEnabledOverrides.value),
 );
 
 const effectiveReaderSurfaceLight = computed(() =>
   resolveEffectiveReaderPalette(
     readerSurfaceLight.value,
-    readerPaletteColorEnabledLight.value,
+    readerPaletteColorEnabled.value,
   ),
 );
 const effectiveReaderSurfaceDark = computed(() =>
   resolveEffectiveReaderPalette(
     readerSurfaceDark.value,
-    readerPaletteColorEnabledDark.value,
+    readerPaletteColorEnabled.value,
   ),
 );
 
@@ -1084,10 +1112,8 @@ const lineationColorsForReader = computed(() =>
     : lineationColorsDark.value,
 );
 
-const readerPaletteColorEnabledForReader = computed(() =>
-  currentTheme.value === "vs"
-    ? readerPaletteColorEnabledLight.value
-    : readerPaletteColorEnabledDark.value,
+const readerPaletteColorEnabledForReader = computed(
+  () => readerPaletteColorEnabled.value,
 );
 
 const currentFileMetaRecord = computed(() => {
@@ -1185,7 +1211,6 @@ const currentFileIsMarkdown = computed(() => {
 /** 当前文件是否已完成加载与阅读位置同步；无打开文件时为 true，打开/重置会话后为 false，流结束并完成滚动后为 true */
 const readingProgressSynced = ref(true);
 
-const readerEditMode = ref(false);
 const readerEditorDirty = ref(false);
 const editorContentChangeEpoch = ref(0);
 
@@ -1394,6 +1419,7 @@ const persistence = useAppPersistence({
   readingProgressSynced,
   sidebarWidth,
   showSidebar,
+  isMinimalistView,
   currentTheme,
   monacoCustomHighlight,
   compressBlankLines,
@@ -1427,6 +1453,12 @@ const persistence = useAppPersistence({
   fastScrollSensitivity,
   stickyChapterTitleEnabled,
   readerClickMode,
+  readingRulerEnabled,
+  readingRulerFocusLines,
+  readingRulerDimOpacity,
+  readingRulerDimStickyTitle,
+  readingRulerTransitionEnabled,
+  markdownImageHeightPx,
   chapterNavToolbarEnabled,
   readerEditShowLineNumbers,
   readerEditMinimap,
@@ -1443,10 +1475,11 @@ const persistence = useAppPersistence({
   fileMetaRecords,
   shortcutBindings,
   defaultShortcutBindings,
-  readerPaletteOverridesLight,
-  readerPaletteOverridesDark,
-  readerPaletteColorEnabledOverridesLight,
-  readerPaletteColorEnabledOverridesDark,
+  readerPaletteColorEnabledOverrides,
+  readerPaletteUserPresets,
+  readerPaletteSelectedIdLight,
+  readerPaletteSelectedIdDark,
+  readerBackground,
   highlightColorsLight,
   highlightColorsDark,
   lineationColorsLight,
@@ -1509,6 +1542,7 @@ watch(fileListEditing, (editing, wasEditing) => {
 });
 
 watch(showSidebar, () => persistSettings());
+watch(isMinimalistView, () => persistSettings());
 watch(aiAssistantDeepThinking, () => persistSettings());
 watch(aiAssistantSpoilerSafe, () => persistSettings());
 watch(wordcloudAngleMode, () => persistSettings());
@@ -2300,6 +2334,8 @@ const chapterNav = useAppChapterNavigation({
     await nextTick();
     await readerSidebarRef.value?.centerActiveChapterInList?.(false);
   },
+  readingRulerEnabled,
+  isVoiceReadActive: () => isVoiceReadActive.value,
 });
 
 /** 视口已按物理行恢复且 probe 已更新后：重算章节并居中侧栏（加载结束等） */
@@ -2508,6 +2544,7 @@ const {
   isTimedScrollActive,
   canStartTimedScroll,
   toggleTimedScroll,
+  nudgeTimedScrollTimer,
 } = useAppTimedScroll({
   readerRef,
   timedScrollSettings,
@@ -2517,6 +2554,15 @@ const {
   viewportAtBottom,
   isVoiceReadActive,
 });
+
+function onProbeLineChangeForTimedScroll(
+  probeLine: number,
+  fromReadingScroll?: boolean,
+  fromAnyScroll?: boolean,
+) {
+  onProbeLineChange(probeLine, fromReadingScroll);
+  if (fromAnyScroll === true) nudgeTimedScrollTimer();
+}
 
 function onVoiceReadToggle() {
   if (!isVoiceReadActive.value && isTimedScrollActive.value) return;
@@ -2558,7 +2604,7 @@ const readerChapterNavUiVisible = computed(
 const readerChapterNavVisible = computed(
   () =>
     readerChapterNavUiVisible.value &&
-    (!isFullscreenView.value || showFullscreenFooter.value),
+    (!chromeAutoHide.value || showFullscreenFooter.value),
 );
 
 const readerChapterNavBusy = computed(
@@ -2670,6 +2716,12 @@ async function onApplyPartialPhysicalEdit(payload: {
 
 function toggleReaderClickMode() {
   readerClickMode.value = !readerClickMode.value;
+  persistSettings();
+}
+
+function toggleReadingRuler() {
+  if (isVoiceReadActive.value) return;
+  readingRulerEnabled.value = !readingRulerEnabled.value;
   persistSettings();
 }
 
@@ -2923,6 +2975,9 @@ const readerUi = useAppReaderUiPrefs({
   readerRef,
   readerFontSize,
   readerLineHeightMultiple,
+  readerLineSpacingPx,
+  readerLetterSpacingPx,
+  readerHorizontalInsetPx,
   monacoFontFamily,
   pinnedOtherFonts,
   monacoCustomHighlight,
@@ -2944,6 +2999,7 @@ const readerUi = useAppReaderUiPrefs({
   viewportVisualProgressPercent,
   viewportAtBottom,
   isVoiceReadBlocksFind,
+  showReaderHudTip,
 });
 
 const {
@@ -2954,6 +3010,12 @@ const {
   decreaseFontSize,
   increaseLineHeight,
   decreaseLineHeight,
+  increaseLetterSpacing,
+  decreaseLetterSpacing,
+  increaseParagraphSpacing,
+  decreaseParagraphSpacing,
+  increaseHorizontalInset,
+  decreaseHorizontalInset,
   setMonacoFontFamily,
   togglePinnedOtherFont,
   toggleMonacoCustomHighlight,
@@ -2980,6 +3042,64 @@ function openNewWindow() {
 
 function openFindBookWindow() {
   window.colorTxt.openFindBookWindow();
+}
+
+const canEnterStealth = computed(
+  () => Boolean(currentFile.value) && !loading.value,
+);
+
+/** 阅读区（Monaco）在屏幕上的位置；供首次摸鱼窗对齐用。 */
+async function resolveReaderAreaScreenBounds(): Promise<{
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+} | null> {
+  const dom = readerRef.value?.getReaderEditorDomNode?.() ?? null;
+  if (!dom) return null;
+  const r = dom.getBoundingClientRect();
+  if (r.width < 8 || r.height < 8) return null;
+  const content = await window.colorTxt.getWindowContentBounds();
+  const originX = content?.x ?? window.screenX;
+  const originY = content?.y ?? window.screenY;
+  return {
+    x: Math.round(originX + r.left),
+    y: Math.round(originY + r.top),
+    width: Math.round(r.width),
+    height: Math.round(r.height),
+  };
+}
+
+async function enterStealthMode() {
+  const reader = readerRef.value;
+  const body = reader?.getAllText() ?? "";
+  if (!body) {
+    appToast("没有可阅读的正文", { kind: "warning", duration: 2000 });
+    return;
+  }
+  const startLine = reader?.getViewportTopLine() ?? 1;
+  const chaps = chapters.value.map((c) => ({
+    title: c.title,
+    lineNumber: c.lineNumber,
+    tocOrder: c.tocOrder,
+  }));
+  const saved = loadStealthReaderSettings();
+  const bounds =
+    saved.bounds ?? (await resolveReaderAreaScreenBounds()) ?? undefined;
+  const result = await window.colorTxt.stealthReaderEnter({
+    text: body,
+    startLine,
+    chapters: chaps,
+    bounds,
+    exitAccelerator: shortcutBindings.value.enterStealthReader || "F9",
+    navShortcuts: saved.shortcuts,
+  });
+  if (!result?.ok) {
+    appToast(result?.message || "无法进入摸鱼模式", {
+      kind: "warning",
+      duration: 2200,
+    });
+  }
 }
 
 async function applyShortcutBindings(next: ShortcutBindingMap) {
@@ -3290,6 +3410,12 @@ function applyReaderAppearanceFromSettings() {
     readerSurfaceLight.value,
     readerSurfaceDark.value,
   );
+  void applyReaderBackgroundForPalettes(
+    currentTheme.value,
+    readerBackground.value,
+    readerSurfaceLight.value,
+    readerSurfaceDark.value,
+  );
   readerRef.value?.setTheme(currentTheme.value);
   readerRef.value?.setFontSize(readerFontSize.value);
   readerRef.value?.setLineHeightMultiple(readerLineHeightMultiple.value);
@@ -3305,25 +3431,28 @@ function refreshReaderSurfaceAfterPaletteChange() {
     readerSurfaceLight.value,
     readerSurfaceDark.value,
   );
+  void applyReaderBackgroundForPalettes(
+    currentTheme.value,
+    readerBackground.value,
+    readerSurfaceLight.value,
+    readerSurfaceDark.value,
+  );
   readerRef.value?.setTheme(currentTheme.value);
 }
 
 function onApplyColorScheme(payload: ColorSchemeApplyPayload) {
   if (payload.reader) {
-    readerPaletteOverridesLight.value = overridesFromFullPalette(
-      payload.reader.light,
-      defaultReaderPaletteLight,
-    );
-    readerPaletteOverridesDark.value = overridesFromFullPalette(
-      payload.reader.dark,
-      defaultReaderPaletteDark,
-    );
-    readerPaletteColorEnabledOverridesLight.value = overridesFromColorEnabled(
-      payload.reader.colorEnabledLight,
-    );
-    readerPaletteColorEnabledOverridesDark.value = overridesFromColorEnabled(
-      payload.reader.colorEnabledDark,
-    );
+    const persisted = toPersistedReaderPaletteState(payload.reader);
+    readerPaletteColorEnabledOverrides.value =
+      persisted.readerPaletteColorEnabledOverrides;
+    readerPaletteUserPresets.value = persisted.readerPaletteUserPresets;
+    readerPaletteSelectedIdLight.value = persisted.readerPaletteSelectedIdLight;
+    readerPaletteSelectedIdDark.value = persisted.readerPaletteSelectedIdDark;
+    if (payload.reader.background) {
+      readerBackground.value = cloneReaderBackgroundState(
+        payload.reader.background,
+      );
+    }
   }
   if (payload.highlight) {
     highlightColorsLight.value = mergeHighlightColors(
@@ -3450,11 +3579,16 @@ function onSearchWithQuote(text: string) {
   searchQuery.value = q;
 }
 
+function openReaderSidebarTab(tab: ReaderSidebarTab) {
+  if (tab === "aiAssistant" && !aiFeaturesEnabled.value) return;
+  sidebarTab.value = tab;
+  showSidebar.value = true;
+  if (chromeAutoHide.value) revealFullscreenSidebar();
+}
+
 function openSidebarSearch() {
   const sel = readerRef.value?.getSelectedText?.()?.trim() ?? "";
-  sidebarTab.value = "search";
-  showSidebar.value = true;
-  if (isFullscreenView.value) showFullscreenSidebar.value = true;
+  openReaderSidebarTab("search");
   if (sel) searchQuery.value = sel;
   void nextTick(() => {
     readerSidebarRef.value?.focusSidebarSearchInput?.();
@@ -3509,6 +3643,18 @@ async function applySettings(payload: SettingsApplyPayload) {
     payload.fastScrollSensitivity,
   );
   stickyChapterTitleEnabled.value = payload.stickyChapterTitleEnabled;
+  readingRulerEnabled.value = payload.readingRulerEnabled;
+  readingRulerFocusLines.value = clampReadingRulerFocusLines(
+    payload.readingRulerFocusLines,
+  );
+  readingRulerDimOpacity.value = clampReadingRulerDimOpacity(
+    payload.readingRulerDimOpacity,
+  );
+  readingRulerDimStickyTitle.value = payload.readingRulerDimStickyTitle;
+  readingRulerTransitionEnabled.value = payload.readingRulerTransitionEnabled;
+  markdownImageHeightPx.value = clampMarkdownImageHeightPx(
+    payload.markdownImageHeightPx,
+  );
   chapterNavToolbarEnabled.value = payload.chapterNavToolbarEnabled;
   chapterCharCountExact.value = payload.chapterCharCountExact;
   timedScrollSettings.value = mergeTimedScrollSettings(payload.timedScroll);
@@ -3589,13 +3735,16 @@ async function applySettings(payload: SettingsApplyPayload) {
   const nextReaderHorizontalInsetPx = clampReaderHorizontalInsetPx(
     payload.readerHorizontalInsetPx,
   );
+  const nextFontFamily = payload.fontFamily.trim() || monacoFontFamily.value;
   const lineSpacingChanged = readerLineSpacingPx.value !== nextLineSpacingPx;
   readerFontSize.value = nextFontSize;
+  monacoFontFamily.value = nextFontFamily;
   readerLineHeightMultiple.value = nextLineHeightMultiple;
   readerLineSpacingPx.value = nextLineSpacingPx;
   readerLetterSpacingPx.value = nextLetterSpacingPx;
   readerHorizontalInsetPx.value = nextReaderHorizontalInsetPx;
   readerRef.value?.setFontSize(nextFontSize);
+  readerRef.value?.setFontFamily(nextFontFamily);
   readerRef.value?.setLineHeightMultiple(nextLineHeightMultiple);
   if (lineSpacingChanged) {
     // 抑制高度变化中间态换章滚动；恢复视口后强制居中（idx 常不变不会触发 watch）
@@ -3679,6 +3828,11 @@ async function applySettings(payload: SettingsApplyPayload) {
 /** 来自主进程的跨窗口主题同步，避免再发 theme:set 造成循环 */
 const skipNextThemeNativeIpc = ref(false);
 
+function applyShellTheme(theme: string) {
+  if (appOverlaysRef.value?.isColorSchemeThemeLocked()) return;
+  currentTheme.value = theme === "vs-dark" ? "vs-dark" : "vs";
+}
+
 useAppWindowBindings({
   readerRef,
   stream,
@@ -3687,6 +3841,7 @@ useAppWindowBindings({
   persistFileListCache,
   persistSidebarWidth,
   isFullscreenView,
+  chromeAutoHide,
   showSidebar,
   sidebarWidth,
   fullscreenSidebarWidth,
@@ -3699,9 +3854,14 @@ useAppWindowBindings({
   updateFullscreenSidebarHover,
   endSidebarResize,
   dismissFullscreenChromeForNativeExit,
+  handleReaderChromeEscape,
   bumpFullscreenCursorIdle,
   recordFullscreenPointer,
   enterOrExitFullscreenView,
+  toggleMinimalistView,
+  toggleTheme: () => {
+    applyShellTheme(currentTheme.value === "vs" ? "vs-dark" : "vs");
+  },
   pulseChapterListCenter,
   syncChaptersAfterViewportSettled,
   currentTheme,
@@ -3731,6 +3891,12 @@ useAppWindowBindings({
   decreaseFontSize,
   increaseLineHeight,
   decreaseLineHeight,
+  increaseLetterSpacing,
+  decreaseLetterSpacing,
+  increaseParagraphSpacing,
+  decreaseParagraphSpacing,
+  increaseHorizontalInset,
+  decreaseHorizontalInset,
   openNewWindow,
   openFileViaDialog,
   pickTxtDirectory,
@@ -3745,8 +3911,15 @@ useAppWindowBindings({
     showColorSchemePanel.value = true;
   },
   openFindBook: openFindBookWindow,
+  enterStealthReader: () => {
+    void enterStealthMode();
+  },
   toggleFind: onToggleFind,
   openSidebarSearch,
+  openSidebarFiles: () => openReaderSidebarTab("files"),
+  openSidebarChapters: () => openReaderSidebarTab("chapters"),
+  openSidebarAiAssistant: () => openReaderSidebarTab("aiAssistant"),
+  revealFullscreenSidebar,
   toggleReaderEdit: () => {
     void onToggleReaderEdit();
   },
@@ -3790,6 +3963,7 @@ useAppShellThemeWatch({
   readerRef,
   readerSurfaceLight,
   readerSurfaceDark,
+  readerBackground,
   skipNextThemeNativeIpc,
   persistSettings,
   showChapterCounts,
@@ -3797,7 +3971,7 @@ useAppShellThemeWatch({
   txtFiles,
   readerEditMode,
   readerEditorDirty,
-  isFullscreenView,
+  isFullscreenView: chromeAutoHide,
   showFullscreenSidebar,
   pulseChapterListCenter,
 });
@@ -3809,17 +3983,20 @@ useAppShellThemeWatch({
     class="app"
     :class="{
       fullscreen: isFullscreenView,
-      'fullscreen--cursorHidden': isFullscreenView && fullscreenCursorHidden,
+      chromeHidden: chromeAutoHide,
+      'fullscreen--cursorHidden': chromeAutoHide && fullscreenCursorHidden,
     }"
   >
+    <Transition name="chromeFloatHeader" :css="chromeAutoHide">
     <div
       :ref="setFullscreenHeaderOverlayEl"
       class="appHeaderWrap"
-      v-show="!isFullscreenView || showFullscreenHeader"
+      v-show="!chromeAutoHide || showFullscreenHeader"
       @mouseleave="onFullscreenHeaderMouseLeave"
     >
       <AppHeader
         :in-fullscreen="isFullscreenView"
+        :in-minimalist="isMinimalistView"
         :recent-files="recentFilesForMenu"
         :pin-active="pinActive"
         :can-pin="canPin"
@@ -3831,7 +4008,6 @@ useAppShellThemeWatch({
         :can-timed-scroll="canStartTimedScroll"
         :voice-read-header-locked="isVoiceReadHeaderLocked"
         :current-theme="currentTheme"
-        :show-sidebar="showSidebar"
         :can-increase-font="readerFontSize < maxFontSize"
         :can-decrease-font="readerFontSize > minFontSize"
         :can-increase-line-height="
@@ -3841,6 +4017,8 @@ useAppShellThemeWatch({
         :can-decrease-line-height="
           readerLineHeightMultiple > minLineHeightMultiple + 1e-6
         "
+        :reader-font-size="readerFontSize"
+        :reader-line-height-multiple="readerLineHeightMultiple"
         :monaco-font-family="monacoFontFamily"
         :pinned-other-fonts="pinnedOtherFonts"
         :monaco-advanced-wrapping="monacoAdvancedWrapping"
@@ -3854,14 +4032,16 @@ useAppShellThemeWatch({
         :reader-edit-mode="readerEditMode"
         :reader-click-mode="effectiveClickMode"
         :reader-click-mode-alt-held="clickModeAltHeld"
+        :reading-ruler-enabled="readingRulerEnabled"
         :can-enter-reader-edit-mode="canEnterReaderEditMode"
         :shortcut-bindings="shortcutBindings"
+        :can-enter-stealth="canEnterStealth"
         @open-file="openFileViaDialog"
         @pin-click="onPinClick"
         @bookmark-click="onBookmarkClick"
         @go-back-from-pin="onGoBackFromPin"
-        @change-theme="currentTheme = $event"
-        @toggle-sidebar="showSidebar = !showSidebar"
+        @change-theme="applyShellTheme"
+        @toggle-minimalist="toggleMinimalistView"
         @toggle-fullscreen="enterOrExitFullscreenView"
         @set-monaco-font="setMonacoFontFamily"
         @toggle-pin-other-font="togglePinnedOtherFont"
@@ -3894,6 +4074,7 @@ useAppShellThemeWatch({
         @open-settings="showSettingsPanel = true"
         @open-color-scheme="showColorSchemePanel = true"
         @open-find-book="openFindBookWindow"
+        @enter-stealth-reader="enterStealthMode"
         @open-new-window="openNewWindow"
         @open-recent-file="openRecentFileFromHistory"
         @clear-recent-files="clearRecentFiles"
@@ -3901,6 +4082,7 @@ useAppShellThemeWatch({
         @quit-app="quitApp"
         @toggle-reader-edit="onToggleReaderEdit"
         @toggle-reader-click-mode="toggleReaderClickMode"
+        @toggle-reading-ruler="toggleReadingRuler"
         @save-reader-file="onSaveReaderFile"
         :ai-features-enabled="aiFeaturesEnabled"
         :can-use-ai-smart-format="canUseAiSmartFormat"
@@ -3912,17 +4094,20 @@ useAppShellThemeWatch({
         @timed-scroll-toggle="toggleTimedScroll"
       />
     </div>
+    </Transition>
 
     <div
       class="layout"
-      @pointerdown="onLayoutMouseDown"
+      :class="{ readerSurfaceBg: chromeAutoHide }"
+      @pointerdown.capture="onLayoutMouseDown"
       @contextmenu="onLayoutContextMenu"
       @wheel.capture="onLayoutWheel"
     >
+      <Transition name="chromeFloatSidebar" :css="chromeAutoHide">
       <div
         ref="fullscreenSidebarOverlayRef"
         class="sidebarPaneWrap"
-        :class="{ 'sidebarPaneWrap--fullscreen': isFullscreenView }"
+        :class="{ 'sidebarPaneWrap--fullscreen': chromeAutoHide }"
         v-show="sidebarShellVisible"
         :style="{ width: `${sidebarPaneLayoutWidth}px` }"
         @mouseleave="onFullscreenSidebarMouseLeave"
@@ -3930,11 +4115,11 @@ useAppShellThemeWatch({
         <ReaderSidebar
           ref="readerSidebarRef"
           active-scroll-mode="center"
-          :panel-expanded="isFullscreenView || showSidebar"
+          :panel-expanded="chromeAutoHide || showSidebar"
           :activity-icons-on-dark="currentTheme === 'vs-dark'"
-          :in-fullscreen="isFullscreenView"
+          :in-fullscreen="chromeAutoHide"
           :show-fullscreen-sidebar="
-            isFullscreenView ? showFullscreenSidebar : undefined
+            chromeAutoHide ? showFullscreenSidebar : undefined
           "
           :chapter-list-scroll-smooth="chapterListScrollSmooth"
           :should-center-chapter-list="shouldCenterChapterList"
@@ -4065,6 +4250,7 @@ useAppShellThemeWatch({
           @request-expand-panel="showSidebar = true"
           @request-collapse-panel="showSidebar = false"
           :web-dav-enabled="webDavEnabled"
+          :shortcut-bindings="shortcutBindings"
           @open-web-dav="showWebDavPanel = true"
           @open-color-scheme="showColorSchemePanel = true"
         @open-find-book="openFindBookWindow"
@@ -4072,14 +4258,15 @@ useAppShellThemeWatch({
         />
         <!-- 放在侧栏容器内，避免移到拖条时触发 @mouseleave 导致全屏侧栏收起 -->
         <div
-          v-show="isFullscreenView"
+          v-show="chromeAutoHide"
           class="resizer resizer--fullscreenSidebar"
           :class="{ 'resizer--active': resizingSidebar }"
           @mousedown="startResizeSidebar"
         ></div>
       </div>
+      </Transition>
       <div
-        v-show="showSidebar && !isFullscreenView"
+        v-show="showSidebar && !chromeAutoHide"
         class="resizer"
         :class="{ 'resizer--active': resizingSidebar }"
         :style="{ left: `calc(${sidebarWidthForLayout}px - var(--app-sash-size, 4px) / 2)` }"
@@ -4122,6 +4309,12 @@ useAppShellThemeWatch({
           :fast-scroll-sensitivity="fastScrollSensitivity"
           :sticky-chapter-title-enabled="stickyChapterTitleEnabled"
           :reader-click-mode="effectiveClickMode"
+          :reading-ruler-enabled="readingRulerEnabled"
+          :reading-ruler-focus-lines="readingRulerFocusLines"
+          :reading-ruler-dim-opacity="readingRulerDimOpacity"
+          :reading-ruler-dim-sticky-title="readingRulerDimStickyTitle"
+          :reading-ruler-transition-enabled="readingRulerTransitionEnabled"
+          :markdown-image-height-px="markdownImageHeightPx"
           :reader-click-mode-alt-held="clickModeAltHeld"
           :selection-toolbar-buttons="selectionToolbarButtons"
           :dictionary-settings="dictionarySettings"
@@ -4162,7 +4355,7 @@ useAppShellThemeWatch({
           @ai-smart-format-selection="onAiSmartFormatSelection"
           @smart-format-review-apply="applySmartFormatReview()"
           @smart-format-review-discard="discardSmartFormatReview()"
-          @probe-line-change="onProbeLineChange"
+          @probe-line-change="onProbeLineChangeForTimedScroll"
           @layout-viewport-restored="onLayoutViewportRestored"
           @viewport-top-line-change="onViewportTopLineChange"
           @viewport-end-line-change="onViewportEndLineChange"
@@ -4207,7 +4400,7 @@ useAppShellThemeWatch({
           @open-speak-settings="showVoiceReadSpeakSettingsPanel = true"
         />
         <ReaderChapterNavBar
-          v-if="readerChapterNavUiVisible && !isFullscreenView"
+          v-if="readerChapterNavUiVisible && !chromeAutoHide"
           :visible="readerChapterNavVisible"
           :can-go-prev="readerChapterNavCanPrev"
           :can-go-next="readerChapterNavCanNext"
@@ -4239,6 +4432,14 @@ useAppShellThemeWatch({
         >
           {{ emptyFileHintText }}
         </div>
+        <div
+          v-if="readerHudTipVisible"
+          class="fullscreenTip readerHudTip"
+          :class="{ fading: readerHudTipFading }"
+          aria-live="polite"
+        >
+          {{ readerHudTipText }}
+        </div>
       </div>
     </div>
     <div
@@ -4246,23 +4447,24 @@ useAppShellThemeWatch({
       class="fullscreenTip"
       :class="{ fading: fullscreenTipFading }"
     >
-      按 ESC 退出全屏
+      {{ fullscreenTipText }}
     </div>
     <FullscreenSystemClock
       :visible="isFullscreenView && fullscreenShowSystemTime"
-      :pomodoro-visible="isFullscreenView && pomodoroPhase !== 'idle'"
+      :pomodoro-visible="chromeAutoHide && pomodoroPhase !== 'idle'"
       :pomodoro-progress="pomodoroProgress"
       :pomodoro-paused="pomodoroPaused"
     />
 
+    <Transition name="chromeFloatFooter" :css="chromeAutoHide">
     <div
       :ref="setFullscreenFooterOverlayEl"
       class="appFooterWrap"
-      v-show="!isFullscreenView || showFullscreenFooter"
+      v-show="!chromeAutoHide || showFullscreenFooter"
       @mouseleave="onFullscreenFooterMouseLeave"
     >
       <ReaderChapterNavBar
-        v-if="readerChapterNavUiVisible && isFullscreenView"
+        v-if="readerChapterNavUiVisible && chromeAutoHide"
         :visible="readerChapterNavVisible"
         :can-go-prev="readerChapterNavCanPrev"
         :can-go-next="readerChapterNavCanNext"
@@ -4318,6 +4520,7 @@ useAppShellThemeWatch({
         @pomodoro-stop="stopPomodoro"
       />
     </div>
+    </Transition>
     <PomodoroBreakOverlay
       :visible="pomodoroShowBreakOverlay"
       :countdown-text="pomodoroCountdownText"
@@ -4397,6 +4600,12 @@ useAppShellThemeWatch({
       :mouse-wheel-scroll-sensitivity="mouseWheelScrollSensitivity"
       :fast-scroll-sensitivity="fastScrollSensitivity"
       :sticky-chapter-title-enabled="stickyChapterTitleEnabled"
+      :reading-ruler-enabled="readingRulerEnabled"
+      :reading-ruler-focus-lines="readingRulerFocusLines"
+      :reading-ruler-dim-opacity="readingRulerDimOpacity"
+      :reading-ruler-dim-sticky-title="readingRulerDimStickyTitle"
+      :reading-ruler-transition-enabled="readingRulerTransitionEnabled"
+      :markdown-image-height-px="markdownImageHeightPx"
       :chapter-nav-toolbar-enabled="chapterNavToolbarEnabled"
       :chapter-char-count-exact="chapterCharCountExact"
       :timed-scroll-settings="timedScrollSettings"
@@ -4427,11 +4636,13 @@ useAppShellThemeWatch({
       :shortcut-bindings="shortcutBindings"
       :default-shortcut-bindings="defaultShortcutBindings"
       :current-theme="currentTheme"
-      :reader-surface-light="readerSurfaceLight"
-      :reader-surface-dark="readerSurfaceDark"
-      :reader-palette-color-enabled-light="readerPaletteColorEnabledLight"
-      :reader-palette-color-enabled-dark="readerPaletteColorEnabledDark"
+      :reader-palette-color-enabled="readerPaletteColorEnabled"
+      :reader-palette-user-presets="readerPaletteUserPresets"
+      :reader-palette-selected-id-light="readerPaletteSelectedIdLight"
+      :reader-palette-selected-id-dark="readerPaletteSelectedIdDark"
+      :reader-background="readerBackground"
       :monaco-font-family="monacoFontFamily"
+      :pinned-other-fonts="pinnedOtherFonts"
       :highlight-colors-light="highlightColorsLight"
       :highlight-colors-dark="highlightColorsDark"
       :lineation-colors-light="lineationColorsLight"
@@ -4453,6 +4664,7 @@ useAppShellThemeWatch({
       :ai-custom-skills="aiCustomSkills"
       :reading-data-items="readingDataItems"
       @apply-settings="applySettings"
+      @toggle-pin-other-font="togglePinnedOtherFont"
       @apply-shortcut-bindings="applyShortcutBindings"
       @apply-chapter-rules="applyChapterMatchRules"
       @confirm-add-bookmark="confirmAddBookmark"
@@ -4461,6 +4673,7 @@ useAppShellThemeWatch({
       "
       @confirm-remove-active-bookmark="confirmRemoveActiveBookmark"
       @apply-color-scheme="onApplyColorScheme"
+      @change-theme="applyShellTheme"
       @open-reading-data="openReadingDataPanel"
       @open-dictionary-manage="showDictionaryManagePanel = true"
       @open-web-search-manage="showWebSearchManagePanel = true"

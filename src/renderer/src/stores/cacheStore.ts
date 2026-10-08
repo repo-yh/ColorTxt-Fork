@@ -35,11 +35,20 @@ import {
   type HighlightWordsByIndex,
 } from "./fileMetaStore";
 import {
-  parseReaderPaletteOverrides,
-  parseReaderPaletteColorEnabledOverrides,
+  parseReaderPaletteColorEnabledOverridesFromPersisted,
   type ReaderSurfaceColorEnabled,
-  type ReaderSurfacePalette,
 } from "../constants/readerPalette";
+import {
+  parseReaderBackgroundState,
+  type ReaderBackgroundState,
+} from "../constants/readerBackground";
+import {
+  migrateLegacyReaderPaletteOverrides,
+  parseReaderPaletteSelectedId,
+  parseReaderPaletteUserPresets,
+  serializeReaderPaletteUserPresets,
+  type ReaderPalettePreset,
+} from "../constants/readerPalettePresets";
 import type { ShortcutActionId } from "../services/shortcutRegistry";
 import type { AiCustomSkill, AiSkillUserOverride } from "@shared/aiSkills";
 import {
@@ -79,6 +88,8 @@ export type PersistedSettingsData = {
   sidebarWidth?: number;
   /** 侧边栏是否打开（非全屏时） */
   showSidebar?: boolean;
+  /** 极简视图（顶/侧/底栏默认隐藏） */
+  isMinimalistView?: boolean;
   fontSize?: number;
   /** Monaco 行间距倍数（UI「行间距」），实际 lineHeight = round(fontSize * lineHeightMultiple) */
   lineHeightMultiple?: number;
@@ -132,6 +143,18 @@ export type PersistedSettingsData = {
   stickyChapterTitleEnabled?: boolean;
   /** 阅读器点击翻页模式（false = 可选模式） */
   readerClickMode?: boolean;
+  /** 阅读尺：聚焦视觉行、淡化其余行 */
+  readingRulerEnabled?: boolean;
+  /** 阅读尺聚焦视觉行数（1–10） */
+  readingRulerFocusLines?: number;
+  /** 阅读尺非聚焦行不透明度（0–1，步进 0.05） */
+  readingRulerDimOpacity?: number;
+  /** 阅读尺开启时是否淡化粘性章节标题 */
+  readingRulerDimStickyTitle?: boolean;
+  /** 阅读尺焦点行切换过渡动画 */
+  readingRulerTransitionEnabled?: boolean;
+  /** Markdown 块级插图 ViewZone 内容高度（px） */
+  markdownImageHeightPx?: number;
   /** 阅读区底部「上一章 / 下一章」工具栏 */
   chapterNavToolbarEnabled?: boolean;
   /** 找书阅读器边界滚动切章 */
@@ -164,14 +187,16 @@ export type PersistedSettingsData = {
   translationSettings?: Partial<TranslationSettings>;
   /** 用户自定义快捷键（动作ID -> accelerator） */
   shortcutBindings?: Partial<Record<ShortcutActionId, string>>;
-  /** 阅读器表面色用户覆盖（亮色侧） */
-  readerPaletteOverridesLight?: Partial<ReaderSurfacePalette>;
-  /** 阅读器表面色用户覆盖（暗色侧） */
-  readerPaletteOverridesDark?: Partial<ReaderSurfacePalette>;
-  /** 阅读器 token 独立配色开关覆盖（亮色侧，仅持久化 false） */
-  readerPaletteColorEnabledOverridesLight?: Partial<ReaderSurfaceColorEnabled>;
-  /** 阅读器 token 独立配色开关覆盖（暗色侧，仅持久化 false） */
-  readerPaletteColorEnabledOverridesDark?: Partial<ReaderSurfaceColorEnabled>;
+  /** 阅读器 token 独立配色开关覆盖（亮暗共用，仅持久化 false） */
+  readerPaletteColorEnabledOverrides?: Partial<ReaderSurfaceColorEnabled>;
+  /** 用户添加的阅读器配色方案 */
+  readerPaletteUserPresets?: ReaderPalettePreset[];
+  /** 当前选中的阅读器配色方案 id（亮色） */
+  readerPaletteSelectedIdLight?: string;
+  /** 当前选中的阅读器配色方案 id（暗色） */
+  readerPaletteSelectedIdDark?: string;
+  /** 阅读区背景图图库（选图在配色色板 `textureId`） */
+  readerBackground?: ReaderBackgroundState;
   /** 自定义高亮色（亮色主题），与默认逐项相同可不写入 */
   highlightColorsLight?: string[];
   /** 自定义高亮色（暗色主题） */
@@ -336,6 +361,9 @@ export function loadPersistedSettingsData(
   if (typeof obj.showSidebar === "boolean") {
     data.showSidebar = obj.showSidebar;
   }
+  if (typeof obj.isMinimalistView === "boolean") {
+    data.isMinimalistView = obj.isMinimalistView;
+  }
   if (typeof obj.fontSize === "number" && Number.isFinite(obj.fontSize)) {
     data.fontSize = obj.fontSize;
   }
@@ -454,6 +482,33 @@ export function loadPersistedSettingsData(
   if (typeof obj.readerClickMode === "boolean") {
     data.readerClickMode = obj.readerClickMode;
   }
+  if (typeof obj.readingRulerEnabled === "boolean") {
+    data.readingRulerEnabled = obj.readingRulerEnabled;
+  }
+  if (
+    typeof obj.readingRulerFocusLines === "number" &&
+    Number.isFinite(obj.readingRulerFocusLines)
+  ) {
+    data.readingRulerFocusLines = obj.readingRulerFocusLines;
+  }
+  if (
+    typeof obj.readingRulerDimOpacity === "number" &&
+    Number.isFinite(obj.readingRulerDimOpacity)
+  ) {
+    data.readingRulerDimOpacity = obj.readingRulerDimOpacity;
+  }
+  if (typeof obj.readingRulerDimStickyTitle === "boolean") {
+    data.readingRulerDimStickyTitle = obj.readingRulerDimStickyTitle;
+  }
+  if (typeof obj.readingRulerTransitionEnabled === "boolean") {
+    data.readingRulerTransitionEnabled = obj.readingRulerTransitionEnabled;
+  }
+  if (
+    typeof obj.markdownImageHeightPx === "number" &&
+    Number.isFinite(obj.markdownImageHeightPx)
+  ) {
+    data.markdownImageHeightPx = obj.markdownImageHeightPx;
+  }
   if (typeof obj.chapterNavToolbarEnabled === "boolean") {
     data.chapterNavToolbarEnabled = obj.chapterNavToolbarEnabled;
   }
@@ -521,37 +576,37 @@ export function loadPersistedSettingsData(
       Record<ShortcutActionId, string>
     >;
   }
-  if (
-    obj.readerPaletteOverridesLight &&
-    typeof obj.readerPaletteOverridesLight === "object"
-  ) {
-    const p = parseReaderPaletteOverrides(obj.readerPaletteOverridesLight);
-    if (Object.keys(p).length) data.readerPaletteOverridesLight = p;
+  const enabledOverrides = parseReaderPaletteColorEnabledOverridesFromPersisted(
+    obj,
+  );
+  if (Object.keys(enabledOverrides).length) {
+    data.readerPaletteColorEnabledOverrides = enabledOverrides;
   }
-  if (
-    obj.readerPaletteOverridesDark &&
-    typeof obj.readerPaletteOverridesDark === "object"
-  ) {
-    const p = parseReaderPaletteOverrides(obj.readerPaletteOverridesDark);
-    if (Object.keys(p).length) data.readerPaletteOverridesDark = p;
+  if (obj.readerBackground != null) {
+    data.readerBackground = parseReaderBackgroundState(obj.readerBackground);
   }
-  if (
-    obj.readerPaletteColorEnabledOverridesLight &&
-    typeof obj.readerPaletteColorEnabledOverridesLight === "object"
-  ) {
-    const p = parseReaderPaletteColorEnabledOverrides(
-      obj.readerPaletteColorEnabledOverridesLight,
-    );
-    if (Object.keys(p).length) data.readerPaletteColorEnabledOverridesLight = p;
+  const migratedPalette = migrateLegacyReaderPaletteOverrides({
+    userPresets: parseReaderPaletteUserPresets(obj.readerPaletteUserPresets),
+    selectedIdLight: parseReaderPaletteSelectedId(
+      obj.readerPaletteSelectedIdLight,
+    ),
+    selectedIdDark: parseReaderPaletteSelectedId(
+      obj.readerPaletteSelectedIdDark,
+    ),
+    overridesLight: obj.readerPaletteOverridesLight,
+    overridesDark: obj.readerPaletteOverridesDark,
+  });
+  if (migratedPalette.userPresets.length) {
+    data.readerPaletteUserPresets = migratedPalette.userPresets;
   }
-  if (
-    obj.readerPaletteColorEnabledOverridesDark &&
-    typeof obj.readerPaletteColorEnabledOverridesDark === "object"
-  ) {
-    const p = parseReaderPaletteColorEnabledOverrides(
-      obj.readerPaletteColorEnabledOverridesDark,
-    );
-    if (Object.keys(p).length) data.readerPaletteColorEnabledOverridesDark = p;
+  if (migratedPalette.selectedIdLight) {
+    data.readerPaletteSelectedIdLight = migratedPalette.selectedIdLight;
+  }
+  if (migratedPalette.selectedIdDark) {
+    data.readerPaletteSelectedIdDark = migratedPalette.selectedIdDark;
+  }
+  if (migratedPalette.migrated) {
+    persistLegacyReaderPaletteMigration(storage, key, obj, migratedPalette);
   }
   if (Array.isArray(obj.highlightColorsLight)) {
     const h = parseHighlightColorsArray(obj.highlightColorsLight);
@@ -731,13 +786,55 @@ export function loadPersistedSettingsData(
   };
 }
 
+function persistLegacyReaderPaletteMigration(
+  storage: Storage | undefined,
+  key: string,
+  disk: Record<string, unknown>,
+  migrated: {
+    userPresets: ReaderPalettePreset[];
+    selectedIdLight: string;
+    selectedIdDark: string;
+  },
+) {
+  try {
+    const next = { ...disk };
+    next.readerPaletteUserPresets = serializeReaderPaletteUserPresets(
+      migrated.userPresets,
+    );
+    if (migrated.selectedIdLight) {
+      next.readerPaletteSelectedIdLight = migrated.selectedIdLight;
+    } else {
+      delete next.readerPaletteSelectedIdLight;
+    }
+    if (migrated.selectedIdDark) {
+      next.readerPaletteSelectedIdDark = migrated.selectedIdDark;
+    } else {
+      delete next.readerPaletteSelectedIdDark;
+    }
+    delete next.readerPaletteOverridesLight;
+    delete next.readerPaletteOverridesDark;
+    delete next.readerPaletteColorEnabledOverridesLight;
+    delete next.readerPaletteColorEnabledOverridesDark;
+    delete next.readerPaletteSelectedPresetId;
+    storage?.setItem(key, JSON.stringify(next));
+  } catch {
+    // ignore
+  }
+}
+
 export function persistSettingsData(
   storage: Storage | undefined,
   key: string,
   data: PersistedSettingsData,
 ) {
   try {
-    storage?.setItem(key, JSON.stringify(data));
+    const payload = { ...(data as Record<string, unknown>) };
+    delete payload.readerPaletteColorEnabledOverridesLight;
+    delete payload.readerPaletteColorEnabledOverridesDark;
+    delete payload.readerPaletteSelectedPresetId;
+    delete payload.readerPaletteOverridesLight;
+    delete payload.readerPaletteOverridesDark;
+    storage?.setItem(key, JSON.stringify(payload));
     if (
       typeof window !== "undefined" &&
       storage === window.localStorage &&
@@ -780,6 +877,11 @@ export function patchPersistedMainSettings(
       if (value === undefined) continue;
       next[key] = value;
     }
+    delete next.readerPaletteColorEnabledOverridesLight;
+    delete next.readerPaletteColorEnabledOverridesDark;
+    delete next.readerPaletteSelectedPresetId;
+    delete next.readerPaletteOverridesLight;
+    delete next.readerPaletteOverridesDark;
   }
   persistSettingsData(
     typeof localStorage !== "undefined" ? localStorage : undefined,

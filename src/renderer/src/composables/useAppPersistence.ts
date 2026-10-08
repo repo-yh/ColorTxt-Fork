@@ -118,6 +118,9 @@ import {
   minChapterMinCharCount,
   clampMouseWheelScrollSensitivity,
   clampFastScrollSensitivity,
+  clampReadingRulerFocusLines,
+  clampReadingRulerDimOpacity,
+  clampMarkdownImageHeightPx,
   defaultMouseWheelScrollSensitivity,
   defaultFastScrollSensitivity,
   fileListKey,
@@ -130,11 +133,24 @@ import {
   skipUnloadPersistenceSessionKey,
   APP_DISPLAY_NAME,
   type ChapterTitleBlankMode,
-  type ReaderSurfacePalette,
+  type ReaderBackgroundState,
 } from "../constants/appUi";
+import {
+  parseReaderBackgroundState,
+  serializeReaderBackgroundState,
+} from "../constants/readerBackground";
+import {
+  parseReaderPaletteSelectedId,
+  parseReaderPaletteUserPresets,
+  serializeReaderPaletteUserPresets,
+  type ReaderPalettePreset,
+} from "../constants/readerPalettePresets";
 import { EBOOK_CONVERT_DEFAULT_SUBDIR } from "@shared/ebookConvertPaths";
 import type { ShortcutBindingMap } from "../services/shortcutRegistry";
-import { mergeShortcutBindings } from "../services/shortcutUtils";
+import {
+  mergeShortcutBindings,
+  shortcutBindingOverridesForPersist,
+} from "../services/shortcutUtils";
 import { joinFs } from "../ebook/pathUtils";
 import { resolveDefaultEbookConvertOutputDirSync } from "../utils/defaultCacheDirs";
 import type { AiCustomSkill, AiSkillUserOverride } from "@shared/aiSkills";
@@ -230,6 +246,7 @@ export function useAppPersistence(deps: {
   readingProgressSynced: Ref<boolean>;
   sidebarWidth: Ref<number>;
   showSidebar: Ref<boolean>;
+  isMinimalistView: Ref<boolean>;
   currentTheme: Ref<string>;
   monacoCustomHighlight: Ref<boolean>;
   compressBlankLines: Ref<boolean>;
@@ -264,6 +281,12 @@ export function useAppPersistence(deps: {
   fastScrollSensitivity: Ref<number>;
   stickyChapterTitleEnabled: Ref<boolean>;
   readerClickMode: Ref<boolean>;
+  readingRulerEnabled: Ref<boolean>;
+  readingRulerFocusLines: Ref<number>;
+  readingRulerDimOpacity: Ref<number>;
+  readingRulerDimStickyTitle: Ref<boolean>;
+  readingRulerTransitionEnabled: Ref<boolean>;
+  markdownImageHeightPx: Ref<number>;
   chapterNavToolbarEnabled: Ref<boolean>;
   readerEditShowLineNumbers: Ref<boolean>;
   readerEditMinimap: Ref<boolean>;
@@ -280,14 +303,13 @@ export function useAppPersistence(deps: {
   fileMetaRecords: Ref<FileMetaRecord[]>;
   shortcutBindings: Ref<ShortcutBindingMap>;
   defaultShortcutBindings: ShortcutBindingMap;
-  readerPaletteOverridesLight: Ref<Partial<ReaderSurfacePalette>>;
-  readerPaletteOverridesDark: Ref<Partial<ReaderSurfacePalette>>;
-  readerPaletteColorEnabledOverridesLight: Ref<
+  readerPaletteColorEnabledOverrides: Ref<
     Partial<import("../constants/readerPalette").ReaderSurfaceColorEnabled>
   >;
-  readerPaletteColorEnabledOverridesDark: Ref<
-    Partial<import("../constants/readerPalette").ReaderSurfaceColorEnabled>
-  >;
+  readerPaletteUserPresets: Ref<ReaderPalettePreset[]>;
+  readerPaletteSelectedIdLight: Ref<string>;
+  readerPaletteSelectedIdDark: Ref<string>;
+  readerBackground: Ref<ReaderBackgroundState>;
   highlightColorsLight: Ref<string[]>;
   highlightColorsDark: Ref<string[]>;
   lineationColorsLight: Ref<string[]>;
@@ -380,6 +402,7 @@ export function useAppPersistence(deps: {
       theme: deps.currentTheme.value === "vs" ? "vs" : "vs-dark",
       sidebarWidth: deps.sidebarWidth.value,
       showSidebar: deps.showSidebar.value,
+      isMinimalistView: deps.isMinimalistView.value,
       fontSize: deps.readerFontSize.value,
       lineHeightMultiple: deps.readerLineHeightMultiple.value,
       lineSpacingPx: deps.readerLineSpacingPx.value,
@@ -412,6 +435,12 @@ export function useAppPersistence(deps: {
       fastScrollSensitivity: deps.fastScrollSensitivity.value,
       stickyChapterTitleEnabled: deps.stickyChapterTitleEnabled.value,
       readerClickMode: deps.readerClickMode.value,
+      readingRulerEnabled: deps.readingRulerEnabled.value,
+      readingRulerFocusLines: deps.readingRulerFocusLines.value,
+      readingRulerDimOpacity: deps.readingRulerDimOpacity.value,
+      readingRulerDimStickyTitle: deps.readingRulerDimStickyTitle.value,
+      readingRulerTransitionEnabled: deps.readingRulerTransitionEnabled.value,
+      markdownImageHeightPx: deps.markdownImageHeightPx.value,
       chapterNavToolbarEnabled: deps.chapterNavToolbarEnabled.value,
       readerEditShowLineNumbers: deps.readerEditShowLineNumbers.value,
       readerEditMinimap: deps.readerEditMinimap.value,
@@ -427,20 +456,25 @@ export function useAppPersistence(deps: {
       translationSettings: stripTranslationSecretsForDisk(
         deps.translationSettings.value,
       ),
-      shortcutBindings: deps.shortcutBindings.value,
-      // 空对象也要写入：合并落盘时若用 undefined 会跳过，磁盘上旧覆盖无法清除（恢复默认失效）
-      readerPaletteOverridesLight: {
-        ...deps.readerPaletteOverridesLight.value,
+      shortcutBindings: shortcutBindingOverridesForPersist(
+        deps.defaultShortcutBindings,
+        deps.shortcutBindings.value,
+      ),
+      readerPaletteColorEnabledOverrides: {
+        ...deps.readerPaletteColorEnabledOverrides.value,
       },
-      readerPaletteOverridesDark: {
-        ...deps.readerPaletteOverridesDark.value,
-      },
-      readerPaletteColorEnabledOverridesLight: {
-        ...deps.readerPaletteColorEnabledOverridesLight.value,
-      },
-      readerPaletteColorEnabledOverridesDark: {
-        ...deps.readerPaletteColorEnabledOverridesDark.value,
-      },
+      readerPaletteUserPresets: serializeReaderPaletteUserPresets(
+        deps.readerPaletteUserPresets.value,
+      ),
+      readerPaletteSelectedIdLight: parseReaderPaletteSelectedId(
+        deps.readerPaletteSelectedIdLight.value,
+      ),
+      readerPaletteSelectedIdDark: parseReaderPaletteSelectedId(
+        deps.readerPaletteSelectedIdDark.value,
+      ),
+      readerBackground: serializeReaderBackgroundState(
+        deps.readerBackground.value,
+      ),
       // 始终写入完整数组：PersistPayload 在与默认相同时返回 undefined，合并会跳过并保留磁盘旧表
       highlightColorsLight: [...deps.highlightColorsLight.value],
       highlightColorsDark: [...deps.highlightColorsDark.value],
@@ -775,6 +809,7 @@ export function useAppPersistence(deps: {
       loadPersistedSettings({
         applySidebarWidth: false,
         applyShowSidebar: false,
+        applyMinimalistView: false,
         applyReaderUiPrefs: false,
       });
     }
@@ -1121,6 +1156,8 @@ export function useAppPersistence(deps: {
     applySidebarWidth?: boolean;
     /** 为 false 时不覆盖本窗口侧栏开关（多窗口 storage 同步） */
     applyShowSidebar?: boolean;
+    /** 为 false 时不覆盖本窗口极简视图（多窗口 storage 同步） */
+    applyMinimalistView?: boolean;
     /**
      * 为 false 时不覆盖本窗口阅读/编辑/语音朗读相关 UI。
      * 多窗口 storage 同步时使用，避免「界面仍是本窗值、打开设置却是别窗刚存的值」。
@@ -1133,6 +1170,7 @@ export function useAppPersistence(deps: {
   } {
     const applySidebarWidth = options?.applySidebarWidth !== false;
     const applyShowSidebar = options?.applyShowSidebar !== false;
+    const applyMinimalistView = options?.applyMinimalistView !== false;
     const applyReaderUiPrefs = options?.applyReaderUiPrefs !== false;
     const loaded = loadPersistedSettingsData(
       typeof window !== "undefined" ? window.localStorage : undefined,
@@ -1164,6 +1202,10 @@ export function useAppPersistence(deps: {
 
     if (applyShowSidebar && typeof data.showSidebar === "boolean") {
       deps.showSidebar.value = data.showSidebar;
+    }
+
+    if (applyMinimalistView && typeof data.isMinimalistView === "boolean") {
+      deps.isMinimalistView.value = data.isMinimalistView;
     }
 
     if (applyReaderUiPrefs) {
@@ -1335,6 +1377,40 @@ export function useAppPersistence(deps: {
       if (typeof data.readerClickMode === "boolean") {
         deps.readerClickMode.value = data.readerClickMode;
       }
+      if (typeof data.readingRulerEnabled === "boolean") {
+        deps.readingRulerEnabled.value = data.readingRulerEnabled;
+      }
+      if (
+        typeof data.readingRulerFocusLines === "number" &&
+        Number.isFinite(data.readingRulerFocusLines)
+      ) {
+        deps.readingRulerFocusLines.value = clampReadingRulerFocusLines(
+          data.readingRulerFocusLines,
+        );
+      }
+      if (
+        typeof data.readingRulerDimOpacity === "number" &&
+        Number.isFinite(data.readingRulerDimOpacity)
+      ) {
+        deps.readingRulerDimOpacity.value = clampReadingRulerDimOpacity(
+          data.readingRulerDimOpacity,
+        );
+      }
+      if (typeof data.readingRulerDimStickyTitle === "boolean") {
+        deps.readingRulerDimStickyTitle.value = data.readingRulerDimStickyTitle;
+      }
+      if (typeof data.readingRulerTransitionEnabled === "boolean") {
+        deps.readingRulerTransitionEnabled.value =
+          data.readingRulerTransitionEnabled;
+      }
+      if (
+        typeof data.markdownImageHeightPx === "number" &&
+        Number.isFinite(data.markdownImageHeightPx)
+      ) {
+        deps.markdownImageHeightPx.value = clampMarkdownImageHeightPx(
+          data.markdownImageHeightPx,
+        );
+      }
       if (typeof data.chapterNavToolbarEnabled === "boolean") {
         deps.chapterNavToolbarEnabled.value = data.chapterNavToolbarEnabled;
       }
@@ -1394,20 +1470,23 @@ export function useAppPersistence(deps: {
       data.shortcutBindings,
     );
 
-    deps.readerPaletteOverridesLight.value = data.readerPaletteOverridesLight
-      ? { ...data.readerPaletteOverridesLight }
-      : {};
-    deps.readerPaletteOverridesDark.value = data.readerPaletteOverridesDark
-      ? { ...data.readerPaletteOverridesDark }
-      : {};
-    deps.readerPaletteColorEnabledOverridesLight.value =
-      data.readerPaletteColorEnabledOverridesLight
-        ? { ...data.readerPaletteColorEnabledOverridesLight }
+    deps.readerPaletteColorEnabledOverrides.value =
+      data.readerPaletteColorEnabledOverrides
+        ? { ...data.readerPaletteColorEnabledOverrides }
         : {};
-    deps.readerPaletteColorEnabledOverridesDark.value =
-      data.readerPaletteColorEnabledOverridesDark
-        ? { ...data.readerPaletteColorEnabledOverridesDark }
-        : {};
+    deps.readerBackground.value = parseReaderBackgroundState(
+      data.readerBackground,
+    );
+    const loadedUserPresets = parseReaderPaletteUserPresets(
+      data.readerPaletteUserPresets,
+    );
+    deps.readerPaletteUserPresets.value = loadedUserPresets;
+    deps.readerPaletteSelectedIdLight.value = parseReaderPaletteSelectedId(
+      data.readerPaletteSelectedIdLight,
+    );
+    deps.readerPaletteSelectedIdDark.value = parseReaderPaletteSelectedId(
+      data.readerPaletteSelectedIdDark,
+    );
 
     const parsedHL = parseHighlightColorsArray(data.highlightColorsLight);
     deps.highlightColorsLight.value = mergeHighlightColors(
@@ -1556,6 +1635,10 @@ export function useAppPersistence(deps: {
       }
       if (applyShowSidebar) {
         settingsPersistBaseline.showSidebar = deps.showSidebar.value;
+      }
+      if (applyMinimalistView) {
+        settingsPersistBaseline.isMinimalistView =
+          deps.isMinimalistView.value;
       }
     }
 

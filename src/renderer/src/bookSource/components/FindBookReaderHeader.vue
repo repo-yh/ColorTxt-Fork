@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import IconButton from "../../components/IconButton.vue";
+import MinimalistViewButton from "../../components/MinimalistViewButton.vue";
 import HeaderFontToolbar from "../../components/HeaderFontToolbar.vue";
 import HeaderFormatToolbar from "../../components/HeaderFormatToolbar.vue";
 import AppShellMenuTeleport from "../../components/AppShellMenuTeleport.vue";
@@ -12,23 +13,30 @@ import {
 } from "../../constants/appHeaderLayout";
 import { icons } from "../../icons";
 import {
+  readingRulerButtonTitle,
   readerClickModeButtonTitle,
+  readerClickModeButtonTitleWithRuler,
   readerSelectModeButtonTitle,
+  readerSelectModeButtonTitleWithRuler,
 } from "../../constants/appUi";
 import type {
   TextConvertWidthMode,
   TextConvertZhMode,
 } from "@shared/textConvertTypes";
+import type { ShortcutBindingMap } from "../../services/shortcutRegistry";
+import { titleWithShortcut, acceleratorToDisplayText } from "../../services/shortcutUtils";
 
 const props = withDefaults(
   defineProps<{
     currentTheme: string;
-    showSidebar: boolean;
     inFullscreen?: boolean;
+    inMinimalist?: boolean;
     canIncreaseFont: boolean;
     canDecreaseFont: boolean;
     canIncreaseLineHeight: boolean;
     canDecreaseLineHeight: boolean;
+    readerFontSize: number;
+    readerLineHeightMultiple: number;
     monacoFontFamily: string;
     pinnedOtherFonts?: string[];
     monacoAdvancedWrapping: boolean;
@@ -50,19 +58,27 @@ const props = withDefaults(
     colorSchemeShortcutLabel?: string;
     /** 查找菜单项右侧快捷键文案 */
     findShortcutLabel?: string;
+    /** 切换主题色按钮 title 中的快捷键文案（如 F2） */
+    themeShortcutLabel?: string;
     readerEditMode?: boolean;
     /** 阅读器点击翻页模式（false = 可选模式）；传入生效值（含按住 Alt 的临时反转） */
     readerClickMode?: boolean;
     /** 按住 Alt 临时切换交互模式 */
     readerClickModeAltHeld?: boolean;
+    /** 阅读尺（聚焦行淡化） */
+    readingRulerEnabled?: boolean;
     canEnterReaderEditMode?: boolean;
     /** 保存章节缓存中 */
     readerChapterSaving?: boolean;
     /** 有已启用的文本替换规则时工具栏按钮为激活态 */
     textReplaceActive?: boolean;
+    /** 当前有正文可进入摸鱼模式 */
+    canEnterStealth?: boolean;
+    shortcutBindings: ShortcutBindingMap;
   }>(),
   {
     inFullscreen: false,
+    inMinimalist: false,
     pinnedOtherFonts: () => [],
     textConvertZh: "off",
     textConvertLetter: "off",
@@ -76,18 +92,21 @@ const props = withDefaults(
     settingsShortcutLabel: "",
     colorSchemeShortcutLabel: "",
     findShortcutLabel: "",
+    themeShortcutLabel: "",
     readerEditMode: false,
     readerClickMode: false,
     readerClickModeAltHeld: false,
+    readingRulerEnabled: false,
     canEnterReaderEditMode: false,
     readerChapterSaving: false,
     textReplaceActive: false,
+    canEnterStealth: false,
   },
 );
 
 const emit = defineEmits<{
   changeTheme: [theme: string];
-  toggleSidebar: [];
+  toggleMinimalist: [];
   toggleFullscreen: [];
   setMonacoFont: [fontFamily: string];
   togglePinOtherFont: [fontName: string];
@@ -115,15 +134,53 @@ const emit = defineEmits<{
   toggleBookshelf: [];
   toggleReaderEdit: [];
   toggleReaderClickMode: [];
+  toggleReadingRuler: [];
   saveReaderChapter: [];
   openTextReplace: [];
+  enterStealthReader: [];
 }>();
 
 const vrFormatLock = computed(() => props.voiceReadHeaderLocked);
+const isMacPlatform = /mac|iphone|ipad|ipod/i.test(navigator.platform || "");
+const themeToggleTitle = computed(() =>
+  titleWithShortcut(
+    props.currentTheme === "vs"
+      ? "当前亮色，点击切换暗色"
+      : "当前暗色，点击切换亮色",
+    props.shortcutBindings.toggleTheme,
+    isMacPlatform,
+  ),
+);
+const editModeTitle = computed(() =>
+  titleWithShortcut(
+    "编辑模式",
+    props.shortcutBindings.toggleReaderEdit,
+    isMacPlatform,
+  ),
+);
+const readingRulerTitle = computed(() =>
+  props.voiceReadActive
+    ? `${readingRulerButtonTitle}\n\n语音朗读中不可使用阅读尺`
+    : readingRulerButtonTitle,
+);
+const readingRulerRuntimeOn = computed(
+  () => props.readingRulerEnabled === true && !props.voiceReadActive,
+);
+const fullscreenTitle = computed(() =>
+  titleWithShortcut(
+    props.inFullscreen ? "退出全屏" : "全屏阅读",
+    props.shortcutBindings.toggleFullscreen,
+    isMacPlatform,
+  ),
+);
 const readerClickModeTitle = computed(() =>
   props.readerClickMode
-    ? readerClickModeButtonTitle
-    : readerSelectModeButtonTitle,
+    ? readingRulerRuntimeOn.value
+      ? readerClickModeButtonTitleWithRuler
+      : readerClickModeButtonTitle
+    : readingRulerRuntimeOn.value
+      ? readerSelectModeButtonTitleWithRuler
+      : readerSelectModeButtonTitle,
 );
 const readerClickModeAriaLabel = computed(() => {
   const base = props.readerClickMode
@@ -158,6 +215,7 @@ const {
   toggleMenu: toggleMoreMenu,
   closeMenu: closeMoreMenu,
   panelRef: moreMenuPanelRef,
+  availableMaxHeight: moreMenuMaxHeight,
 } = moreMenu;
 
 function bindMoreMenuPanel(el: HTMLElement | null) {
@@ -183,6 +241,18 @@ function onOpenTextReplace() {
   closeMoreMenu();
   emit("openTextReplace");
 }
+
+function onEnterStealthReader() {
+  closeMoreMenu();
+  emit("enterStealthReader");
+}
+
+const stealthShortcutLabel = computed(() =>
+  acceleratorToDisplayText(
+    props.shortcutBindings.enterStealthReader,
+    isMacPlatform,
+  ),
+);
 </script>
 
 <template>
@@ -207,10 +277,25 @@ function onOpenTextReplace() {
         :icon-html="icons.edit"
         :active="readerEditMode"
         :pressed="readerEditMode"
-        title="编辑模式"
-        aria-label="切换编辑模式"
+        :title="editModeTitle"
+        :aria-label="editModeTitle"
         :disabled="!readerEditMode && !canEnterReaderEditMode"
         @click="emit('toggleReaderEdit')"
+      />
+      <span
+        v-if="!readerEditMode"
+        class="toolbarDivider"
+        aria-hidden="true"
+      />
+      <IconButton
+        v-if="!readerEditMode"
+        :icon-html="icons.readingRuler"
+        :active="readingRulerRuntimeOn"
+        :pressed="readingRulerRuntimeOn"
+        :title="readingRulerTitle"
+        aria-label="切换阅读尺"
+        :disabled="voiceReadActive"
+        @click="emit('toggleReadingRuler')"
       />
       <IconButton
         v-if="!readerEditMode"
@@ -266,6 +351,9 @@ function onOpenTextReplace() {
           :can-decrease-font="canDecreaseFont"
           :can-increase-line-height="canIncreaseLineHeight"
           :can-decrease-line-height="canDecreaseLineHeight"
+          :font-size="readerFontSize"
+          :line-height-multiple="readerLineHeightMultiple"
+          :shortcut-bindings="shortcutBindings"
           @set-monaco-font="(fontFamily) => emit('setMonacoFont', fontFamily)"
           @toggle-pin-other-font="(fontName) => emit('togglePinOtherFont', fontName)"
           @increase-font-size="emit('increaseFontSize')"
@@ -317,20 +405,20 @@ function onOpenTextReplace() {
         />
         <IconButton
           :icon-html="currentTheme === 'vs' ? icons.light : icons.dark"
-          :title="currentTheme === 'vs' ? '当前亮色，点击切换暗色' : '当前暗色，点击切换亮色'"
+          :title="themeToggleTitle"
+          :aria-label="themeToggleTitle"
           @click="emit('changeTheme', currentTheme === 'vs' ? 'vs-dark' : 'vs')"
         />
-        <IconButton
-          v-if="!inFullscreen"
-          :icon-html="icons.sidebar"
-          :active="showSidebar"
-          :pressed="showSidebar"
-          title="切换侧边栏"
-          @click="emit('toggleSidebar')"
+        <MinimalistViewButton
+          :minimalist="inMinimalist"
+          :disabled="inFullscreen"
+          :shortcut-bindings="shortcutBindings"
+          @toggle-minimalist="emit('toggleMinimalist')"
         />
         <IconButton
           :icon-html="inFullscreen ? icons.leaveFullscreen : icons.enterFullscreen"
-          :title="inFullscreen ? '退出全屏' : '全屏阅读'"
+          :title="fullscreenTitle"
+          :aria-label="fullscreenTitle"
           @click="emit('toggleFullscreen')"
         />
         <div ref="moreBtnRef" class="findBookReaderMoreWrap">
@@ -353,22 +441,10 @@ function onOpenTextReplace() {
       :left="moreMenuLeft"
       :top="moreMenuTop"
       caret="end"
-      :fullscreen-header-float="inFullscreen"
+      :fullscreen-header-float="inFullscreen || inMinimalist"
+      :max-height="moreMenuMaxHeight"
       :on-panel-mount="bindMoreMenuPanel"
     >
-      <button
-        type="button"
-        class="appShellMenuItem"
-        role="menuitem"
-        @click="onToggleFindFromToolbar"
-      >
-        <span class="appShellMenuIconSlot" v-html="icons.find" />
-        <span class="appShellMenuLabel">查找</span>
-        <span v-if="findShortcutLabel" class="appShellMenuShortcut">{{
-          findShortcutLabel
-        }}</span>
-      </button>
-      <div class="appShellMenuDivider" role="separator" />
       <div v-if="showToolbarInMoreMenu" class="findBookReaderMorePanel">
         <HeaderFontToolbar
           v-if="compactFontToolbar"
@@ -379,6 +455,9 @@ function onOpenTextReplace() {
           :can-decrease-font="canDecreaseFont"
           :can-increase-line-height="canIncreaseLineHeight"
           :can-decrease-line-height="canDecreaseLineHeight"
+          :font-size="readerFontSize"
+          :line-height-multiple="readerLineHeightMultiple"
+          :shortcut-bindings="shortcutBindings"
           @set-monaco-font="(fontFamily) => { emit('setMonacoFont', fontFamily); closeMoreMenu(); }"
           @toggle-pin-other-font="(fontName) => emit('togglePinOtherFont', fontName)"
           @increase-font-size="emit('increaseFontSize')"
@@ -421,6 +500,19 @@ function onOpenTextReplace() {
         type="button"
         class="appShellMenuItem"
         role="menuitem"
+        @click="onToggleFindFromToolbar"
+      >
+        <span class="appShellMenuIconSlot" v-html="icons.find" />
+        <span class="appShellMenuLabel">查找</span>
+        <span v-if="findShortcutLabel" class="appShellMenuShortcut">{{
+          findShortcutLabel
+        }}</span>
+      </button>
+      <div class="appShellMenuDivider" role="separator" />
+      <button
+        type="button"
+        class="appShellMenuItem"
+        role="menuitem"
         @click="onOpenSettingsFromToolbar"
       >
         <span class="appShellMenuIconSlot" v-html="icons.setting" />
@@ -442,6 +534,22 @@ function onOpenTextReplace() {
         <span class="appShellMenuLabel">配色</span>
         <span v-if="colorSchemeShortcutLabel" class="appShellMenuShortcut">{{
           colorSchemeShortcutLabel
+        }}</span>
+      </button>
+      <button
+        type="button"
+        class="appShellMenuItem"
+        role="menuitem"
+        :disabled="!canEnterStealth"
+        @click="onEnterStealthReader"
+      >
+        <span
+          class="appShellMenuIconSlot appShellMenuIconSlot--colorful"
+          v-html="icons.stealthMode"
+        />
+        <span class="appShellMenuLabel">摸鱼模式</span>
+        <span v-if="stealthShortcutLabel" class="appShellMenuShortcut">{{
+          stealthShortcutLabel
         }}</span>
       </button>
     </AppShellMenuTeleport>
@@ -513,8 +621,15 @@ function onOpenTextReplace() {
 .findBookReaderMorePanel {
   display: flex;
   flex-direction: column;
+  align-items: stretch;
   gap: 8px;
-  padding: 8px;
+  padding: 4px 4px 0;
+  overflow: visible;
+  flex-shrink: 0;
+}
+.findBookReaderMorePanel :deep(.headerFontToolbar),
+.findBookReaderMorePanel :deep(.headerFormatToolbar) {
+  justify-content: center;
 }
 .hdrLockable {
   display: inline-flex;

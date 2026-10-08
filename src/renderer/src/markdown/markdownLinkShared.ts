@@ -261,6 +261,29 @@ function tryLexLinkAt(line: string, open: number): Tokens.Link | null {
   return link;
 }
 
+/** `![alt](url)`：避免把其中的 `[](url)` 误当成链接（会留下孤立的 `!`） */
+function tryLexImageAt(line: string, bang: number): Tokens.Image | null {
+  const sub = line.slice(bang);
+  if (!sub.startsWith("![")) return null;
+  const tokens = Lexer.lexInline(sub);
+  const first = tokens[0];
+  if (!first || first.type !== "image") return null;
+  const img = first as Tokens.Image;
+  if (!sub.startsWith(img.raw)) return null;
+  return img;
+}
+
+/** 若 `[` 属于 `![…](…)`，返回应跳过到的下一扫描位置 */
+function skipIndexAfterMdImageBracket(
+  line: string,
+  openBracket: number,
+): number | null {
+  if (openBracket <= 0 || line[openBracket - 1] !== "!") return null;
+  const img = tryLexImageAt(line, openBracket - 1);
+  if (!img) return null;
+  return openBracket - 1 + img.raw.length;
+}
+
 function parsedFromMarkedLink(
   tok: Tokens.Link,
   index: number,
@@ -300,13 +323,28 @@ export function scanMdInternalLinkAt(
   line: string,
   from: number,
 ): ParsedMdInternalLink | null {
-  const open = line.indexOf("[", from);
-  if (open < 0) return null;
-  const tok = tryLexLinkAt(line, open);
-  if (!tok) return null;
-  const parsed = parsedFromMarkedLink(tok, open);
-  if (!parsed || !("fragment" in parsed)) return null;
-  return parsed;
+  let pos = from;
+  while (pos < line.length) {
+    const open = line.indexOf("[", pos);
+    if (open < 0) return null;
+    const afterImage = skipIndexAfterMdImageBracket(line, open);
+    if (afterImage != null) {
+      pos = afterImage;
+      continue;
+    }
+    const tok = tryLexLinkAt(line, open);
+    if (!tok) {
+      pos = open + 1;
+      continue;
+    }
+    const parsed = parsedFromMarkedLink(tok, open);
+    if (!parsed || !("fragment" in parsed)) {
+      pos = open + 1;
+      continue;
+    }
+    return parsed;
+  }
+  return null;
 }
 
 export type ParsedMdExternalLink = {
@@ -323,13 +361,28 @@ export function scanMdExternalLinkAt(
   line: string,
   from: number,
 ): ParsedMdExternalLink | null {
-  const open = line.indexOf("[", from);
-  if (open < 0) return null;
-  const tok = tryLexLinkAt(line, open);
-  if (!tok) return null;
-  const parsed = parsedFromMarkedLink(tok, open);
-  if (!parsed || !("url" in parsed)) return null;
-  return parsed;
+  let pos = from;
+  while (pos < line.length) {
+    const open = line.indexOf("[", pos);
+    if (open < 0) return null;
+    const afterImage = skipIndexAfterMdImageBracket(line, open);
+    if (afterImage != null) {
+      pos = afterImage;
+      continue;
+    }
+    const tok = tryLexLinkAt(line, open);
+    if (!tok) {
+      pos = open + 1;
+      continue;
+    }
+    const parsed = parsedFromMarkedLink(tok, open);
+    if (!parsed || !("url" in parsed)) {
+      pos = open + 1;
+      continue;
+    }
+    return parsed;
+  }
+  return null;
 }
 
 export type NextMdLinkScan =
@@ -344,6 +397,11 @@ export function scanNextMdLinkAt(
   while (pos < line.length) {
     const open = line.indexOf("[", pos);
     if (open < 0) return null;
+    const afterImage = skipIndexAfterMdImageBracket(line, open);
+    if (afterImage != null) {
+      pos = afterImage;
+      continue;
+    }
     const tok = tryLexLinkAt(line, open);
     if (tok) {
       const parsed = parsedFromMarkedLink(tok, open);

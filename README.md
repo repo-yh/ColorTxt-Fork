@@ -33,7 +33,12 @@
 | <img src="./src/renderer/src/assets/chapter_list.svg" width="18" height="18" alt=""> | 自动章节识别 | 内置常用的章节匹配规则，也支持自定义匹配规则 |
 | <img src="./src/renderer/src/assets/palette.svg" width="18" height="18" alt=""> | **个性内容上色** | 使用一套自定义的高亮规则对内容进行着色，带来 **独特的阅读体验**！ |
 | <img src="./src/renderer/src/assets/highlight.svg" width="18" height="18" alt=""> | **自定义高亮词** | 可选择任意词语进行高亮显示（可用于突出主要角色、关键词语等） |
-| <img src="./src/renderer/src/assets/palette.svg" width="18" height="18" alt=""> | **自定义配色** | 可定制阅读区、高亮词、划线标注的配色 |
+| <img src="./src/renderer/src/assets/palette.svg" width="18" height="18" alt=""> | **自定义配色** | 内置多套配色方案，也可以自定义阅读区配色 / 高亮色 / 标注色 |
+| <img src="./src/renderer/src/assets/enter_fullscreen.svg" width="18" height="18" alt=""> | 全屏阅读 | 禅模式，**沉浸式阅读体验**，阅读区域宽度可自由调整 |
+| <img src="./src/renderer/src/assets/enter_minimalist_view.svg" width="18" height="18" alt=""> | 极简视图 | **专注阅读**，阅读区撑满窗口，鼠标移到窗口边缘唤出相应面板 |
+| <img src="./src/renderer/src/assets/reading_ruler.svg" width="18" height="18" alt=""> | 阅读尺 | 适合注意力不容易集中的人（**ADHD**），聚焦阅读行，淡化其他行 |
+| <img src="./src/renderer/src/assets/emituofo.svg" width="18" height="18" alt=""> | 摸鱼模式 | 打开一个无边框透明置顶的阅读窗口，不知道有什么用 |
+| <img src="./src/renderer/src/assets/history.svg" width="18" height="18" alt=""> | **番茄时钟** | 保护眼睛，健康阅读，从你我做起！ |
 | <img src="./src/renderer/src/assets/bookmark_active.svg" width="18" height="18" alt=""> | 书签 | 可添加带备注的书签 |
 | <img src="./src/renderer/src/assets/note.svg" width="18" height="18" alt=""> | **划线笔记** | 可选中文本进行划线标注、记笔记 |
 | <img src="./src/renderer/src/assets/edit.svg" width="18" height="18" alt=""> | **编辑模式** | 方便对小说内容进行修改（_错别字坚决不能忍！_） |
@@ -41,7 +46,6 @@
 | <img src="./src/renderer/src/assets/reading.svg" width="18" height="18" alt=""> | **语音朗读** | 支持旁白 / 对白多音色，配合 AI + 角色卡可实现多角色语音朗读 |
 | <img src="./src/renderer/src/assets/replace.svg" width="18" height="18" alt=""> | **文本替换** | 全局替换文本（可用于替换人名、去广告文本等） |
 | <img src="./src/renderer/src/assets/conver.svg" width="18" height="18" alt=""> | **简繁互转** | 简繁互转，字母 / 数字全半角互转 |
-| <img src="./src/renderer/src/assets/history.svg" width="18" height="18" alt=""> | **番茄时钟** | 保护眼睛，健康阅读，从你我做起！ |
 | <img src="./src/renderer/src/assets/AI_chat.svg" width="18" height="18" alt=""> | **AI 阅读助手** | 可以让 **AI** 帮忙分析剧情、回答小说相关问题（支持生成 <img src="./src/renderer/src/assets/mindmap.svg" width="18" height="18" alt=""> **思维导图** / <img src="./src/renderer/src/assets/wordcloud.svg" width="18" height="18" alt=""> **词云图**） |
 | <img src="./src/renderer/src/assets/character.svg" width="18" height="18" alt=""> | **角色卡生成** | 借助 **AI** 检索小说中角色的相关信息生成摘要，通过 **文生图** 生成角色立绘 |
 | <img src="./src/renderer/src/assets/AI_compose.svg" width="18" height="18" alt=""> | **AI 智能排版** | 让 **AI** 对文本进行排版，可自动处理硬换行、修正标点符号等 |
@@ -56,7 +60,6 @@
 | <img src="./src/renderer/src/assets/font_family.svg" width="18" height="18" alt=""> | 字体 | 可设置字体 / 字号；内置 `京華老宋体`，也可以选择系统中安装的任意字体 |
 | <img src="./src/renderer/src/assets/line_height_up.svg" width="18" height="18" alt=""> | 排版 | 可设置字间距 / 行间距 / 段间距 / 左右边距 |
 | <img src="./src/renderer/src/assets/dark.svg" width="18" height="18" alt=""> | 主题切换 | 内置明亮 / 暗黑两种主题 |
-| <img src="./src/renderer/src/assets/enter_fullscreen.svg" width="18" height="18" alt=""> | 全屏阅读 | **沉浸式阅读体验**，阅读区域宽度可自由调整 |
 |  | 粘性标题栏 | 章节标题会常驻顶部，看到哪里一目了然 |
 |  | 阅读进度恢复 | 自动记录阅读进度，下次打开可以继续阅读 |
 |  | 最近打开记录 | 记录最近打开的文件 |
@@ -73,9 +76,9 @@
 支持打开常见的电子书格式（`.epub`/`.mobi`/`.azw3`/`.fb2`/`.fbz`/`.pdf`/`.chm`），打开时会转换为 `.md` 进行加载。
 
 > [!NOTE]
-> 会舍弃掉电子书自带的样式，只提取里面的文本进行展示。
+> 会舍弃掉电子书自带的样式，只提取里面的文本进行展示。<br />对于排版精美的电子书，建议使用专门的阅读器进行阅读，彩读**只适用于**纯文本或带简单插图的电子书。
 
-### 关于「摸鱼快捷键」
+### 关于「摸鱼快捷键」与「摸鱼模式」
 
 「摸鱼快捷键」可以快速隐藏阅读器，包括窗口、任务栏按钮（Windows）、程序坞图标（macOS），让摸鱼更安全。
 
@@ -84,15 +87,21 @@
 > [!NOTE]
 > macOS 上，要隐藏程序坞图标，需要在 `系统设置` → `桌面与程序坞` 中关掉 `在程序坞中显示建议App和最近使用的App`。
 
+「摸鱼模式」会打开一个无边框、无任务栏、透明背景、始终置顶的阅读窗口，不知道有什么用。
+
+全局快捷键 `Ctrl` + `↑` / `↓` 翻页、`Ctrl` + `←` / `→` 切章。
+
+右键菜单可开关「定时滚动」。
+
 > [!WARNING]
 > 已知问题：在 Linux Wayland 上，全局快捷键会失效，这个暂时没有解决办法。
 
 ### 关于「高级换行策略」
 
-阅读器默认使用一套比较简单的换行算法，效率高，但不够准确，会出现该换行却没有换行的情况。这个问题连 VSCode 都没能完美解决。
-
 > [!IMPORTANT]
 > 彩读给 Monaco 打了补丁，「简单换行策略」下的中文自动换行效果已经得到了不错的改善，所以除非情况特殊，不建议开启「高级换行策略」
+
+阅读器默认使用一套比较简单的换行算法，效率高，但不够准确，会出现该换行却没有换行的情况。这个问题连 VSCode 都没能完美解决。
 
 「高级换行策略」则使用了一套更复杂的算法，能有效提高换行的准确性，但性能较差。当要处理的文件比较大时，会出现明显卡顿，要等计算完才能恢复。
 
@@ -155,11 +164,9 @@
 | 小米 MiMo | MiMo                    | 支持 **音色定制** 和 **音色克隆**，**目前限免** |
 | 豆包语音合成大模型 2.0 | 火山引擎 | 内置官方 **444 个音色**，可切换方言 |
 
-支持「单音色」或「旁白/对白多音色」。
-
-启用「AI 阅读助手」时，多音色可区分「男声」「女声」，也可以在「角色卡」中给角色设置专属音色。
-
-支持「朗读过滤」（朗读时忽略特定内容）和「自动暂停」（朗读指定的章节数或时长后自动暂停）。
+- 支持「单音色」或「旁白/对白多音色」。
+  - 启用「AI 阅读助手」时，多音色可区分「男声」「女声」，也可以在「角色卡」中给角色设置专属音色。
+- 支持「朗读过滤」（朗读时忽略特定内容）和「自动暂停」（朗读指定的章节数或时长后自动暂停）。
 
 ### 关于「AI」功能
 
@@ -171,6 +178,15 @@
 **对话模型**：用于「AI 阅读助手」对话，以及「角色卡」整理检索结果、推断画风；
 
 **向量模型**：用于全文检索（RAG），支持 **内置本地模型** 和 **远程嵌入 API**。
+
+<details>
+<summary>为什么需要向量模型？</summary>
+
+> 简单来说，就是 **对话模型** 擅长「思考」和「说」，却不擅长「找」，我们也不可能每提一个问题都把整本小说的内容一起发给 AI 服务器，成本太高。（比如你问 `xxx在第几章出场？`，这个问题显然需要在整本书里找）
+> 
+> 而 **向量模型** 就是来做这个事情的，它会提前给整本小说 _建立索引_ （可以简单理解为生成了一个「小说内容的搜索引擎」），当你提问时，它会在索引库中「找到」和问题 _相关性最高_ 的几个片段再交给 AI。<br/>这个过程是在 _本地执行_ 的，不需要消耗 Token；发给 AI 服务器的原文也只剩下找出来的几个片段，从而降低了成本。
+
+</details>
 
 远程接口目前只支持 OpenAI 规范，以下为预设的服务商列表：
 
@@ -191,11 +207,14 @@
 | Google Gemini（OpenAI 兼容） | `https://generativelanguage.googleapis.com/v1beta/openai` |
 | _自定义 OpenAI 兼容服务_     | _（手动输入接口地址）_                                    |
 
-OpenAI 接口拼接方式：
+<details>
+<summary>OpenAI 接口拼接方式（不重要）</summary>
 
 - 拉取模型列表：`GET {接口地址}/models`
 - 对话：`POST {接口地址}/chat/completions`
 - 调用嵌入模型：`POST {接口地址}/embeddings`
+
+</details>
 
 **内置本地模型**：下载模型到本地运行，无需 API（模型文件没有打包，需要在「设置」中手动下载）：
 
@@ -311,6 +330,7 @@ ColorTxt/
 ## 相关
 
 - 应用图标由 [豆包](https://www.doubao.com/) 生成
+- 内置背景图由 [ChatGPT Images 2.0](https://chatgpt.com/images/) 生成
 - 页面里的图标来自 [iconfont](https://www.iconfont.cn/)
 - 内置的 `京華老宋体` 仅供学习交流使用，商用请购买正版字体
 - 内容上色灵感来源于 VS Code 插件 [vscode-txt-syntax](https://github.com/xshrim/vscode-txt-syntax)

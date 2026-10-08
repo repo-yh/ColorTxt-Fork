@@ -35,6 +35,13 @@ const props = withDefaults(
   },
 );
 
+const bodyMaxHeight = computed(() => {
+  if (props.maxHeight == null) return undefined;
+  return typeof props.maxHeight === "number"
+    ? `${props.maxHeight}px`
+    : props.maxHeight;
+});
+
 const panelClassList = computed(() => {
   const list: Array<string | undefined> = [props.panelClass];
   if (props.caret) {
@@ -79,16 +86,16 @@ function setPanelEl(el: Element | null | { $el?: unknown }) {
               ? `${minWidth}px`
               : minWidth
             : undefined,
-        maxHeight:
-          maxHeight != null
-            ? typeof maxHeight === 'number'
-              ? `${maxHeight}px`
-              : maxHeight
-            : undefined,
       }"
       @click.stop
     >
-      <slot />
+      <div
+        class="appShellMenuTeleportBody"
+        :class="{ 'appShellMenuTeleportBody--scroll': !!bodyMaxHeight }"
+        :style="{ maxHeight: bodyMaxHeight }"
+      >
+        <slot />
+      </div>
     </div>
   </Teleport>
 </template>
@@ -106,6 +113,18 @@ function setPanelEl(el: Element | null | { $el?: unknown }) {
 
 .appShellMenuTeleport--withCaret {
   overflow: visible;
+}
+
+.appShellMenuTeleportBody {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.appShellMenuTeleportBody--scroll {
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .appShellMenuTeleport--withCaret::before,

@@ -51,6 +51,15 @@ import {
   defaultReaderHorizontalInsetPx,
   clampReaderHorizontalInsetPx,
   defaultStickyChapterTitleEnabled,
+  defaultReadingRulerEnabled,
+  defaultReadingRulerFocusLines,
+  defaultReadingRulerDimOpacity,
+  defaultReadingRulerDimStickyTitle,
+  defaultReadingRulerTransitionEnabled,
+  clampReadingRulerFocusLines,
+  clampReadingRulerDimOpacity,
+  defaultMarkdownImageHeightPx,
+  clampMarkdownImageHeightPx,
   defaultTxtrDelimitedMatchCrossLine,
   defaultChapterNavToolbarEnabled,
   maxLineHeightMultipleForFontSize,
@@ -108,6 +117,7 @@ import {
 } from "../../utils/defaultCacheDirs";
 import { confirmClearAllChapterCache } from "../services/clearBookChapterCache";
 import { appAlert } from "../../services/appDialog";
+import { READER_EDITOR_DEFAULT_FONT_FAMILY } from "../../monaco/readerEditorOptions";
 import type { CharacterRosterEntry } from "@shared/characterTypes";
 import "../../styles/settingsPanel.css";
 
@@ -157,6 +167,7 @@ const draftWebDavUsername = ref("");
 const draftWebDavPassword = ref("");
 const draftWebDavRemoteDir = ref("ColorTxt");
 const draftFontSize = ref(defaultReaderFontSize);
+const draftFontFamily = ref(READER_EDITOR_DEFAULT_FONT_FAMILY);
 const draftLineHeightMultiple = ref(defaultReaderLineHeightMultiple);
 const draftLineSpacingPx = ref(defaultLineSpacingPx);
 const draftLetterSpacingPx = ref(defaultLetterSpacingPx);
@@ -169,6 +180,14 @@ const draftMouseWheelScrollSensitivity = ref(
 );
 const draftFastScrollSensitivity = ref(defaultFastScrollSensitivity);
 const draftStickyChapterTitleEnabled = ref(defaultStickyChapterTitleEnabled);
+const draftReadingRulerEnabled = ref(defaultReadingRulerEnabled);
+const draftReadingRulerFocusLines = ref(defaultReadingRulerFocusLines);
+const draftReadingRulerDimOpacity = ref(defaultReadingRulerDimOpacity);
+const draftReadingRulerDimStickyTitle = ref(defaultReadingRulerDimStickyTitle);
+const draftReadingRulerTransitionEnabled = ref(
+  defaultReadingRulerTransitionEnabled,
+);
+const draftMarkdownImageHeightPx = ref(defaultMarkdownImageHeightPx);
 const draftChapterNavToolbarEnabled = ref(defaultChapterNavToolbarEnabled);
 const draftFindBookChapterAdvanceEnabled = ref(fbReaderSettings.findBookChapterAdvanceEnabled.value);
 const draftReaderEditShowLineNumbers = ref(defaultReaderEditShowLineNumbers);
@@ -258,8 +277,22 @@ async function loadWebDavPasswordDraft() {
   }
 }
 
+function togglePinOtherFont(fontName: string) {
+  const normalized = fontName.trim();
+  if (!normalized) return;
+  const list = fb.pinnedOtherFonts.value;
+  const idx = list.findIndex((f) => f.trim() === normalized);
+  if (idx >= 0) {
+    fb.pinnedOtherFonts.value = list.filter((_, i) => i !== idx);
+  } else {
+    fb.pinnedOtherFonts.value = [...list, normalized];
+  }
+  fb.persistReaderUiPrefs();
+}
+
 function syncSharedReaderDraftFromStore() {
   draftFontSize.value = fb.readerFontSize.value;
+  draftFontFamily.value = fb.monacoFontFamily.value;
   draftLineHeightMultiple.value = clampFindBookReaderLineHeight(
     fb.readerFontSize.value,
     fb.readerLineHeightMultiple.value,
@@ -280,6 +313,19 @@ function syncSharedReaderDraftFromStore() {
     fb.fastScrollSensitivity.value,
   );
   draftStickyChapterTitleEnabled.value = fb.stickyChapterTitleEnabled.value;
+  draftReadingRulerEnabled.value = fb.readingRulerEnabled.value;
+  draftReadingRulerFocusLines.value = clampReadingRulerFocusLines(
+    fb.readingRulerFocusLines.value,
+  );
+  draftReadingRulerDimOpacity.value = clampReadingRulerDimOpacity(
+    fb.readingRulerDimOpacity.value,
+  );
+  draftReadingRulerDimStickyTitle.value = fb.readingRulerDimStickyTitle.value;
+  draftReadingRulerTransitionEnabled.value =
+    fb.readingRulerTransitionEnabled.value;
+  draftMarkdownImageHeightPx.value = clampMarkdownImageHeightPx(
+    fb.markdownImageHeightPx.value,
+  );
   draftChapterNavToolbarEnabled.value = fb.chapterNavToolbarEnabled.value;
   draftFindBookChapterAdvanceEnabled.value = fb.findBookChapterAdvanceEnabled.value;
   draftReaderEditShowLineNumbers.value = fb.readerEditShowLineNumbers.value;
@@ -358,6 +404,7 @@ function resetWebDavDraft() {
 
 function resetReadingDraft() {
   draftFontSize.value = defaultReaderFontSize;
+  draftFontFamily.value = READER_EDITOR_DEFAULT_FONT_FAMILY;
   draftLineHeightMultiple.value = defaultReaderLineHeightMultiple;
   draftLineSpacingPx.value = defaultLineSpacingPx;
   draftLetterSpacingPx.value = defaultLetterSpacingPx;
@@ -367,6 +414,13 @@ function resetReadingDraft() {
   draftMouseWheelScrollSensitivity.value = defaultMouseWheelScrollSensitivity;
   draftFastScrollSensitivity.value = defaultFastScrollSensitivity;
   draftStickyChapterTitleEnabled.value = defaultStickyChapterTitleEnabled;
+  draftReadingRulerEnabled.value = defaultReadingRulerEnabled;
+  draftReadingRulerFocusLines.value = defaultReadingRulerFocusLines;
+  draftReadingRulerDimOpacity.value = defaultReadingRulerDimOpacity;
+  draftReadingRulerDimStickyTitle.value = defaultReadingRulerDimStickyTitle;
+  draftReadingRulerTransitionEnabled.value =
+    defaultReadingRulerTransitionEnabled;
+  draftMarkdownImageHeightPx.value = defaultMarkdownImageHeightPx;
   draftChapterNavToolbarEnabled.value = defaultChapterNavToolbarEnabled;
   draftChapterTitleBlankMode.value =
     defaultChapterTitleBlankMode;
@@ -518,6 +572,8 @@ async function onConfirm() {
     password: draftProxyPassword.value,
   };
   fb.readerFontSize.value = draftFontSize.value;
+  fb.monacoFontFamily.value =
+    draftFontFamily.value.trim() || fb.monacoFontFamily.value;
   fb.readerLineHeightMultiple.value = clampFindBookReaderLineHeight(
     draftFontSize.value,
     draftLineHeightMultiple.value,
@@ -538,6 +594,19 @@ async function onConfirm() {
     draftFastScrollSensitivity.value,
   );
   fb.stickyChapterTitleEnabled.value = draftStickyChapterTitleEnabled.value;
+  fb.readingRulerEnabled.value = draftReadingRulerEnabled.value;
+  fb.readingRulerFocusLines.value = clampReadingRulerFocusLines(
+    draftReadingRulerFocusLines.value,
+  );
+  fb.readingRulerDimOpacity.value = clampReadingRulerDimOpacity(
+    draftReadingRulerDimOpacity.value,
+  );
+  fb.readingRulerDimStickyTitle.value = draftReadingRulerDimStickyTitle.value;
+  fb.readingRulerTransitionEnabled.value =
+    draftReadingRulerTransitionEnabled.value;
+  fb.markdownImageHeightPx.value = clampMarkdownImageHeightPx(
+    draftMarkdownImageHeightPx.value,
+  );
   fb.chapterNavToolbarEnabled.value = draftChapterNavToolbarEnabled.value;
   fb.findBookChapterAdvanceEnabled.value = draftFindBookChapterAdvanceEnabled.value;
   fb.readerEditShowLineNumbers.value = draftReaderEditShowLineNumbers.value;
@@ -670,6 +739,8 @@ watch(draftFontSize, (size) => {
 
             <SettingsReadingPanel
               v-show="activeTab === 'reading'"
+              v-model:draft-font-family="draftFontFamily"
+              :pinned-other-fonts="fb.pinnedOtherFonts.value"
               v-model:draft-font-size="draftFontSize"
               v-model:draft-line-height-multiple="draftLineHeightMultiple"
               v-model:draft-line-spacing-px="draftLineSpacingPx"
@@ -685,6 +756,12 @@ watch(draftFontSize, (size) => {
               "
               v-model:draft-fast-scroll-sensitivity="draftFastScrollSensitivity"
               v-model:draft-sticky-chapter-title-enabled="draftStickyChapterTitleEnabled"
+              v-model:draft-reading-ruler-enabled="draftReadingRulerEnabled"
+              v-model:draft-reading-ruler-focus-lines="draftReadingRulerFocusLines"
+              v-model:draft-reading-ruler-dim-opacity="draftReadingRulerDimOpacity"
+              v-model:draft-reading-ruler-dim-sticky-title="draftReadingRulerDimStickyTitle"
+              v-model:draft-reading-ruler-transition-enabled="draftReadingRulerTransitionEnabled"
+              v-model:draft-markdown-image-height-px="draftMarkdownImageHeightPx"
               v-model:draft-chapter-nav-toolbar-enabled="draftChapterNavToolbarEnabled"
               v-model:draft-find-book-chapter-advance-enabled="draftFindBookChapterAdvanceEnabled"
               v-model:draft-chapter-title-blank-mode="draftChapterTitleBlankMode"
@@ -706,6 +783,7 @@ watch(draftFontSize, (size) => {
               :show-ask-ai="false"
               :show-find-book-chapter-advance-option="true"
               :monaco-custom-highlight="fb.monacoCustomHighlight.value"
+              @toggle-pin-other-font="togglePinOtherFont"
               @open-dictionary-manage="showDictionaryManagePanel = true"
               @open-web-search-manage="showWebSearchManagePanel = true"
               @open-translate-manage="openTranslateManageFromSettings"

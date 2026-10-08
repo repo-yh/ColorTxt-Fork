@@ -4,7 +4,7 @@ import {
   resolveTxt2ImgSize,
   TXT2IMG_DEFAULT_CLOUD_MODEL,
 } from "@shared/txt2ImgBackend";
-import { resolveOpenAiImagesApiQuality } from "@shared/txt2ImgOpenAiQuality";
+import { resolveOpenAiImagesApiQuality, openAiImagesShouldSendResponseFormat } from "@shared/txt2ImgOpenAiQuality";
 import {
   bufferFromImageUrl,
   errorFromTxt2ImgCatch,
@@ -45,8 +45,10 @@ export async function fetchOpenAiImagesBuffer(
     prompt: prompt.trim(),
     n: 1,
     size: openAiImagesSizeString(size),
-    response_format: "b64_json",
   };
+  if (openAiImagesShouldSendResponseFormat(model)) {
+    body.response_format = "b64_json";
+  }
   if (quality) body.quality = quality;
 
   const url = `${base}/images/generations`;

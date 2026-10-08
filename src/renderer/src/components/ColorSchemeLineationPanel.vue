@@ -25,7 +25,6 @@ const emit = defineEmits<{
   "draft-end": [];
   reorder: [fromIndex: number, toIndex: number];
   remove: [index: number];
-  add: [];
 }>();
 
 const tableScrollEl = ref<HTMLElement | null>(null);
@@ -42,12 +41,13 @@ const { remount: remountLineationSortable } = useSortableReorder({
   },
 });
 
-async function onAddClick() {
-  emit("add");
+async function scrollToBottom() {
   await nextTick();
   const el = tableScrollEl.value;
   if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
 }
+
+defineExpose({ scrollToBottom });
 
 function markerStyle(hex: string) {
   return {
@@ -76,7 +76,7 @@ function straightStyle(hex: string) {
 <template>
   <div class="colorSchemeLineation" role="tabpanel">
     <div ref="tableScrollEl" class="schemePanelTableScroll">
-      <table class="lineationTable" :class="{ hasScrollBar: rows.length >= 6 }">
+      <table class="lineationTable" :class="{ hasScrollBar: rows.length >= 8 }">
         <tbody ref="tableBodyRef">
           <tr v-for="(row, rowIdx) in rows" :key="row.id">
             <td class="lnColLabel colorSchemeRowLabel">
@@ -134,16 +134,6 @@ function straightStyle(hex: string) {
         </tbody>
       </table>
     </div>
-    <button
-      type="button"
-      class="btn lineationAddBtn"
-      size="large"
-      aria-label="新增标注色"
-      title="新增标注色"
-      @click="onAddClick"
-    >
-      <span class="lineationAddBtnIcon" aria-hidden="true" v-html="icons.add"></span>
-    </button>
   </div>
 </template>
 
@@ -232,31 +222,6 @@ function straightStyle(hex: string) {
   align-items: center;
   justify-content: flex-end;
   gap: 4px;
-}
-
-.lineationAddBtn {
-  margin-top: 10px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.lineationAddBtnIcon {
-  flex-shrink: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: inherit;
-}
-
-.lineationAddBtnIcon :deep(svg) {
-  width: 18px;
-  height: 18px;
-  display: block;
-}
-
-.lineationAddBtnIcon :deep(svg path) {
-  fill: currentColor;
 }
 
 :deep(tr.sortableRowGhost) {

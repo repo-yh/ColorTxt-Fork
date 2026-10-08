@@ -62,6 +62,9 @@ export function useAppChapterNavigation(deps: {
     fn: () => Promise<T> | T,
   ) => Promise<T>;
   onAfterChapterListRefresh?: () => void | Promise<void>;
+  readingRulerEnabled: Ref<boolean>;
+  /** 晚绑定：朗读中（含暂停）不走阅读尺居中切章 */
+  isVoiceReadActive?: () => boolean;
 }) {
   function resolveChapterListIndex(ch: Chapter): number {
     const list = deps.chapters.value;
@@ -77,11 +80,22 @@ export function useAppChapterNavigation(deps: {
   }
 
   function jumpToChapter(ch: Chapter) {
-    deps.readerRef.value?.scrollToLineNearTop?.(
-      ch.lineNumber,
-      true,
-      chapterJumpAnchorSlotFromTop(ch.headingLevel),
-    );
+    if (
+      deps.readingRulerEnabled.value &&
+      !deps.readerEditMode.value &&
+      !deps.isVoiceReadActive?.()
+    ) {
+      deps.readerRef.value?.scrollChapterTitleToRulerFocus?.(
+        ch.lineNumber,
+        true,
+      );
+    } else {
+      deps.readerRef.value?.scrollToLineNearTop?.(
+        ch.lineNumber,
+        true,
+        chapterJumpAnchorSlotFromTop(ch.headingLevel),
+      );
+    }
     const idx = resolveChapterListIndex(ch);
     if (idx !== deps.activeChapterIdx.value) deps.activeChapterIdx.value = idx;
   }

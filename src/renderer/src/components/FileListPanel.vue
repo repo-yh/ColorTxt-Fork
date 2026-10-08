@@ -546,8 +546,13 @@ function resolveTreeFileItem(row: Extract<FileListTreeFlatRow, { kind: "file" }>
 
 const renamingFilePath = ref<string | null>(null);
 const renameDraft = ref("");
-const renameInputRef = ref<HTMLInputElement | null>(null);
+const renameInputEl = ref<HTMLInputElement | null>(null);
 const renameCommitting = ref(false);
+
+/** VirtualList 的 v-for 会把同名模板 ref 收成数组，须用函数 ref 拿到真正的 input */
+function setRenameInputEl(el: unknown) {
+  renameInputEl.value = el instanceof HTMLInputElement ? el : null;
+}
 
 function startRenamingFile(path: string) {
   const row = props.files.find((f) => f.path === path);
@@ -620,7 +625,7 @@ function onFileListRootKeydown(ev: KeyboardEvent) {
 watch(renamingFilePath, async (path) => {
   if (!path) return;
   await nextTick();
-  const input = renameInputRef.value;
+  const input = renameInputEl.value;
   if (!input) return;
   input.focus({ preventScroll: true });
   const range = fileNameSelectionRange(input.value);
@@ -1258,6 +1263,7 @@ onBeforeUnmount(() => {
     <div
       ref="listFocusEl"
       class="sidebarTabBody"
+      data-file-list-rename-hotkey
       :tabindex="isEditingFileList ? 0 : -1"
       @keydown="onFileListRootKeydown"
     >
@@ -1356,6 +1362,7 @@ onBeforeUnmount(() => {
             :row-stride="READER_SIDEBAR_ROW_STRIDE"
             :overscan="10"
             :item-key="isTreeMode ? treeItemKeyFn : listItemKeyFn"
+            arrow-nav
           >
             <template #default="{ index }">
               <template v-if="isTreeMode">
@@ -1366,6 +1373,7 @@ onBeforeUnmount(() => {
                   <button
                     v-if="row?.kind === 'folder'"
                     type="button"
+                    tabindex="-1"
                     class="sidebarItem fileItem fileItem--folder"
                     :title="row.fullDirPath"
                     @click="onTreeFolderClick(row.fullDirPath)"
@@ -1396,6 +1404,7 @@ onBeforeUnmount(() => {
                   <button
                     v-else-if="row?.kind === 'file'"
                     type="button"
+                    tabindex="-1"
                     class="sidebarItem fileItem"
                     :class="{
                       active: row.file.path === currentFilePath,
@@ -1444,7 +1453,7 @@ onBeforeUnmount(() => {
                       />
                       <input
                         v-if="renamingFilePath === row.file.path"
-                        ref="renameInputRef"
+                        :ref="setRenameInputEl"
                         v-model="renameDraft"
                         class="fileItemRenameInput"
                         type="text"
@@ -1482,6 +1491,8 @@ onBeforeUnmount(() => {
               </template>
               <button
                 v-else
+                type="button"
+                tabindex="-1"
                 class="sidebarItem fileItem"
                 :class="{
                   active: filesFiltered[index].path === currentFilePath,
@@ -1523,7 +1534,7 @@ onBeforeUnmount(() => {
                   />
                   <input
                     v-if="renamingFilePath === filesFiltered[index].path"
-                    ref="renameInputRef"
+                    :ref="setRenameInputEl"
                     v-model="renameDraft"
                     class="fileItemRenameInput"
                     type="text"

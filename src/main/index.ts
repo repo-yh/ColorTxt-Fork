@@ -15,6 +15,12 @@ import {
   destroyAllBackstageWebViews,
   isBackstageWebViewWindow,
 } from "./bookSource/engine/backstageWebView";
+import { destroyEyedropperOverlays, isEyedropperWindow } from "./eyedropper";
+import {
+  destroyStealthReaderWindow,
+  isStealthReaderWindow,
+} from "./stealthReader";
+import { isStealthSettingsWindow } from "./stealthSettingsWindow";
 
 // 开发态 DevTools 会对「无 CSP / 含 unsafe-eval」的渲染进程刷安全警告；
 // 主界面 CSP 需 unsafe-eval（文本替换 @js:），登录验证窗还会加载第三方页——无法也不应强行收紧。
@@ -93,13 +99,20 @@ app.whenReady().then(async () => {
 
   app.on("activate", () => {
     const userWindows = BrowserWindow.getAllWindows().filter(
-      (w) => !w.isDestroyed() && !isBackstageWebViewWindow(w),
+      (w) =>
+        !w.isDestroyed() &&
+        !isBackstageWebViewWindow(w) &&
+        !isEyedropperWindow(w) &&
+        !isStealthReaderWindow(w) &&
+        !isStealthSettingsWindow(w),
     );
     if (userWindows.length === 0) createWindow({});
   });
 });
 
 app.on("before-quit", () => {
+  destroyStealthReaderWindow();
+  destroyEyedropperOverlays();
   // 优雅关闭 Web 展示服务，清理失效缓存
   const w = (() => {
     if (mainWindowFocusState.lastId != null) {
@@ -129,6 +142,8 @@ app.on("will-quit", () => {
 });
 
 app.on("window-all-closed", () => {
+  destroyStealthReaderWindow();
+  destroyEyedropperOverlays();
   destroyAllBackstageWebViews();
   // 末窗关闭后须再次 quit；macOS 上 Cmd+Q 首次 quit 常被关窗拦截 cancel，靠此路径收尾
   markAppQuittingForClose();

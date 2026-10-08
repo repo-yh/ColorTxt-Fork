@@ -65,6 +65,11 @@ import { registerBookSourceIpcHandlers } from "./bookSource/registerBookSourceIp
 import { registerWebDavIpcHandlers } from "./webdav/registerWebDavIpc";
 import { registerDictionaryIpcHandlers } from "./dictionary/registerDictionaryIpc";
 import { registerTranslationIpcHandlers } from "./translation/registerTranslationIpc";
+import { registerReaderBackgroundIpc } from "./readerBackgroundIpc";
+import { registerEyedropperIpc } from "./eyedropper";
+import { registerStealthReaderIpc } from "./stealthReader";
+import { registerStealthSettingsIpc, setStealthSettingsClosedHandler } from "./stealthSettingsWindow";
+import { resolveTerminalDefaultFontFace } from "./terminalFont";
 import { createFindBookDesktopShortcut } from "./findBookLaunch";
 import {
   focusOrOpenFindBookWindow,
@@ -766,18 +771,30 @@ export function registerMainIpcHandlers(
   });
 
   ipcMain.handle("fonts:listSystemFonts", async () => {
-    if (cachedSystemFonts) return cachedSystemFonts;
+    if (cachedSystemFonts && cachedSystemFonts.length > 0) {
+      return cachedSystemFonts;
+    }
 
     try {
       const fonts = await getFonts({ disableQuoting: true });
-      cachedSystemFonts = Array.from(new Set(fonts)).sort((a, b) =>
+      const list = Array.from(new Set(fonts)).sort((a, b) =>
         a.localeCompare(b, "zh-Hans-CN"),
       );
-    } catch {
-      cachedSystemFonts = [];
+      // 成功才缓存；失败勿缓存空数组，否则后续窗口永远「未获取到」
+      if (list.length > 0) cachedSystemFonts = list;
+      return list;
+    } catch (err) {
+      console.warn("[fonts] listSystemFonts failed", err);
+      return [];
     }
+  });
 
-    return cachedSystemFonts;
+  ipcMain.handle("fonts:getTerminalDefaultFace", async () => {
+    try {
+      return await resolveTerminalDefaultFontFace();
+    } catch {
+      return null;
+    }
   });
 
   ipcMain.on("window:setTitle", (evt, title: string) => {
@@ -790,6 +807,12 @@ export function registerMainIpcHandlers(
     if (!win) return false;
     win.setFullScreen(Boolean(value));
     return win.isFullScreen();
+  });
+
+  ipcMain.handle("window:getContentBounds", (evt) => {
+    const win = BrowserWindow.fromWebContents(evt.sender);
+    if (!win || win.isDestroyed()) return null;
+    return win.getContentBounds();
   });
 
   ipcMain.handle("shortcut:getGlobalToggle", () => {
@@ -1371,4 +1394,11 @@ function unknownQuoteAttributions(
   registerWebDavIpcHandlers();
   registerDictionaryIpcHandlers();
   registerTranslationIpcHandlers();
+  registerReaderBackgroundIpc();
+  registerEyedropperIpc();
+  registerStealthReaderIpc();
+  setStealthSettingsClosedHandler(() => {
+    resumeGlobalShortcutsAfterRecording();
+  });
+  registerStealthSettingsIpc();
 }

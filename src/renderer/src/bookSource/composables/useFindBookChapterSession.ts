@@ -18,6 +18,7 @@ import { formatPhysicalPlainTextForReader } from "../../reader/readerDisplayPipe
 import type { ChapterTitleBlankMode } from "../../constants/appUi";
 import type { ReaderViewportRestoreAnchor } from "../../reader/readerViewportAnchor";
 import { applyTextDisplayConverts } from "../../services/textConvertApply";
+import { afterNextPaints } from "../../ebook/yieldToUi";
 import { appConfirm } from "../../services/appDialog";
 import { appToast } from "../../services/appToast";
 import { appLoading } from "../../services/appLoading";
@@ -71,6 +72,10 @@ export type FindBookChapterSessionDeps = {
   exitVoiceRead: () => void;
   /** 进入编辑前停止定时滚动（可晚绑定） */
   stopTimedScroll: () => void;
+  readerEditMode: Ref<boolean>;
+  readingRulerEnabled: Ref<boolean>;
+  /** 晚绑定：朗读中（含暂停）不走阅读尺居中 */
+  isVoiceReadActive?: () => boolean;
 };
 
 /**
@@ -81,8 +86,10 @@ export function useFindBookChapterSession(deps: FindBookChapterSessionDeps) {
   const readerContentKey = ref<string | null>(null);
   const lastChapterTitle = ref("");
   const lastChapterBody = ref("");
+  /** 阅读展示中章节标题所在行（切章阅读尺居中用） */
+  let lastChapterTitleDisplayLine = 1;
   const totalLineCount = ref(0);
-  const readerEditMode = ref(false);
+  const readerEditMode = deps.readerEditMode;
   const readerEditorDirty = ref(false);
   /** 章节保存 / 局部编辑写缓存中 */
   const readerChapterSaving = ref(false);
@@ -109,6 +116,8 @@ export function useFindBookChapterSession(deps: FindBookChapterSessionDeps) {
    * 与 `lastDisplayLineToPhysicalLine` 下标一致；供局部编辑选区映射。
    */
   const lastReaderPhysicalLines = ref<string[]>([]);
+  /** 最近一次写入 ReaderMain 的展示正文（摸鱼热换章用，不依赖隐藏窗 Monaco） */
+  const lastRenderedReaderText = ref("");
 
   function viewportDisplayLineToPhysicalLine(displayLine: number): number {
     const v = Math.max(1, Math.floor(displayLine));
@@ -207,17 +216,25 @@ export function useFindBookChapterSession(deps: FindBookChapterSessionDeps) {
     }
     const reader = deps.readerRef.value;
     if (!reader) return;
-    reader.scrollToDocumentStart(false);
+    const rulerFocus =
+      deps.readingRulerEnabled.value &&
+      !deps.readerEditMode.value &&
+      !deps.isVoiceReadActive?.();
+    const apply = () => {
+      if (rulerFocus) {
+        reader.scrollChapterTitleToRulerFocus?.(
+          lastChapterTitleDisplayLine,
+          false,
+        );
+      } else {
+        reader.scrollToDocumentStart(false);
+      }
+    };
+    apply();
     await nextTick();
-    await new Promise<void>((resolve) => {
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          reader.scrollToDocumentStart(false);
-          reader.refreshChapterStickyScroll?.();
-          resolve();
-        });
-      });
-    });
+    await afterNextPaints();
+    apply();
+    reader.refreshChapterStickyScroll?.();
   }
 
   async function ensureChapterScrollAtBottom() {
@@ -228,15 +245,16 @@ export function useFindBookChapterSession(deps: FindBookChapterSessionDeps) {
     if (!reader) return;
     reader.scrollToBottom?.(false);
     await nextTick();
-    await new Promise<void>((resolve) => {
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          reader.scrollToBottom?.(false);
-          reader.refreshChapterStickyScroll?.();
-          resolve();
-        });
-      });
-    });
+    await afterNextPaints();
+    reader.scrollToBottom?.(false);
+    reader.refreshChapterStickyScroll?.();
+    if (
+      deps.readingRulerEnabled.value &&
+      !deps.readerEditMode.value &&
+      !deps.isVoiceReadActive?.()
+    ) {
+      reader.syncReadingRulerToDocumentContentEdge?.(1);
+    }
   }
 
   function stripLeadingChapterTitleFromBody(body: string, title: string): string {
@@ -286,6 +304,7 @@ export function useFindBookChapterSession(deps: FindBookChapterSessionDeps) {
     if (!reader) return;
     lastReaderPhysicalLines.value = text.length > 0 ? text.split("\n") : [""];
     lastDisplayLineToPhysicalLine.value = formatted.displayLineToPhysicalLine;
+    lastRenderedReaderText.value = formatted.text;
     await reader.setFullText(formatted.text, {
       heavy: false,
       resetScroll: opts?.resetScroll ?? true,
@@ -294,6 +313,7 @@ export function useFindBookChapterSession(deps: FindBookChapterSessionDeps) {
     if (rawTitle) {
       const lineNumber =
         formatted.chapterTitleDisplayLineByPhysical.get(1) ?? 1;
+      lastChapterTitleDisplayLine = lineNumber;
       reader.setChapters([
         {
           title: rawTitle,
@@ -302,6 +322,7 @@ export function useFindBookChapterSession(deps: FindBookChapterSessionDeps) {
         },
       ]);
     } else {
+      lastChapterTitleDisplayLine = 1;
       reader.setChapters([]);
     }
   }
@@ -320,11 +341,7 @@ export function useFindBookChapterSession(deps: FindBookChapterSessionDeps) {
   }
 
   function settleReaderViewport(): Promise<void> {
-    return new Promise((resolve) => {
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => resolve());
-      });
-    });
+    return afterNextPaints();
   }
 
   const chapterContentBusy = computed(
@@ -588,6 +605,7 @@ export function useFindBookChapterSession(deps: FindBookChapterSessionDeps) {
       readerContentKey.value = null;
       lastChapterTitle.value = "";
       lastChapterBody.value = "";
+      lastRenderedReaderText.value = "";
       totalLineCount.value = 0;
     }
     const listLen = deps.displayChapters.value.length;
@@ -632,6 +650,7 @@ export function useFindBookChapterSession(deps: FindBookChapterSessionDeps) {
         readerContentKey.value = null;
         lastChapterTitle.value = ch.title;
         lastChapterBody.value = "";
+        lastRenderedReaderText.value = "";
         return;
       }
       const { content: body, displayTitle } = loaded;
@@ -680,6 +699,7 @@ export function useFindBookChapterSession(deps: FindBookChapterSessionDeps) {
     readerContentKey.value = null;
     lastChapterBody.value = "";
     lastChapterTitle.value = "";
+    lastRenderedReaderText.value = "";
     totalLineCount.value = 0;
     lastDisplayLineToPhysicalLine.value = null;
     lastReaderPhysicalLines.value = [];
@@ -694,6 +714,7 @@ export function useFindBookChapterSession(deps: FindBookChapterSessionDeps) {
     readerContentKey,
     lastChapterTitle,
     lastChapterBody,
+    lastRenderedReaderText,
     totalLineCount,
     readerEditMode,
     readerEditorDirty,

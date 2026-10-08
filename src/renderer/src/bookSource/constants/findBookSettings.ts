@@ -131,6 +131,8 @@ export type PersistedFindBookSettings = {
   proxy?: FindBookProxySettings;
   /** 阅读器侧栏是否展开（非全屏） */
   showSidebar?: boolean;
+  /** 极简视图 */
+  isMinimalistView?: boolean;
   sidebarWidth?: number;
   /** 目录是否显示章节附加信息（BookChapter.tag） */
   showChapterTag?: boolean;

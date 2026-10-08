@@ -166,11 +166,19 @@ function unbindCheckEvents() {
 
 function onCheckEvent(ev: BookSourceCheckEvent) {
   if (!modelValue.value) return;
-  if (ev.type === "sourceStatus" || ev.type === "sourceDone") {
+  if (ev.type === "sourceStatus") {
+    if (!checking.value) return;
     const nextMsg = new Map(checkMessages.value);
     nextMsg.set(ev.sourceUrl, ev.message);
     checkMessages.value = nextMsg;
-    if (ev.type === "sourceDone") {
+    return;
+  }
+  if (ev.type === "sourceDone") {
+    const nextMsg = new Map(checkMessages.value);
+    if (!isCheckFinishedMessage(ev.message)) {
+      nextMsg.delete(ev.sourceUrl);
+    } else {
+      nextMsg.set(ev.sourceUrl, ev.message);
       const idx = items.value.findIndex((i) => i.bookSourceUrl === ev.sourceUrl);
       if (idx >= 0) {
         const copy = items.value.slice();
@@ -181,6 +189,7 @@ function onCheckEvent(ev: BookSourceCheckEvent) {
         items.value = copy;
       }
     }
+    checkMessages.value = nextMsg;
     return;
   }
   if (ev.type === "progress") {
@@ -191,6 +200,7 @@ function onCheckEvent(ev: BookSourceCheckEvent) {
     checking.value = false;
     checkProgressText.value = "";
     if (ev.cancelled) {
+      resetIncompleteCheckMessages();
       appToast(`已停止校验（完成 ${ev.completed}/${ev.total}）`, { kind: "warning" });
     } else {
       appToast(`校验完成（${ev.completed}/${ev.total}）`, { kind: "info" });
@@ -332,6 +342,45 @@ function invertSelect() {
     next.size > 0 ? [...next][next.size - 1]! : null;
 }
 
+function isCheckFailedMessage(msg: string | undefined): boolean {
+  return !!msg?.includes("校验失败");
+}
+
+function isCheckFinishedMessage(msg: string | undefined): boolean {
+  return !!msg && (msg.includes("校验成功") || msg.includes("校验失败"));
+}
+
+/** 停止校验后：未完成项去掉中间态，已成功/失败的结果保留 */
+function resetIncompleteCheckMessages() {
+  const nextMsg = new Map(checkMessages.value);
+  let changed = false;
+  for (const [url, msg] of nextMsg) {
+    if (!isCheckFinishedMessage(msg)) {
+      nextMsg.delete(url);
+      changed = true;
+    }
+  }
+  if (changed) checkMessages.value = nextMsg;
+}
+
+/** 当前筛选列表中是否有校验失败的书源 */
+const hasCheckFailedInList = computed(() =>
+  filtered.value.some((i) =>
+    isCheckFailedMessage(checkMessages.value.get(i.bookSourceUrl)),
+  ),
+);
+
+function selectCheckFailed() {
+  const urls = filtered.value
+    .filter((i) =>
+      isCheckFailedMessage(checkMessages.value.get(i.bookSourceUrl)),
+    )
+    .map((i) => i.bookSourceUrl);
+  selected.value = new Set(urls);
+  lastSelectedUrl.value =
+    urls.length > 0 ? urls[urls.length - 1]! : null;
+}
+
 const { onListKeydown, focusList } = useListSelectionHotkeys({
   listEl: listFocusRef,
   enabled: () =>
@@ -351,10 +400,11 @@ watch(modelValue, (open) => {
     return;
   }
   clearSelection();
-  // 关闭面板时保留各项校验结果文案；仅收起进度并停止进行中的校验
+  // 关闭面板时保留已完成的校验结果；进行中的中间态清空并停止校验
   checkProgressText.value = "";
   if (checking.value) {
     checking.value = false;
+    resetIncompleteCheckMessages();
     void window.colorTxt.bookSourceCheckCancel();
   }
 });
@@ -498,6 +548,7 @@ async function onExportSelected() {
 async function onStopCheck() {
   if (!checking.value) return;
   await window.colorTxt.bookSourceCheckCancel();
+  resetIncompleteCheckMessages();
   appToast("正在停止校验…", { kind: "warning" });
 }
 
@@ -958,6 +1009,15 @@ function onEditDone() {
             </template>
           </AppCheckbox>
           <div class="bsFooterActions">
+            <button
+              v-if="hasCheckFailedInList"
+              type="button"
+              class="btn"
+              size="large"
+              @click="selectCheckFailed"
+            >
+              选中失败项
+            </button>
             <button type="button" class="btn" size="large" @click="invertSelect">反选</button>
             <button
               type="button"
@@ -1101,7 +1161,7 @@ function onEditDone() {
 }
 .appModalPanel.bookSourcePanel .appModalFooter {
   margin-top: 0;
-  padding: 10px 10px 10px 16px;
+  padding: 0;
   border-top: 1px solid var(--border, rgba(0, 0, 0, 0.08));
 }
 .appModalPanel.bookSourcePanel .bsList {
@@ -1297,8 +1357,8 @@ function onEditDone() {
   width: 100%;
   min-width: 0;
   box-sizing: border-box;
-  padding: 0 0 8px;
-  margin: 0 0 8px;
+  padding: 10px 10px 8px 16px;
+  margin: 0;
   border-bottom: 1px solid var(--border, rgba(0, 0, 0, 0.08));
 }
 .bsCheckProgressText {
@@ -1324,6 +1384,8 @@ function onEditDone() {
   justify-content: space-between;
   gap: 12px;
   width: 100%;
+  box-sizing: border-box;
+  padding: 10px 10px 10px 16px;
 }
 .bsFooterSelectAll {
   font-size: 14px;

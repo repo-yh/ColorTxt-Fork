@@ -111,7 +111,7 @@ onUnmounted(stop);
   font-size: 13px;
   font-variant-numeric: tabular-nums;
   line-height: 1.2;
-  background: var(--reader-bg);
+  background: transparent;
   color: color-mix(in srgb, var(--reader-body-text) 50%, transparent);
   user-select: none;
 }

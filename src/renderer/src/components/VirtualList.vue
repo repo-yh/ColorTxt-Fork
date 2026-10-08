@@ -25,8 +25,13 @@ const props = withDefaults(
      * 本组件只占位 totalHeight，自身不再产生滚动条。
      */
     externalScrollEl?: HTMLElement | null;
+    /**
+     * 方向键 / PageUp / PageDown 在本列表移动，焦点留在滚动容器上。
+     * 避免虚拟行销毁后焦点落到 body，快捷键改去滚阅读区。
+     */
+    arrowNav?: boolean;
   }>(),
-  { overscan: 10, scrollPadding: 5 },
+  { overscan: 10, scrollPadding: 5, arrowNav: false },
 );
 
 const emit = defineEmits<{
@@ -49,6 +54,143 @@ const listViewportHeight = ref(240);
 let cancelPendingSmoothScroll: (() => void) | null = null;
 
 const useExternalScroll = computed(() => Boolean(props.externalScrollEl));
+
+const arrowNavInstanceId = `vl-${Math.random().toString(36).slice(2, 9)}`;
+const cursorIndex = ref(0);
+
+function isEditableKeyTarget(t: EventTarget | null): boolean {
+  if (!(t instanceof Element)) return false;
+  if (
+    t instanceof HTMLInputElement ||
+    t instanceof HTMLTextAreaElement ||
+    t instanceof HTMLSelectElement
+  ) {
+    return true;
+  }
+  return t instanceof HTMLElement && t.isContentEditable;
+}
+
+function optionId(index: number): string {
+  return `${arrowNavInstanceId}-opt-${index}`;
+}
+
+function clampCursor() {
+  const n = props.itemCount;
+  if (n <= 0) {
+    cursorIndex.value = 0;
+    return;
+  }
+  if (cursorIndex.value > n - 1) cursorIndex.value = n - 1;
+  if (cursorIndex.value < 0) cursorIndex.value = 0;
+}
+
+function syncCursorFromScrollTop(scrollTop: number) {
+  if (!props.arrowNav || props.itemCount <= 0) return;
+  const stride = Math.max(1, props.rowStride);
+  cursorIndex.value = Math.max(
+    0,
+    Math.min(props.itemCount - 1, Math.round(scrollTop / stride)),
+  );
+}
+
+function activateCursorRow() {
+  const id = optionId(cursorIndex.value);
+  const row = listRootEl.value?.querySelector(`#${CSS.escape(id)}`);
+  const btn = row?.querySelector("button");
+  if (btn instanceof HTMLElement) btn.click();
+}
+
+function focusArrowNavHost() {
+  if (!props.arrowNav) return;
+  const ae = document.activeElement;
+  if (isEditableKeyTarget(ae)) return;
+  const host = scrollEl.value;
+  if (!host) return;
+  // 焦点已离开本列表（例如点了阅读区）：不要在 rAF 里抢回来
+  if (
+    ae instanceof HTMLElement &&
+    ae !== host &&
+    !host.contains(ae) &&
+    ae !== document.body &&
+    ae !== document.documentElement
+  ) {
+    return;
+  }
+  host.focus({ preventScroll: true });
+}
+
+function scrollHostByKey(ev: KeyboardEvent): boolean {
+  const el = scrollEl.value;
+  if (!el || useExternalScroll.value) return false;
+  const line = Math.max(1, props.rowStride);
+  const page = Math.max(line, el.clientHeight - line);
+  switch (ev.key) {
+    case "ArrowDown":
+      el.scrollTop += line;
+      return true;
+    case "ArrowUp":
+      el.scrollTop -= line;
+      return true;
+    case "PageDown":
+      el.scrollTop += page;
+      return true;
+    case "PageUp":
+      el.scrollTop -= page;
+      return true;
+    case "Home":
+      el.scrollTop = 0;
+      return true;
+    case "End":
+      el.scrollTop = el.scrollHeight;
+      return true;
+    default:
+      return false;
+  }
+}
+
+function onArrowNavKeydown(ev: KeyboardEvent) {
+  if (!props.arrowNav) return;
+  if (ev.altKey || ev.ctrlKey || ev.metaKey) return;
+  if (isEditableKeyTarget(ev.target)) return;
+  const n = props.itemCount;
+  if (n <= 0) return;
+  if (ev.key === "Enter" || ev.key === " ") {
+    if (ev.target === scrollEl.value) {
+      activateCursorRow();
+      ev.preventDefault();
+      ev.stopPropagation();
+    }
+    return;
+  }
+  const host = scrollEl.value;
+  if (!host) return;
+  // 焦点若还在行按钮上，原生方向键不会滚 overflow 容器；先聚焦再手动滚一行/一页。
+  if (ev.target !== host && host.contains(ev.target as Node)) {
+    focusArrowNavHost();
+    if (scrollHostByKey(ev)) {
+      ev.preventDefault();
+      ev.stopPropagation();
+    }
+  }
+}
+
+function onRowPointerDown(index: number, ev: PointerEvent) {
+  if (!props.arrowNav) return;
+  cursorIndex.value = index;
+  if (isEditableKeyTarget(ev.target)) return;
+}
+
+function onRowClick() {
+  if (!props.arrowNav) return;
+  requestAnimationFrame(focusArrowNavHost);
+}
+
+watch(
+  () => props.itemCount,
+  () => {
+    clampCursor();
+  },
+);
 
 const totalHeight = computed(() =>
   Math.max(0, props.itemCount * props.rowStride),
@@ -93,7 +235,9 @@ function syncFromExternal() {
 
 function onInternalScroll(e: Event) {
   if (useExternalScroll.value) return;
-  listScrollOffset.value = (e.target as HTMLElement).scrollTop;
+  const top = (e.target as HTMLElement).scrollTop;
+  listScrollOffset.value = top;
+  syncCursorFromScrollTop(top);
 }
 
 function getScrollHost(): HTMLElement | null {
@@ -226,11 +370,9 @@ function applyScrollTop(
       typeof window.matchMedia === "function" &&
       window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     if (reduceMotion) {
-      el.scrollTop = nextScrollTop;
-      if (useExternalScroll.value) syncFromExternal();
-      else listScrollOffset.value = nextScrollTop;
-      cancelPendingSmoothScroll = null;
-      return Promise.resolve();
+      return applyInstantScrollTop(el, nextScrollTop).then(() => {
+        cancelPendingSmoothScroll = null;
+      });
     }
 
     const targetTop = nextScrollTop;
@@ -285,10 +427,22 @@ function applyScrollTop(
     });
   }
 
+  return applyInstantScrollTop(el, nextScrollTop);
+}
+
+/**
+ * 瞬时滚动：先更新虚拟窗并等 DOM 落地，再写 scrollTop，
+ * 避免一帧内「容器已滚、transform 仍旧」造成文字重影闪烁。
+ */
+async function applyInstantScrollTop(el: HTMLElement, nextScrollTop: number) {
+  if (useExternalScroll.value) {
+    el.scrollTop = nextScrollTop;
+    syncFromExternal();
+    return;
+  }
+  listScrollOffset.value = nextScrollTop;
+  await nextTick();
   el.scrollTop = nextScrollTop;
-  if (useExternalScroll.value) syncFromExternal();
-  else listScrollOffset.value = nextScrollTop;
-  return Promise.resolve();
 }
 
 /**
@@ -383,8 +537,17 @@ defineExpose({
   <div
     ref="scrollEl"
     class="virtualList-scroll"
-    :class="{ 'virtualList-scroll--external': useExternalScroll }"
+    :class="{
+      'virtualList-scroll--external': useExternalScroll,
+      'virtualList-scroll--arrowNav': arrowNav,
+    }"
+    :tabindex="arrowNav && itemCount > 0 ? 0 : undefined"
+    :role="arrowNav ? 'listbox' : undefined"
+    :aria-activedescendant="
+      arrowNav && itemCount > 0 ? optionId(cursorIndex) : undefined
+    "
     @scroll="onInternalScroll"
+    @keydown="onArrowNavKeydown"
   >
     <div
       ref="listRootEl"
@@ -397,9 +560,15 @@ defineExpose({
       >
         <div
           v-for="index in virtualWindow.indices"
+          :id="arrowNav ? optionId(index) : undefined"
           :key="resolveKey(index)"
           class="virtualList-row"
+          :class="{ 'virtualList-row--cursor': arrowNav && index === cursorIndex }"
           :style="{ height: `${rowStride}px` }"
+          :role="arrowNav ? 'option' : undefined"
+          :aria-selected="arrowNav ? index === cursorIndex : undefined"
+          @pointerdown="onRowPointerDown(index, $event)"
+          @click="onRowClick"
         >
           <slot :index="index" />
         </div>
@@ -434,12 +603,21 @@ defineExpose({
   top: 0;
   display: flex;
   flex-direction: column;
-  will-change: transform;
 }
 
 .virtualList-row {
   flex-shrink: 0;
   box-sizing: border-box;
+}
+
+.virtualList-scroll--arrowNav:focus,
+.virtualList-scroll--arrowNav:focus-visible {
+  outline: none;
+}
+
+.virtualList-scroll--arrowNav :deep(button:focus),
+.virtualList-scroll--arrowNav :deep(button:focus-visible) {
+  outline: none;
 }
 
 .virtualList-row > :deep(*) {

@@ -9,6 +9,7 @@ import {
   useTemplateRef,
 } from "vue";
 import { icons } from "../icons";
+import { syncDismissibleOverlay } from "../utils/dismissibleOverlayStack";
 
 export type CustomSelectItemTagTone =
   | "language"
@@ -84,12 +85,15 @@ const props = withDefaults(
     searchPlaceholder?: string;
     /** 下拉最小宽度（px），默认与触发器同宽 */
     minPanelWidth?: number;
+    /** 下拉 Teleport 面板 z-index；嵌套在其它浮层内时需高于父面板 */
+    panelZIndex?: number;
     /** 为 true 时用左侧 3px 色块表示分类色（排序项带 prefixHtml 时不显示色块） */
     categoryColorMarks?: boolean;
   }>(),
   {
     scrollMaxHeight: 220,
     minPanelWidth: 0,
+    panelZIndex: 7200,
     triggerPrefixHtml: "",
     categoryColorMarks: false,
     placeholder: "",
@@ -107,6 +111,7 @@ const emit = defineEmits<{
 }>();
 
 const open = ref(false);
+syncDismissibleOverlay(open);
 const triggerRef = useTemplateRef<HTMLButtonElement>("triggerRef");
 const panelRef = useTemplateRef<HTMLElement>("panelRef");
 const scrollAreaRef = useTemplateRef<HTMLElement>("scrollAreaRef");
@@ -291,6 +296,7 @@ function onKey(ev: KeyboardEvent) {
   if (!open.value) return;
   if (ev.key === "Escape") {
     ev.preventDefault();
+    ev.stopPropagation();
     close();
   }
 }
@@ -345,13 +351,13 @@ watch(
 );
 
 onMounted(() => {
-  document.addEventListener("pointerdown", onDocPointerDown);
+  document.addEventListener("pointerdown", onDocPointerDown, true);
   document.addEventListener("keydown", onKey, true);
   window.addEventListener("resize", close);
 });
 onBeforeUnmount(() => {
   unbindScrollAreaResizeObserver();
-  document.removeEventListener("pointerdown", onDocPointerDown);
+  document.removeEventListener("pointerdown", onDocPointerDown, true);
   document.removeEventListener("keydown", onKey, true);
   window.removeEventListener("resize", close);
 });
@@ -450,6 +456,7 @@ const triggerMainText = computed(() => {
           left: `${posLeft}px`,
           top: `${posTop}px`,
           width: `${panelWidth}px`,
+          zIndex: panelZIndex,
         }"
         @click.stop
       >

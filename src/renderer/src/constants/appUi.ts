@@ -16,15 +16,32 @@ export {
   mergeReaderPaletteColorEnabled,
   mergeReaderSurfacePalette,
   overridesFromColorEnabled,
-  overridesFromFullPalette,
   parseReaderPaletteColorEnabledOverrides,
+  parseReaderPaletteColorEnabledOverridesFromPersisted,
   parseReaderPaletteOverrides,
   READER_SURFACE_KEYS,
   READER_SURFACE_LABELS,
+  READER_SURFACE_PRESET_CARD_SWATCH_KEYS,
   READER_SURFACE_OPTIONAL_COLOR_KEYS,
   READER_SURFACE_TABLE_ROWS,
   resolveEffectiveReaderPalette,
 } from "./readerPalette";
+
+export type {
+  ReaderBackgroundBlend,
+  ReaderBackgroundPosition,
+  ReaderBackgroundSize,
+  ReaderBackgroundState,
+  ReaderCustomBackground,
+} from "./readerBackground";
+export {
+  applyReaderBackgroundToDocument,
+  applyReaderBackgroundForPalettes,
+  cloneReaderBackgroundState,
+  defaultReaderBackgroundState,
+  parseReaderBackgroundState,
+  serializeReaderBackgroundState,
+} from "./readerBackground";
 
 export {
   APP_DISPLAY_NAME,
@@ -63,7 +80,7 @@ export const FULLSCREEN_RIGHT_SCROLLBAR_GUTTER_PX = 20;
 
 /**
  * 侧栏文件列表等 Teleport 到 `body` 的浮层根节点应带对应 `data-*` 属性，
- * 全屏浮动侧栏的 `mouseleave`、`.layout` 按下收起、空白区滚轮等逻辑据此白名单识别。
+ * 全屏 / 极简浮动侧栏的 `mouseleave`、`.layout` 按下收起、空白区滚轮等逻辑据此白名单识别。
  */
 export const FULLSCREEN_SIDEBAR_FLOAT_SELECTOR =
   "[data-fullscreen-sidebar-float]";
@@ -106,6 +123,8 @@ export const skipSettingsPersistenceSessionKey = "colorTxt.skipSettingsPersisten
  */
 export const defaultReaderTheme = "vs";
 export const defaultShowSidebar = true;
+/** 极简视图：顶/侧/底栏默认隐藏，阅读区撑满窗口 */
+export const defaultIsMinimalistView = false;
 export const defaultMonacoCustomHighlight = true;
 /**
  * 为 true 且开启「内容上色」时，Monarch 成对引号/括号可跨行（includeLF: false）。
@@ -189,8 +208,8 @@ export const minChapterMinCharCount = 0;
 export const maxChapterMinCharCount = 100000;
 export const defaultReaderFontSize = 24;
 export const defaultReaderLineHeightMultiple = 1.5;
-/** 每个物理行（model line）结束后的额外间距（px）；0 关闭 */
-export const defaultLineSpacingPx = 0;
+/** 段间距：每个物理行（model line）结束后的额外间距（px）；0 关闭 */
+export const defaultLineSpacingPx = 10;
 export const minLineSpacingPx = 0;
 export const maxLineSpacingPx = 100;
 export const lineSpacingPxStep = 1;
@@ -263,10 +282,66 @@ export const defaultStickyChapterTitleEnabled = true;
  * 仅只读阅读生效；编辑模式始终可选。
  */
 export const defaultReaderClickMode = false;
+
+/** 阅读尺：聚焦视觉行、淡化其余行（默认关闭） */
+export const defaultReadingRulerEnabled = false;
+export const defaultReadingRulerFocusLines = 1;
+export const minReadingRulerFocusLines = 1;
+export const maxReadingRulerFocusLines = 10;
+export const defaultReadingRulerDimOpacity = 0.2;
+export const minReadingRulerDimOpacity = 0;
+export const maxReadingRulerDimOpacity = 1;
+export const readingRulerFocusLinesStep = 1;
+export const readingRulerDimOpacityStep = 0.05;
+/** 阅读尺开启时是否淡化顶部粘性章节标题（默认淡化） */
+export const defaultReadingRulerDimStickyTitle = true;
+/** 阅读尺焦点行切换时的过渡动画（默认开启） */
+export const defaultReadingRulerTransitionEnabled = true;
+
+export function clampReadingRulerFocusLines(n: number): number {
+  if (!Number.isFinite(n)) return defaultReadingRulerFocusLines;
+  return Math.min(
+    maxReadingRulerFocusLines,
+    Math.max(minReadingRulerFocusLines, Math.round(n)),
+  );
+}
+
+export function clampReadingRulerDimOpacity(n: number): number {
+  if (!Number.isFinite(n)) return defaultReadingRulerDimOpacity;
+  const stepped =
+    Math.round(n / readingRulerDimOpacityStep) * readingRulerDimOpacityStep;
+  return Math.min(
+    maxReadingRulerDimOpacity,
+    Math.max(minReadingRulerDimOpacity, Number(stepped.toFixed(2))),
+  );
+}
+
+export const readingRulerButtonTitle =
+  "阅读尺\n\n适合注意力不容易集中的人，聚焦阅读行，淡化其他行";
+
+/** Markdown 块级插图 ViewZone 内容高度（px）；不含底部段间距 */
+export const defaultMarkdownImageHeightPx = 100;
+export const minMarkdownImageHeightPx = 50;
+export const maxMarkdownImageHeightPx = 1000;
+export const markdownImageHeightPxStep = 50;
+
+export function clampMarkdownImageHeightPx(px: number): number {
+  if (!Number.isFinite(px)) return defaultMarkdownImageHeightPx;
+  const stepped =
+    Math.round(px / markdownImageHeightPxStep) * markdownImageHeightPxStep;
+  return Math.max(
+    minMarkdownImageHeightPx,
+    Math.min(maxMarkdownImageHeightPx, stepped),
+  );
+}
 export const readerSelectModeButtonTitle =
   "当前为「可选模式」，点击切换「点击模式」\n\n可选模式：可选中文本进行标记、记笔记等操作\n点击模式：左键下一屏，右键上一屏，按下可拖动\n\n按住 Alt 可临时切换模式";
 export const readerClickModeButtonTitle =
   "当前为「点击模式」，点击切换「可选模式」\n\n可选模式：可选中文本进行标记、记笔记等操作\n点击模式：左键下一屏，右键上一屏，按下可拖动\n\n按住 Alt 可临时切换模式";
+export const readerSelectModeButtonTitleWithRuler =
+  "当前为「可选模式（阅读尺）」，点击切换「点击模式（阅读尺）」\n\n可选模式（阅读尺）：可选中文本进行标记、记笔记等操作\n点击模式（阅读尺）：左键按聚焦行数下移阅读尺，右键按聚焦行数上移阅读尺；按下可拖动\n\n按住 Alt 可临时切换模式";
+export const readerClickModeButtonTitleWithRuler =
+  "当前为「点击模式（阅读尺）」，点击切换「可选模式（阅读尺）」\n\n可选模式（阅读尺）：可选中文本进行标记、记笔记等操作\n点击模式（阅读尺）：左键按聚焦行数下移阅读尺，右键按聚焦行数上移阅读尺；按下可拖动\n\n按住 Alt 可临时切换模式";
 /** 主界面阅读区底部「上一章 / 下一章」工具栏（默认关闭） */
 export const defaultChapterNavToolbarEnabled = false;
 /** 编辑模式下 Monaco 是否显示行号（只读模式始终关闭） */
@@ -300,7 +375,7 @@ export const defaultFullscreenShowSystemTime = true;
  * 实际应用值会按阅读窗格宽度压缩，保证正文宿主不少于
  * {@link minReaderBodyWidthWithHorizontalInsetPx}。
  */
-export const defaultReaderHorizontalInsetPx = 0;
+export const defaultReaderHorizontalInsetPx = 10;
 export const minReaderHorizontalInsetPx = 0;
 export const maxReaderHorizontalInsetPx = 160;
 export const readerHorizontalInsetPxStep = 1;

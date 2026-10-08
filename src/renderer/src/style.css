@@ -107,6 +107,12 @@
   --reader-bg: #f4ead7;
   --reader-body-text: #000000;
   --reader-chapter-title: #b88230;
+  --reader-bg-image: none;
+  --reader-bg-image-opacity: 0;
+  --reader-bg-image-size: cover;
+  --reader-bg-image-position: right top;
+  --reader-bg-image-repeat: no-repeat;
+  --reader-bg-image-blend: normal;
 
   --female: #cc0033;
   --male: #339933;
@@ -202,6 +208,60 @@ body,
   overflow: hidden;
 }
 
+/**
+ * 阅读区底色 + 纹理叠层（仅阅读表面，不作用于书库/文件列表）。
+ * 叠层参数由 `applyReaderBackgroundToDocument` 写入 `--reader-bg-image-*`。
+ * 全屏/极简时外层 `.layout` 已是阅读表面；内层再叠一层会按正文列重算纹理，
+ * 与两侧留白对不齐。内层只透出外层的底色+图。
+ */
+.readerSurfaceBg {
+  position: relative;
+  isolation: isolate;
+  background-color: var(--reader-bg);
+}
+.readerSurfaceBg::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background-image: var(--reader-bg-image, none);
+  background-repeat: var(--reader-bg-image-repeat, no-repeat);
+  background-size: var(--reader-bg-image-size, cover);
+  background-position: var(--reader-bg-image-position, right top);
+  mix-blend-mode: var(--reader-bg-image-blend, normal);
+  opacity: var(--reader-bg-image-opacity, 0);
+}
+.readerSurfaceBg .readerSurfaceBg {
+  background-color: transparent !important;
+  isolation: auto;
+}
+.readerSurfaceBg .readerSurfaceBg::before {
+  content: none;
+  display: none;
+}
+
+/*
+ * 粘性章节条：实心底色挡住滚动正文，::before 用与阅读表面相同的图并对齐
+ *（`--reader-bg-align-*` 由 scheduleReaderBackgroundStickyAlign 写入）。
+ */
+.readerPane .monaco-editor .sticky-widget::before {
+  content: "";
+  position: absolute;
+  pointer-events: none;
+  z-index: 0;
+  width: var(--reader-bg-align-w, 100%);
+  height: var(--reader-bg-align-h, 100%);
+  left: var(--reader-bg-align-x, 0px);
+  top: var(--reader-bg-align-y, 0px);
+  background-image: var(--reader-bg-image, none);
+  background-repeat: var(--reader-bg-image-repeat, no-repeat);
+  background-size: var(--reader-bg-image-size, cover);
+  background-position: var(--reader-bg-image-position, right top);
+  mix-blend-mode: var(--reader-bg-image-blend, normal);
+  opacity: var(--reader-bg-image-opacity, 0);
+}
+
 /* 滚动条样式 */
 * {
   box-sizing: border-box;
@@ -281,7 +341,8 @@ body,
   font-size: 14px;
 }
 
-.btn svg path {
+/* 彩色图标（如色盘）保留 SVG 原色，见 `.btnIconColorful` */
+.btn:not(.btnIconColorful) svg path {
   fill: currentColor;
 }
 

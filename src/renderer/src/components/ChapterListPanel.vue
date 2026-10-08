@@ -257,9 +257,12 @@ function onBindListRef(value: Element | ComponentPublicInstance | null) {
           :row-stride="READER_SIDEBAR_ROW_STRIDE"
           :overscan="10"
           :item-key="chapterItemKey"
+          arrow-nav
         >
           <template #default="{ index }">
             <button
+              type="button"
+              tabindex="-1"
               class="sidebarItem"
               :class="{
                 active: isChapterActive(displayedChapters[index]),

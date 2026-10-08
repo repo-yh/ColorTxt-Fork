@@ -1,9 +1,13 @@
 import darkIcon from "./assets/dark.svg?raw";
 import lightIcon from "./assets/light.svg?raw";
 import sidebarIcon from "./assets/sidebar.svg?raw";
+import enterMinimalistViewIcon from "./assets/enter_minimalist_view.svg?raw";
+import leaveMinimalistViewIcon from "./assets/leave_minimalist_view.svg?raw";
 import enterFullscreenIcon from "./assets/enter_fullscreen.svg?raw";
 import leaveFullscreenIcon from "./assets/leave_fullscreen.svg?raw";
 import paletteIcon from "./assets/palette.svg?raw";
+import switchIcon from "./assets/switch.svg?raw";
+import optionsIcon from "./assets/options.svg?raw";
 import moreIcon from "./assets/more.svg?raw";
 import mindmapIcon from "./assets/mindmap.svg?raw";
 import wordcloudIcon from "./assets/wordcloud.svg?raw";
@@ -23,6 +27,8 @@ import newWindowIcon from "./assets/new_window.svg?raw";
 import infoIcon from "./assets/info.svg?raw";
 import quitIcon from "./assets/quit.svg?raw";
 import fontFamilyIcon from "./assets/font_family.svg?raw";
+import boldIcon from "./assets/bold.svg?raw";
+import italicIcon from "./assets/italic.svg?raw";
 import editIcon from "./assets/edit.svg?raw";
 import saveIcon from "./assets/save.svg?raw";
 import sourceCodeIcon from "./assets/source_code.svg?raw";
@@ -127,6 +133,9 @@ import webDavUploadIcon from "./assets/WebDAV_upload.svg?raw";
 import webDavDownloadIcon from "./assets/WebDAV_download.svg?raw";
 import selectModeIcon from "./assets/select_mode.svg?raw";
 import clickModeIcon from "./assets/click_mode.svg?raw";
+import readingRulerIcon from "./assets/reading_ruler.svg?raw";
+import eyedropperIcon from "./assets/eyedropper.svg?raw";
+import stealthModeIcon from "./assets/emituofo.svg?raw";
 
 /** 角色卡「语音」播放动画帧：speak_0 → speak_1 → speak */
 export const speakIconAnimFrames = [
@@ -139,9 +148,16 @@ export const icons = {
   dark: darkIcon,
   light: lightIcon,
   sidebar: sidebarIcon,
+  /** 进入极简视图（隐藏顶/侧/底栏，阅读区撑满） */
+  enterMinimalistView: enterMinimalistViewIcon,
+  /** 退出极简视图 */
+  leaveMinimalistView: leaveMinimalistViewIcon,
   enterFullscreen: enterFullscreenIcon,
   leaveFullscreen: leaveFullscreenIcon,
   palette: paletteIcon,
+  switch: switchIcon,
+  /** 阅读区背景图「选项」 */
+  options: optionsIcon,
   more: moreIcon,
   /** 书源列表行「登录」 */
   user: userIcon,
@@ -173,6 +189,8 @@ export const icons = {
   info: infoIcon,
   quit: quitIcon,
   fontFamily: fontFamilyIcon,
+  bold: boldIcon,
+  italic: italicIcon,
   edit: editIcon,
   save: saveIcon,
   sourceCode: sourceCodeIcon,
@@ -316,4 +334,10 @@ export const icons = {
   selectMode: selectModeIcon,
   /** 阅读器「点击模式」（左/右键翻页） */
   clickMode: clickModeIcon,
+  /** 阅读尺（聚焦行淡化） */
+  readingRuler: readingRulerIcon,
+  /** 拾色器全屏取色 */
+  eyedropper: eyedropperIcon,
+  /** 摸鱼模式 */
+  stealthMode: stealthModeIcon,
 } as const;

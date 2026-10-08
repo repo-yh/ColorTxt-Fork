@@ -90,6 +90,8 @@ export const BOOK_SOURCE_IPC = {
 export type BookSourceCheckConfig = {
   keyword: string;
   timeout: number;
+  /** 同时校验的书源数 */
+  concurrency: number;
   checkSearch: boolean;
   checkDiscovery: boolean;
   checkInfo: boolean;

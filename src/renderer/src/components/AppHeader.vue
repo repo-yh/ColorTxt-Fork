@@ -1,16 +1,21 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import IconButton from "./IconButton.vue";
+import MinimalistViewButton from "./MinimalistViewButton.vue";
 import MoreMenu from "./MoreMenu.vue";
 import HeaderFontToolbar from "./HeaderFontToolbar.vue";
 import HeaderFormatToolbar from "./HeaderFormatToolbar.vue";
 import { useAppHeaderLayout } from "../composables/useAppHeaderLayout";
 import { icons } from "../icons";
 import {
+  readingRulerButtonTitle,
   readerClickModeButtonTitle,
+  readerClickModeButtonTitleWithRuler,
   readerSelectModeButtonTitle,
+  readerSelectModeButtonTitleWithRuler,
 } from "../constants/appUi";
 import type { ShortcutBindingMap } from "../services/shortcutRegistry";
+import { titleWithShortcut } from "../services/shortcutUtils";
 import type {
   TextConvertWidthMode,
   TextConvertZhMode,
@@ -22,11 +27,12 @@ export type RecentFileItem = { path: string; progress?: number };
 const props = withDefaults(
   defineProps<{
     currentTheme: string;
-    showSidebar: boolean;
     canIncreaseFont: boolean;
     canDecreaseFont: boolean;
     canIncreaseLineHeight: boolean;
     canDecreaseLineHeight: boolean;
+    readerFontSize: number;
+    readerLineHeightMultiple: number;
     monacoFontFamily: string;
     /** 钉在外层列表的「其他字体」 */
     pinnedOtherFonts?: string[];
@@ -46,6 +52,8 @@ const props = withDefaults(
     textConvertDigit?: TextConvertWidthMode;
     /** 当前是否处于全屏阅读（全屏浮动顶栏为 true，用于全屏按钮图标与提示） */
     inFullscreen?: boolean;
+    /** 当前是否处于极简视图（顶栏极简按钮激活态 / 浮动顶栏浮层标记） */
+    inMinimalist?: boolean;
     /** 最近打开的文件（含阅读进度），最多 20 条 */
     recentFiles?: RecentFileItem[];
     /** 书钉是否已记录阅读位置 */
@@ -68,10 +76,13 @@ const props = withDefaults(
     readerClickMode?: boolean;
     /** 按住 Alt 临时切换交互模式 */
     readerClickModeAltHeld?: boolean;
+    /** 阅读尺（聚焦行淡化） */
+    readingRulerEnabled?: boolean;
     /** 是否允许进入编辑（有文件且加载完成等，由父组件计算） */
     canEnterReaderEditMode: boolean;
     /** 与快捷键面板、按键处理一致，用于「更多」菜单旁展示的快捷键 */
     shortcutBindings: ShortcutBindingMap;
+    canEnterStealth?: boolean;
     /** Markdown 文件：禁用章节正则规则（使用 # 标题） */
     chapterRulesDisabled?: boolean;
     aiFeaturesEnabled?: boolean;
@@ -84,6 +95,7 @@ const props = withDefaults(
   }>(),
   {
     inFullscreen: false,
+    inMinimalist: false,
     recentFiles: () => [],
     pinActive: false,
     canPin: true,
@@ -97,7 +109,9 @@ const props = withDefaults(
     readerEditMode: false,
     readerClickMode: false,
     readerClickModeAltHeld: false,
+    readingRulerEnabled: false,
     canEnterReaderEditMode: false,
+    canEnterStealth: false,
     chapterRulesDisabled: false,
     textReplaceActive: false,
     aiFeaturesEnabled: false,
@@ -115,7 +129,7 @@ const props = withDefaults(
 const emit = defineEmits<{
   openFile: [];
   changeTheme: [theme: string];
-  toggleSidebar: [];
+  toggleMinimalist: [];
   toggleFullscreen: [];
   setMonacoFont: [fontFamily: string];
   togglePinOtherFont: [fontName: string];
@@ -146,6 +160,7 @@ const emit = defineEmits<{
   openSettings: [];
   openColorScheme: [];
   openFindBook: [];
+  enterStealthReader: [];
   openNewWindow: [];
   openAbout: [];
   quitApp: [];
@@ -156,6 +171,7 @@ const emit = defineEmits<{
   bookmarkClick: [];
   toggleReaderEdit: [];
   toggleReaderClickMode: [];
+  toggleReadingRuler: [];
   saveReaderFile: [];
   aiSmartFormatFull: [];
   voiceReadToggle: [];
@@ -163,10 +179,61 @@ const emit = defineEmits<{
 }>();
 
 const vrFormatLock = computed(() => props.voiceReadHeaderLocked);
+const isMacPlatform = /mac|iphone|ipad|ipod/i.test(navigator.platform || "");
+function titleAccel(
+  label: string,
+  action: keyof ShortcutBindingMap,
+): string {
+  return titleWithShortcut(
+    label,
+    props.shortcutBindings[action],
+    isMacPlatform,
+  );
+}
+const themeToggleTitle = computed(() =>
+  titleAccel(
+    props.currentTheme === "vs"
+      ? "当前亮色，点击切换暗色"
+      : "当前暗色，点击切换亮色",
+    "toggleTheme",
+  ),
+);
+const editModeTitle = computed(() => {
+  if (props.smartFormatReviewActive) return "排版预览中，请先应用或放弃";
+  return titleAccel("编辑模式", "toggleReaderEdit");
+});
+const readingRulerTitle = computed(() =>
+  props.voiceReadActive
+    ? `${readingRulerButtonTitle}\n\n语音朗读中不可使用阅读尺`
+    : readingRulerButtonTitle,
+);
+const readingRulerRuntimeOn = computed(
+  () => props.readingRulerEnabled === true && !props.voiceReadActive,
+);
+const bookmarkTitle = computed(() =>
+  titleAccel(
+    props.bookmarkActive ? "移除书签" : "添加书签",
+    "toggleBookmark",
+  ),
+);
+const chapterRulesTitle = computed(() => {
+  if (props.chapterRulesDisabled) return "Markdown 文件使用 # 标题识别章节";
+  return titleAccel("章节匹配规则", "openChapterRules");
+});
+const fullscreenTitle = computed(() =>
+  titleAccel(
+    props.inFullscreen ? "退出全屏" : "全屏阅读",
+    "toggleFullscreen",
+  ),
+);
 const readerClickModeTitle = computed(() =>
   props.readerClickMode
-    ? readerClickModeButtonTitle
-    : readerSelectModeButtonTitle,
+    ? readingRulerRuntimeOn.value
+      ? readerClickModeButtonTitleWithRuler
+      : readerClickModeButtonTitle
+    : readingRulerRuntimeOn.value
+      ? readerSelectModeButtonTitleWithRuler
+      : readerSelectModeButtonTitle,
 );
 const readerClickModeAriaLabel = computed(() => {
   const base = props.readerClickMode
@@ -192,11 +259,7 @@ const showFormatToolbarInMore = computed(() => compactFormatToolbar.value);
       :icon-html="icons.edit"
       :active="readerEditMode"
       :pressed="readerEditMode"
-      :title="
-        smartFormatReviewActive
-          ? '排版预览中，请先应用或放弃'
-          : '编辑模式'
-      "
+      :title="editModeTitle"
       aria-label="切换编辑模式"
       :disabled="
         vrFormatLock ||
@@ -204,6 +267,21 @@ const showFormatToolbarInMore = computed(() => compactFormatToolbar.value);
         (!readerEditMode && !canEnterReaderEditMode)
       "
       @click="emit('toggleReaderEdit')"
+    />
+    <span
+      v-if="!readerEditMode"
+      class="toolbarDivider"
+      aria-hidden="true"
+    ></span>
+    <IconButton
+      v-if="!readerEditMode"
+      :icon-html="icons.readingRuler"
+      :active="readingRulerRuntimeOn"
+      :pressed="readingRulerRuntimeOn"
+      :title="readingRulerTitle"
+      aria-label="切换阅读尺"
+      :disabled="voiceReadActive"
+      @click="emit('toggleReadingRuler')"
     />
     <IconButton
       v-if="!readerEditMode"
@@ -257,8 +335,8 @@ const showFormatToolbarInMore = computed(() => compactFormatToolbar.value);
           :icon-html="bookmarkActive ? icons.bookmarkActive : icons.bookmark"
           :active="bookmarkActive"
           :pressed="bookmarkActive"
-          :title="bookmarkActive ? '移除书签' : '添加书签'"
-          :aria-label="bookmarkActive ? '移除书签' : '添加书签'"
+          :title="bookmarkTitle"
+          :aria-label="bookmarkTitle"
           :disabled="!bookmarkActive && !canBookmark"
           @click="emit('bookmarkClick')"
         />
@@ -298,6 +376,9 @@ const showFormatToolbarInMore = computed(() => compactFormatToolbar.value);
           :can-decrease-font="canDecreaseFont"
           :can-increase-line-height="canIncreaseLineHeight"
           :can-decrease-line-height="canDecreaseLineHeight"
+          :font-size="readerFontSize"
+          :line-height-multiple="readerLineHeightMultiple"
+          :shortcut-bindings="shortcutBindings"
           @set-monaco-font="(fontFamily) => emit('setMonacoFont', fontFamily)"
           @toggle-pin-other-font="(fontName) => emit('togglePinOtherFont', fontName)"
           @increase-font-size="emit('increaseFontSize')"
@@ -347,11 +428,7 @@ const showFormatToolbarInMore = computed(() => compactFormatToolbar.value);
       <IconButton
         :icon-html="icons.regExp"
         :disabled="chapterRulesDisabled || vrFormatLock"
-        :title="
-          chapterRulesDisabled
-            ? 'Markdown 文件使用 # 标题识别章节'
-            : '章节匹配规则'
-        "
+        :title="chapterRulesTitle"
         @click="!chapterRulesDisabled && $emit('openChapterRules')"
       />
       <IconButton
@@ -366,32 +443,31 @@ const showFormatToolbarInMore = computed(() => compactFormatToolbar.value);
       />
       <IconButton
         :icon-html="currentTheme === 'vs' ? icons.light : icons.dark"
-        :title="
-          currentTheme === 'vs'
-            ? '当前亮色，点击切换暗色'
-            : '当前暗色，点击切换亮色'
-        "
+        :title="themeToggleTitle"
+        :aria-label="themeToggleTitle"
         @click="$emit('changeTheme', currentTheme === 'vs' ? 'vs-dark' : 'vs')"
       />
-      <IconButton
-        v-if="!inFullscreen"
-        :icon-html="icons.sidebar"
-        :active="showSidebar"
-        :pressed="showSidebar"
-        title="切换侧边栏"
-        @click="$emit('toggleSidebar')"
+      <MinimalistViewButton
+        :minimalist="inMinimalist"
+        :disabled="inFullscreen"
+        :shortcut-bindings="shortcutBindings"
+        @toggle-minimalist="$emit('toggleMinimalist')"
       />
       <IconButton
         :icon-html="
           inFullscreen ? icons.leaveFullscreen : icons.enterFullscreen
         "
-        :title="inFullscreen ? '退出全屏' : '全屏阅读'"
+        :title="fullscreenTitle"
+        :aria-label="fullscreenTitle"
         @click="$emit('toggleFullscreen')"
       />
       <div class="moreMenuWrap">
         <MoreMenu
           :recent-files="recentFiles"
           :shortcut-bindings="shortcutBindings"
+          :in-minimalist="inMinimalist"
+          :in-fullscreen="inFullscreen"
+          :can-enter-stealth="canEnterStealth"
           @toggle-find="emit('toggleFind')"
           @open-github="emit('openGithub')"
           @check-for-updates="emit('checkForUpdates')"
@@ -399,6 +475,7 @@ const showFormatToolbarInMore = computed(() => compactFormatToolbar.value);
           @open-settings="emit('openSettings')"
           @open-color-scheme="emit('openColorScheme')"
           @open-find-book="emit('openFindBook')"
+          @enter-stealth-reader="emit('enterStealthReader')"
           @open-new-window="emit('openNewWindow')"
           @open-about="emit('openAbout')"
           @quit-app="emit('quitApp')"
@@ -418,6 +495,9 @@ const showFormatToolbarInMore = computed(() => compactFormatToolbar.value);
               :can-decrease-font="canDecreaseFont"
               :can-increase-line-height="canIncreaseLineHeight"
               :can-decrease-line-height="canDecreaseLineHeight"
+              :font-size="readerFontSize"
+              :line-height-multiple="readerLineHeightMultiple"
+              :shortcut-bindings="shortcutBindings"
               @set-monaco-font="(fontFamily) => emit('setMonacoFont', fontFamily)"
               @toggle-pin-other-font="
                 (fontName) => emit('togglePinOtherFont', fontName)

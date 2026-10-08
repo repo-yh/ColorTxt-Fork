@@ -17,6 +17,12 @@ import {
   destroyAllBackstageWebViews,
   isBackstageWebViewWindow,
 } from "./bookSource/engine/backstageWebView";
+import {
+  destroyEyedropperOverlays,
+  isEyedropperWindow,
+} from "./eyedropper";
+import { isStealthReaderWindow } from "./stealthReader";
+import { isStealthSettingsWindow } from "./stealthSettingsWindow";
 
 export type CreateMainWindow = (options?: {
   openTxtPath?: string | null;
@@ -52,7 +58,12 @@ export function createMainWindowFactory(maps: MainWindowMaps): CreateMainWindow 
     const findBookInitialTab =
       options?.findBookInitialTab === "bookshelf" ? "bookshelf" : "search";
     const hasOtherMainWindow = BrowserWindow.getAllWindows().some(
-      (w) => !w.isDestroyed() && !findBookWindowByWindowId.get(w.id),
+      (w) =>
+        !w.isDestroyed() &&
+        !findBookWindowByWindowId.get(w.id) &&
+        !isEyedropperWindow(w) &&
+        !isStealthReaderWindow(w) &&
+        !isStealthSettingsWindow(w),
     );
     const shouldRestoreSession =
       !hasOtherMainWindow && !openTxtPath && !openFindBook;
@@ -103,9 +114,15 @@ export function createMainWindowFactory(maps: MainWindowMaps): CreateMainWindow 
       findBookInitialTabByWindowId.delete(win.id);
       // 后台 webView 是 show:false 的 BrowserWindow；若不拆掉，关可见窗后进程不退
       const stillUserWindows = BrowserWindow.getAllWindows().some(
-        (w) => !w.isDestroyed() && !isBackstageWebViewWindow(w),
+        (w) =>
+          !w.isDestroyed() &&
+          !isBackstageWebViewWindow(w) &&
+          !isEyedropperWindow(w) &&
+          !isStealthReaderWindow(w) &&
+          !isStealthSettingsWindow(w),
       );
       if (!stillUserWindows) {
+        destroyEyedropperOverlays();
         destroyAllBackstageWebViews();
       }
     });

@@ -56,6 +56,15 @@ import {
   clampMouseWheelScrollSensitivity,
   clampFastScrollSensitivity,
   defaultStickyChapterTitleEnabled,
+  defaultReadingRulerEnabled,
+  defaultReadingRulerFocusLines,
+  defaultReadingRulerDimOpacity,
+  defaultReadingRulerDimStickyTitle,
+  defaultReadingRulerTransitionEnabled,
+  clampReadingRulerFocusLines,
+  clampReadingRulerDimOpacity,
+  defaultMarkdownImageHeightPx,
+  clampMarkdownImageHeightPx,
   defaultChapterNavToolbarEnabled,
   defaultChapterCharCountExact,
   defaultReaderEditShowLineNumbers,
@@ -102,6 +111,7 @@ import {
   type SelectionToolbarButtons,
 } from "../constants/selectionToolbar";
 import { appAlert } from "../services/appDialog";
+import { READER_EDITOR_DEFAULT_FONT_FAMILY } from "../monaco/readerEditorOptions";
 import { getBuiltinEmbeddingBlockMessage } from "../ai/embeddingReady";
 import { icons } from "../icons";
 import {
@@ -155,6 +165,12 @@ export type SettingsApplyPayload = {
   mouseWheelScrollSensitivity: number;
   fastScrollSensitivity: number;
   stickyChapterTitleEnabled: boolean;
+  readingRulerEnabled: boolean;
+  readingRulerFocusLines: number;
+  readingRulerDimOpacity: number;
+  readingRulerDimStickyTitle: boolean;
+  readingRulerTransitionEnabled: boolean;
+  markdownImageHeightPx: number;
   chapterNavToolbarEnabled: boolean;
   chapterCharCountExact: boolean;
   readerEditShowLineNumbers: boolean;
@@ -162,6 +178,7 @@ export type SettingsApplyPayload = {
   editAutoRefreshChapterList: boolean;
   aiSmartFormat: AiSmartFormatSettings;
   fontSize: number;
+  fontFamily: string;
   lineHeightMultiple: number;
   lineSpacingPx: number;
   letterSpacingPx: number;
@@ -199,6 +216,8 @@ const props = defineProps<{
   fullscreenReaderWidthPercent: number;
   fullscreenShowSystemTime: boolean;
   readerFontSize: number;
+  monacoFontFamily: string;
+  pinnedOtherFonts: string[];
   readerLineHeightMultiple: number;
   readerLineSpacingPx: number;
   readerLetterSpacingPx: number;
@@ -209,6 +228,12 @@ const props = defineProps<{
   mouseWheelScrollSensitivity: number;
   fastScrollSensitivity: number;
   stickyChapterTitleEnabled: boolean;
+  readingRulerEnabled: boolean;
+  readingRulerFocusLines: number;
+  readingRulerDimOpacity: number;
+  readingRulerDimStickyTitle: boolean;
+  readingRulerTransitionEnabled: boolean;
+  markdownImageHeightPx: number;
   chapterNavToolbarEnabled: boolean;
   chapterCharCountExact: boolean;
   readerEditShowLineNumbers: boolean;
@@ -241,6 +266,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   apply: [payload: SettingsApplyPayload];
+  togglePinOtherFont: [fontName: string];
   openReadingData: [];
   openDictionaryManage: [];
   openWebSearchManage: [];
@@ -274,6 +300,7 @@ const draftChapterMinCharCount = ref(defaultChapterMinCharCount);
 const draftFullscreenReaderWidthPercent = ref(50);
 const draftFullscreenShowSystemTime = ref(defaultFullscreenShowSystemTime);
 const draftFontSize = ref(14);
+const draftFontFamily = ref(READER_EDITOR_DEFAULT_FONT_FAMILY);
 const draftLineHeightMultiple = ref(1.5);
 const draftLineSpacingPx = ref(defaultLineSpacingPx);
 const draftLetterSpacingPx = ref(defaultLetterSpacingPx);
@@ -286,6 +313,14 @@ const draftMouseWheelScrollSensitivity = ref(
 );
 const draftFastScrollSensitivity = ref(defaultFastScrollSensitivity);
 const draftStickyChapterTitleEnabled = ref(defaultStickyChapterTitleEnabled);
+const draftReadingRulerEnabled = ref(defaultReadingRulerEnabled);
+const draftReadingRulerFocusLines = ref(defaultReadingRulerFocusLines);
+const draftReadingRulerDimOpacity = ref(defaultReadingRulerDimOpacity);
+const draftReadingRulerDimStickyTitle = ref(defaultReadingRulerDimStickyTitle);
+const draftReadingRulerTransitionEnabled = ref(
+  defaultReadingRulerTransitionEnabled,
+);
+const draftMarkdownImageHeightPx = ref(defaultMarkdownImageHeightPx);
 const draftChapterNavToolbarEnabled = ref(defaultChapterNavToolbarEnabled);
 const draftChapterCharCountExact = ref(defaultChapterCharCountExact);
 const draftReaderEditShowLineNumbers = ref(defaultReaderEditShowLineNumbers);
@@ -359,6 +394,7 @@ function syncDraftFromProps() {
   draftFullscreenReaderWidthPercent.value = props.fullscreenReaderWidthPercent;
   draftFullscreenShowSystemTime.value = props.fullscreenShowSystemTime;
   draftFontSize.value = props.readerFontSize;
+  draftFontFamily.value = props.monacoFontFamily;
   draftLineHeightMultiple.value = clampLineHeightMultipleForFontSize(
     props.readerFontSize,
     props.readerLineHeightMultiple,
@@ -378,6 +414,19 @@ function syncDraftFromProps() {
     props.fastScrollSensitivity,
   );
   draftStickyChapterTitleEnabled.value = props.stickyChapterTitleEnabled;
+  draftReadingRulerEnabled.value = props.readingRulerEnabled;
+  draftReadingRulerFocusLines.value = clampReadingRulerFocusLines(
+    props.readingRulerFocusLines,
+  );
+  draftReadingRulerDimOpacity.value = clampReadingRulerDimOpacity(
+    props.readingRulerDimOpacity,
+  );
+  draftReadingRulerDimStickyTitle.value = props.readingRulerDimStickyTitle;
+  draftReadingRulerTransitionEnabled.value =
+    props.readingRulerTransitionEnabled;
+  draftMarkdownImageHeightPx.value = clampMarkdownImageHeightPx(
+    props.markdownImageHeightPx,
+  );
   draftChapterNavToolbarEnabled.value = props.chapterNavToolbarEnabled;
   draftChapterCharCountExact.value = props.chapterCharCountExact;
   draftReaderEditShowLineNumbers.value = props.readerEditShowLineNumbers;
@@ -570,6 +619,7 @@ function resetGeneralDraft() {
 
 function resetReadingDraft() {
   draftFontSize.value = defaultReaderFontSize;
+  draftFontFamily.value = READER_EDITOR_DEFAULT_FONT_FAMILY;
   draftLineHeightMultiple.value = clampLineHeightMultipleForFontSize(
     defaultReaderFontSize,
     defaultReaderLineHeightMultiple,
@@ -583,6 +633,13 @@ function resetReadingDraft() {
   draftMouseWheelScrollSensitivity.value = defaultMouseWheelScrollSensitivity;
   draftFastScrollSensitivity.value = defaultFastScrollSensitivity;
   draftStickyChapterTitleEnabled.value = defaultStickyChapterTitleEnabled;
+  draftReadingRulerEnabled.value = defaultReadingRulerEnabled;
+  draftReadingRulerFocusLines.value = defaultReadingRulerFocusLines;
+  draftReadingRulerDimOpacity.value = defaultReadingRulerDimOpacity;
+  draftReadingRulerDimStickyTitle.value = defaultReadingRulerDimStickyTitle;
+  draftReadingRulerTransitionEnabled.value =
+    defaultReadingRulerTransitionEnabled;
+  draftMarkdownImageHeightPx.value = defaultMarkdownImageHeightPx;
   draftChapterNavToolbarEnabled.value = defaultChapterNavToolbarEnabled;
   draftChapterTitleBlankMode.value =
     defaultChapterTitleBlankMode;
@@ -814,6 +871,18 @@ async function onConfirm() {
       draftFastScrollSensitivity.value,
     ),
     stickyChapterTitleEnabled: draftStickyChapterTitleEnabled.value,
+    readingRulerEnabled: draftReadingRulerEnabled.value,
+    readingRulerFocusLines: clampReadingRulerFocusLines(
+      draftReadingRulerFocusLines.value,
+    ),
+    readingRulerDimOpacity: clampReadingRulerDimOpacity(
+      draftReadingRulerDimOpacity.value,
+    ),
+    readingRulerDimStickyTitle: draftReadingRulerDimStickyTitle.value,
+    readingRulerTransitionEnabled: draftReadingRulerTransitionEnabled.value,
+    markdownImageHeightPx: clampMarkdownImageHeightPx(
+      draftMarkdownImageHeightPx.value,
+    ),
     chapterNavToolbarEnabled: draftChapterNavToolbarEnabled.value,
     chapterCharCountExact: draftChapterCharCountExact.value,
     readerEditShowLineNumbers: draftReaderEditShowLineNumbers.value,
@@ -821,6 +890,7 @@ async function onConfirm() {
     editAutoRefreshChapterList: draftEditAutoRefreshChapterList.value,
     aiSmartFormat: { ...draftAiSmartFormat.value },
     fontSize: draftFontSize.value,
+    fontFamily: draftFontFamily.value,
     lineHeightMultiple: draftLineHeightMultiple.value,
     lineSpacingPx: clampLineSpacingPx(draftLineSpacingPx.value),
     letterSpacingPx: clampLetterSpacingPx(draftLetterSpacingPx.value),
@@ -1073,6 +1143,8 @@ async function onImportConfig(): Promise<void> {
 
             <SettingsReadingPanel
               v-show="activeTab === 'reading'"
+              v-model:draft-font-family="draftFontFamily"
+              :pinned-other-fonts="pinnedOtherFonts"
               v-model:draft-font-size="draftFontSize"
               v-model:draft-line-height-multiple="draftLineHeightMultiple"
               v-model:draft-line-spacing-px="draftLineSpacingPx"
@@ -1090,6 +1162,20 @@ async function onImportConfig(): Promise<void> {
               v-model:draft-sticky-chapter-title-enabled="
                 draftStickyChapterTitleEnabled
               "
+              v-model:draft-reading-ruler-enabled="draftReadingRulerEnabled"
+              v-model:draft-reading-ruler-focus-lines="
+                draftReadingRulerFocusLines
+              "
+              v-model:draft-reading-ruler-dim-opacity="
+                draftReadingRulerDimOpacity
+              "
+              v-model:draft-reading-ruler-dim-sticky-title="
+                draftReadingRulerDimStickyTitle
+              "
+              v-model:draft-reading-ruler-transition-enabled="
+                draftReadingRulerTransitionEnabled
+              "
+              v-model:draft-markdown-image-height-px="draftMarkdownImageHeightPx"
               v-model:draft-chapter-nav-toolbar-enabled="
                 draftChapterNavToolbarEnabled
               "
@@ -1124,6 +1210,7 @@ async function onImportConfig(): Promise<void> {
                 draftSelectionToolbarButtons
               "
               :monaco-custom-highlight="monacoCustomHighlight"
+              @toggle-pin-other-font="emit('togglePinOtherFont', $event)"
               @open-dictionary-manage="emit('openDictionaryManage')"
               @open-web-search-manage="emit('openWebSearchManage')"
               @open-translate-manage="emit('openTranslateManage')"

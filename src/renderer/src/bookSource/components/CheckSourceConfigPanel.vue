@@ -9,6 +9,7 @@ import { appToast } from "../../services/appToast";
 const modelValue = defineModel<boolean>({ default: false });
 
 const timeoutSec = ref(180);
+const concurrency = ref(4);
 const checkSearch = ref(true);
 const checkDiscovery = ref(true);
 const checkInfo = ref(true);
@@ -27,6 +28,7 @@ watch(modelValue, async (open) => {
 
 function applyConfig(cfg: BookSourceCheckConfig) {
   timeoutSec.value = Math.max(1, Math.round((cfg.timeout || 180_000) / 1000));
+  concurrency.value = Math.max(1, Math.min(32, Math.floor(cfg.concurrency || 4)));
   checkSearch.value = cfg.checkSearch !== false;
   checkDiscovery.value = cfg.checkDiscovery !== false;
   checkInfo.value = cfg.checkInfo !== false;
@@ -81,8 +83,14 @@ async function onConfirm() {
     appToast("超时时间须大于 0 秒", { kind: "warning" });
     return;
   }
+  const n = concurrency.value;
+  if (!Number.isFinite(n) || n < 1) {
+    appToast("并发数须至少为 1", { kind: "warning" });
+    return;
+  }
   await window.colorTxt.bookSourceCheckSetConfig({
     timeout: Math.floor(sec) * 1000,
+    concurrency: Math.floor(n),
     checkSearch: checkSearch.value,
     checkDiscovery: checkDiscovery.value,
     checkInfo: checkInfo.value,
@@ -115,6 +123,18 @@ function onCancel() {
             :min="1"
             integer
             aria-label="单个书源校验超时（秒）"
+          />
+        </div>
+      </div>
+      <div class="settingsRow">
+        <div class="settingsRowMain settingsRowMain--baseline">
+          <span class="settingsLabel">并发数</span>
+          <NumericInput
+            v-model="concurrency"
+            :min="1"
+            :max="32"
+            integer
+            aria-label="并发数"
           />
         </div>
       </div>

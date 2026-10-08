@@ -74,6 +74,20 @@ function groupTexts(g: readonly HighlightWord[]): string[] {
   return g.map((w) => w.text);
 }
 
+/** 输入框提交：按 `,` / `，` / `、` / `;` / `；` 拆成多个词（`split: false` 时整段为一词） */
+export function parseHighlightInputTerms(
+  raw: string,
+  options?: { split?: boolean },
+): string[] {
+  const trimmed = raw.trim();
+  if (!trimmed) return [];
+  if (options?.split === false) {
+    return groupTexts(normalizeHighlightGroup([trimmed]) ?? []);
+  }
+  return groupTexts(normalizeHighlightGroup(trimmed.split(/[,，、;；]+/)) ?? []);
+}
+
+/** 从所有桶的各组中移除含该词的项：多词组剔除该词，空组删除 */
 function removeTermFromMap(map: HighlightWordsByIndex, term: string): boolean {
   let changed = false;
   for (const k of Object.keys(map)) {

@@ -89,7 +89,7 @@
 - **A1111**：主进程调用 WebUI **`/sdapi/v1/*`**（如 txt2img、采样器与 SD 模型列表）；设置页可拉取采样器 / 模型 / 高清修复放大算法；**尺寸**为宽高数字输入（默认 **512×768**）。
 - **ComfyUI**：经 **`/prompt`** 提交工作流并轮询 **`/history`**；需在设置中粘贴 **Comfy 工作流 JSON**（导出 API 格式）；尺寸同为自定义宽高。
 - **云端（除自定义兼容代理外）**：各方案 **`txt2img.apiKey`** 经 **`ai.txt2imgProfileKeys`** 加密保存（与语音朗读、AI 阅读助手等密钥在应用内**分开保存**，见 **「API 密钥保险库」**）。出图前由对话模型将 **画风 + 角色形象** 整理为自然语言 prompt（**`natural`** 族）或 SD tag（**`sd`** 族，含 Stability）。**尺寸**为各后端**固定档位**（**`txt2ImgCloudSizePresets`**）；切换服务商时写入该后端 **默认云端模型**（**`txt2ImgCloudModelPresets`** / **`TXT2IMG_DEFAULT_CLOUD_MODEL`**），并按 **512×768** 参考比例选取档位（在比例足够接近的候选中选 **像素最少**，利于立绘省额度）。
-- **自定义 OpenAI 兼容 Images**（`openai_compat_images`）：走 **`ai/txt2img/openAI.ts`**（标准 OpenAI Images：`response_format: b64_json`、可选 `quality`）；**尺寸为自由宽高 64–2048**（与本地 WebUI 相同 UI），便于对接未知网关（如仅支持非 OpenAI 官方分辨率的代理）。
+- **自定义 OpenAI 兼容 Images**（`openai_compat_images`）：走 **`ai/txt2img/openAI.ts`**（与官方 OpenAI Images 同一套请求）。**仅 DALL·E 2/3** 发送 `response_format: b64_json`；**`gpt-image-*` 不传该字段**（官方与多数网关会 400 `unknown_parameter`，模型固定返回 base64）。可选 `quality`。解析同时支持 `data[0].b64_json` 与 `data[0].url`。**尺寸为自由宽高 64–2048**（与本地 WebUI 相同 UI），便于对接未知网关（如仅支持非 OpenAI 官方分辨率的代理）。
 - **MiniMax**（`minimax_images`）：专用 **`ai/txt2img/minimax.ts`**，`POST {baseUrl}/image_generation`（默认 Base 含 `/v1`，与对话一致），按宽高推导 **`aspect_ratio`**；默认模型 **`image-01`**；测试连接走 **`GET {baseUrl}/models`**（不出图）。
 - **Agnes AI**（`agnes_images`）：专用 **`ai/txt2img/agnes.ts`**，仍走 `POST …/images/generations`，但文生图 Base64 用顶层 **`return_base64: true`**（**勿**发顶层 `response_format`，与 OpenAI 官方不同）；默认模型 **`agnes-image-2.1-flash`**；固定尺寸档含 **1024×768** 等（见 **`txt2ImgCloudSizePresets`**）。API Key 控制台：**`AGNES_API_KEY_CONSOLE_URL`**。
 - **测试连接**：**`ai:txt2img`** 的 **`testConnection`** 走 **`ai/txt2img/testConnection.ts`**，仅校验地址/密钥（如 OpenAI `/models`、万相 models、MiniMax models、Stability 账户等），**不出图、不消耗图像额度**；设置页由 **`AppConnectionTestButton`** + **`useConnectionTest`** 展示 pending/成功/失败（成功不弹框）。
@@ -253,7 +253,7 @@ cardShellWrap（悬停抬高 z-index）
 | 防剧透 | 与阅读助手共用 **`spoilerSafe`**：统计章节范围不超过当前阅读章节 |
 | 进度 | 工具折叠区展示阶段标题（构建分词缓存、语义抽取/筛选等） |
 | 侧栏预览 | 与思维导图类似：缩略 Canvas、点击打开全屏；标题行 **`icons.wordcloud`** |
-| 全屏交互 | **字体**（`FontPicker`，独立于阅读器字体）、**角度布局**（水平/垂直/混合，`wordcloudAngleMode`）、**配色**（`wordcloudPalettes`）、**重新生成**（递增 **`layoutSeed`** 换布局）、**导出 PNG**；拖动平移、滚轮缩放 |
+| 全屏交互 | **字体**（`FontPicker`，独立于阅读器字体）、**角度布局**（水平/垂直/混合，`wordcloudAngleMode`）、**配色**（`wordcloudPalettes`）、**重新生成**（递增 **`layoutSeed`** 换布局）、**导出 PNG**；拖动平移、滚轮缩放。全屏面板为让角度/配色菜单溢出而 **`overflow: visible`**，顶栏须自带上圆角（与思维导图弹层 `overflow: hidden` 裁切不同） | |
 | 布局 seed | 每条词云独立 **`layoutSeed`**，写入 tool 消息 JSON；**重新生成**后经 **`ai:messageUpdateToolContent`** IPC 持久化，重开会话布局不变 |
 | 统计行 | 左下角：**语义：xxx，词项：xxx**（general 模式仅显示词项数） |
 | 词项上限 | **设置 → AI 阅读助手 → 词云图词项上限**（`AIConfig.wordcloudMaxWords`）；主进程 **`aiWordcloudTool`** 与 Agent 参数 **`maxWords`** 均钳制于此 |
@@ -286,7 +286,7 @@ cardShellWrap（悬停抬高 z-index）
 - **入口**：编辑态顶栏「保存」右侧 **AI 智能排版**（全文，确认后执行；**`AppHeader`**，`canUseAiSmartFormat`）；右键 **AI 智能排版：选中文本** / **全文**。排版进行中或 Diff 预览时禁用编辑开关与智能排版按钮。
 - **分段**（`aiSmartFormat/aiSmartFormatSegments.ts`）：全文有章节表时按章切分，且**包含第一章标题前的内容**（书名、简介、序等）；单章或章前段超过 **8000 字**时再按字数切块（尽量在换行处断开）。无章节时整文按 8000 字切块。选区超过 **6000 字**时同样按 8000 字切块。仅需本地预处理（如仅清 HTML）且无 LLM 时可为单段同步完成。
 - **进度弹窗**（`AiSmartFormatProgressModal.vue`）：状态行固定 **正在处理…**；仅多段（`total > 1`）时显示 **当前进度：M/N**（`M` 在某段**处理完成**后更新）；需 LLM 时展示 **累计消耗 Token**（输入/缓存命中/输出与花费约，跨段累加，样式同 **`AiTokenUsageBanner`**，标签「累计消耗 Token」）。底栏 **停止**（`danger`）可中断：若已有成功变更的段落，进入 Diff 预览**仅含已完成段**对应行范围；若尚无成功段落则直接结束。停止提示为 **warning** Toast。
-- **流程**：内存中逐段调用对话模型（及本地预处理）→ 校验通过后合并为 **proposed** → 后置 **压缩空行** / **行首缩进** → 在原编辑器区域打开 **Monaco Diff**（左原文、右排版结果）。预览顶栏：**排版预览**、差异计数与 **上/下处差异**（`Ctrl+↑/↓`）、**空白差异** / **折叠未更改** 工具、**放弃** / **应用**。预览期 **`Ctrl+F` / 菜单「查找」** 打开 Monaco 查找栏（当前聚焦的 Diff 侧；无焦点时默认右侧 modified）。预览期间锁定编辑模式与保存；仍可对右侧 modified 模型执行顶栏 **格式化**（压缩空行、行首缩进；**未**单独挂接 **「格式化：转换」** 子菜单，见 [基础功能.md](./基础功能.md) → **「简繁与全半角转换」**）。**应用** 后一次性写回并选中变更范围；**放弃** 前经确认弹框，确认后关闭预览且主文档不变。
+- **流程**：内存中逐段调用对话模型（及本地预处理）→ 校验通过后合并为 **proposed** → 后置 **压缩空行** / **行首缩进** → 在原编辑器区域打开 **Monaco Diff**（左原文、右排版结果）。预览顶栏：**排版预览**、差异计数与 **上/下处差异**（`Ctrl+↑/↓`）、**空白差异** / **折叠未更改** 工具、**放弃** / **应用**。预览期 **`Ctrl+F` / 菜单「查找」** 打开 Monaco 查找栏（当前聚焦的 Diff 侧；无焦点时默认右侧 modified）。预览期间锁定编辑模式与保存；仍可对右侧 modified 模型执行顶栏 **格式化**（压缩空行、行首缩进；**未**单独挂接 **「格式化：转换」** 子菜单，见 [基础功能.md](./基础功能.md) → **「简繁与全半角转换」**）。Diff 对照区**不**套用阅读区 **左右边距**（`readerHorizontalInsetPx`），放弃/应用后恢复。**应用** 后一次性写回并选中变更范围；**放弃** 前经确认弹框，确认后关闭预览且主文档不变。
 - **类型与默认**（`@shared/aiSmartFormatTypes.ts`）：**`AiSmartFormatSettings`**、**`defaultAiSmartFormatSettings`**（乱码/屏蔽/水印/引流等默认开）、分段进度与 Review session 类型；**`aiSmartFormatHasAnyTask`** 判定是否至少启用一项任务。
 - **实现要点**：渲染侧 **`useAiSmartFormat.ts`**（管线与 session）、**`useReaderSmartFormatDiff.ts`** + **`monaco/readerDiffEditorOptions.ts`**（Diff 编辑器）、**`aiSmartFormat/*`**（分段、后置处理、Review 类型、放弃确认文案）；主进程 **`ai/chat/textFormatCleanup.ts`**（`ai:text-format:cleanup` / `abort`，经 **`registerAiIpc.ts`** 注册）。
 - **说明**：不能替代以正确编码重新打开文件；写回后不支持撤销；全书耗时与 Token 消耗随分段数增长。提示词与硬性约束均禁止「的 / 地 / 得」语法互替；段结果写回前会按原文还原此类替换（`revertDeDiDeParticleSubstitutions`）。
@@ -363,7 +363,7 @@ cardShellWrap（悬停抬高 z-index）
 | `SettingsTabBar.vue` | 页签含 **`voiceRead`** / `ai` / `vectorModel` / `txt2img` / `skills` / `edit` / `general` / `reading`。<br>`showAiExtensionTabs` 为 false 时隐藏向量模型 / 角色卡 / 技能扩展页签 |
 | `SettingsAIPanel.vue` | 「AI 阅读助手」：总开关；服务商含 **MiniMax**；**配置方案**；对话模型 + **测试连接**；Token 与 **`aiDataCacheDir`**；快速提问等 |
 | `AiMindmapView.vue` | 阅读助手思维导图：侧栏预览 + 全屏交互（markmap）；全部收起/展开、章节标题替换、**全展开** SVG 导出 |
-| `AiWordcloudView.vue` | 阅读助手词云：侧栏预览 + 全屏 Canvas（d3-cloud）；字体/角度/配色、重新生成（`layoutSeed`）、PNG 导出 |
+| `AiWordcloudView.vue` | 阅读助手词云：侧栏预览 + 全屏 Canvas（d3-cloud）；字体/角度/配色、重新生成（`layoutSeed`）、PNG 导出。全屏面板 `overflow: visible`（角度/配色菜单），顶栏自带上圆角 |
 | `ApiEndpointInput.vue` | 接口地址手填输入框 |
 | `AiTokenUsageBanner.vue` | Token 消耗与花费展示条（阅读助手、角色检索共用） |
 | `AiIndexProgressBanner.vue` | 向量建索引进度条（阅读助手建索引、角色检索前补索引） |

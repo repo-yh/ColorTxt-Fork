@@ -11,6 +11,8 @@ import {
 } from "../../services/shortcutRegistry";
 import {
   bindAppShortcuts,
+  EDIT_MODE_MONACO_DEFERRED_ACTIONS,
+  READER_SCROLL_SHORTCUT_ACTIONS,
   VOICE_READ_SCROLL_BLOCKED_ACTIONS,
 } from "../../services/shortcutService";
 import { mergeShortcutBindings } from "../../services/shortcutUtils";
@@ -18,11 +20,22 @@ import {
   getModalStackDepth,
   hasEscBeforeModalLayers,
 } from "../../utils/modalStack";
-import { keyboardEventFromReaderSidebar } from "../../utils/readerSidebarKeyboard";
+import { shouldDeferShortcutForReaderSidebar } from "../../utils/readerSidebarKeyboard";
 
 function keyboardTargetInsideFindWidget(ev: KeyboardEvent): boolean {
   const t = ev.target;
   return t instanceof Element && !!t.closest(".find-widget");
+}
+
+function keyboardTargetInsideReaderMonacoEditor(
+  ev: KeyboardEvent,
+  readerRef: Ref<InstanceType<typeof ReaderMain> | null>,
+): boolean {
+  const t = ev.target;
+  if (!(t instanceof Node)) return false;
+  if (t instanceof Element && t.closest(".content--readerEdit")) return true;
+  const root = readerRef.value?.getReaderEditorDomNode?.() ?? null;
+  return Boolean(root && root.contains(t));
 }
 
 const defaultShortcutBindings = createDefaultShortcutBindings(
@@ -43,9 +56,16 @@ export function useFindBookReaderShortcuts(deps: {
   decreaseFontSize: () => void;
   increaseLineHeight: () => void;
   decreaseLineHeight: () => void;
+  increaseLetterSpacing: () => void;
+  decreaseLetterSpacing: () => void;
+  increaseParagraphSpacing: () => void;
+  decreaseParagraphSpacing: () => void;
+  increaseHorizontalInset: () => void;
+  decreaseHorizontalInset: () => void;
   jumpToPrevChapter: () => void;
   jumpToNextChapter: () => void;
   toggleSidebar: () => void;
+  toggleMinimalistView: () => void;
   toggleFullscreen: () => void | Promise<void>;
   isVoiceReadScrollLocked?: Ref<boolean>;
   isVoiceReadBlocksFind?: Ref<boolean>;
@@ -54,10 +74,12 @@ export function useFindBookReaderShortcuts(deps: {
   onVoiceReadPlayPrevLine?: () => void;
   onVoiceReadPlayNextLine?: () => void;
   toggleReaderEdit: () => void | Promise<void>;
+  readerEditMode?: Ref<boolean>;
   /**
    * 已在章节边界时再次翻页/逐行滚动：切章并返回 true，调用方不再滚动正文。
    */
   tryAdvanceChapterOnScroll?: (direction: 1 | -1) => boolean;
+  enterStealthReader?: () => void;
 }) {
   const shortcutBindings = ref<ShortcutBindingMap>(
     mergeShortcutBindings(defaultShortcutBindings, loadMainShortcutBindings()),
@@ -74,13 +96,13 @@ export function useFindBookReaderShortcuts(deps: {
     );
   }
 
-  function findBookReaderShortcutsShouldHandle(ev: KeyboardEvent): boolean {
-    if (!deps.readerOpen.value) return false;
-    if (hasEscBeforeModalLayers()) return false;
-    if (getModalStackDepth() > shortcutsBaselineModalDepth) return false;
-    // 与主界面一致：侧栏内按键不接管，交给浏览器（↑/↓ 在章节按钮间移动并滚入视口）
-    if (keyboardEventFromReaderSidebar(ev)) return false;
-    return true;
+  function findBookReaderShortcutsShouldHandle(): boolean {
+    return deps.readerOpen.value;
+  }
+
+  function findBookReaderHasNestedOverlay(): boolean {
+    if (hasEscBeforeModalLayers()) return true;
+    return getModalStackDepth() > shortcutsBaselineModalDepth;
   }
 
   function bindShortcuts() {
@@ -91,13 +113,24 @@ export function useFindBookReaderShortcuts(deps: {
         openSettings: () => {},
         openColorScheme: () => {},
         openFindBook: () => {},
+        enterStealthReader: () => {
+          deps.enterStealthReader?.();
+        },
         openBookSource: () => {},
         toggleFullscreen: deps.toggleFullscreen,
         increaseFontSize: deps.increaseFontSize,
         decreaseFontSize: deps.decreaseFontSize,
         increaseLineHeight: deps.increaseLineHeight,
         decreaseLineHeight: deps.decreaseLineHeight,
+        increaseLetterSpacing: deps.increaseLetterSpacing,
+        decreaseLetterSpacing: deps.decreaseLetterSpacing,
+        increaseParagraphSpacing: deps.increaseParagraphSpacing,
+        decreaseParagraphSpacing: deps.decreaseParagraphSpacing,
+        increaseHorizontalInset: deps.increaseHorizontalInset,
+        decreaseHorizontalInset: deps.decreaseHorizontalInset,
         toggleSidebar: deps.toggleSidebar,
+        toggleMinimalistView: deps.toggleMinimalistView,
+        toggleTheme: () => {},
         openNewWindow: () => {},
         openFile: () => {},
         pickTxtDirectory: () => {},
@@ -110,6 +143,9 @@ export function useFindBookReaderShortcuts(deps: {
           deps.readerRef.value?.toggleFindWidget?.();
         },
         openSidebarSearch: () => {},
+        openSidebarFiles: () => {},
+        openSidebarChapters: () => {},
+        openSidebarAiAssistant: () => {},
         toggleReaderEdit: () => {
           void deps.toggleReaderEdit();
         },
@@ -125,28 +161,47 @@ export function useFindBookReaderShortcuts(deps: {
           deps.readerRef.value?.scrollByLineStep?.(-1);
         },
         scrollPageUp: () => {
-          if (deps.tryAdvanceChapterOnScroll?.(-1)) return;
           deps.readerRef.value?.scrollByPageStep?.(-1);
         },
         scrollPageDown: () => {
-          if (deps.tryAdvanceChapterOnScroll?.(1)) return;
           deps.readerRef.value?.scrollByPageStep?.(1);
         },
       },
       () => shortcutBindings.value,
       findBookReaderShortcutsShouldHandle,
-      (action, ev) =>
-        keyboardTargetInsideFindWidget(ev) &&
-        (action === "scrollUpLine" || action === "scrollDownLine"),
+      (action, ev) => {
+        if (shouldDeferShortcutForReaderSidebar(action, ev)) return true;
+        if (
+          findBookReaderHasNestedOverlay() &&
+          READER_SCROLL_SHORTCUT_ACTIONS.has(action)
+        ) {
+          return true;
+        }
+        if (
+          keyboardTargetInsideFindWidget(ev) &&
+          (action === "scrollUpLine" || action === "scrollDownLine")
+        ) {
+          return true;
+        }
+        return (
+          deps.readerEditMode?.value === true &&
+          keyboardTargetInsideReaderMonacoEditor(ev, deps.readerRef) &&
+          EDIT_MODE_MONACO_DEFERRED_ACTIONS.has(action)
+        );
+      },
       (action) =>
         Boolean(deps.isVoiceReadScrollLocked?.value) &&
         VOICE_READ_SCROLL_BLOCKED_ACTIONS.has(action),
       {
-        isActive: () => Boolean(deps.isVoiceReadActive?.value),
+        isActive: () =>
+          Boolean(deps.isVoiceReadActive?.value) &&
+          !findBookReaderHasNestedOverlay(),
         togglePlayPause: () => deps.onVoiceReadTogglePlayPause?.(),
         playPrevLine: () => deps.onVoiceReadPlayPrevLine?.(),
         playNextLine: () => deps.onVoiceReadPlayNextLine?.(),
       },
+      true,
+      () => deps.readerEditMode?.value === true,
     );
   }
 

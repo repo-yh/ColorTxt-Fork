@@ -31,6 +31,7 @@ import {
   replaceImgAnchorLinesWithViewZones,
   removeViewZonesById,
   syncReaderImageViewZonesLineSpacing,
+  forEachReaderImageViewZone,
   type ReplaceImgAnchorsResult,
 } from "../monaco/readerImageViewZones";
 import { collectBlockMarkdownImageLines } from "../markdown/markdownImages";
@@ -63,6 +64,8 @@ import {
   type TxtrMonarchHighlightOptions,
 } from "../monaco/txtrTextMonarch";
 import { installReaderScrollKeyHandler } from "../monaco/readerKeyScroll";
+import { installReaderReadOnlyImeGuard } from "../monaco/readerReadOnlyImeGuard";
+import { scheduleReaderBackgroundStickyAlign } from "../constants/readerBackground";
 import {
   applyLeadIndentFullWidth,
   buildChaptersFromPlainText,
@@ -135,6 +138,17 @@ import {
   defaultFastScrollSensitivity,
   defaultStickyChapterTitleEnabled,
   defaultReaderClickMode,
+  defaultReadingRulerEnabled,
+  defaultReadingRulerFocusLines,
+  defaultReadingRulerDimOpacity,
+  defaultReadingRulerDimStickyTitle,
+  defaultReadingRulerTransitionEnabled,
+  defaultMarkdownImageHeightPx,
+  clampReadingRulerFocusLines,
+  clampReadingRulerDimOpacity,
+  clampMarkdownImageHeightPx,
+  clampMouseWheelScrollSensitivity,
+  clampFastScrollSensitivity,
   defaultReaderEditShowLineNumbers,
   defaultReaderEditMinimap,
   defaultTxtrDelimitedMatchCrossLine,
@@ -176,7 +190,8 @@ import {
   READER_HL_FLOAT_ROOT_Z_INDEX,
   subscribeModalStackChange,
 } from "../utils/modalStack";
-import { yieldToUi } from "../ebook/yieldToUi";
+import { hasDismissibleOverlay } from "../utils/dismissibleOverlayStack";
+import { yieldToUi, afterNextPaints } from "../ebook/yieldToUi";
 import { appAlert } from "../services/appDialog";
 import { appToast } from "../services/appToast";
 import {
@@ -193,6 +208,28 @@ import {
 import { useReaderEbookInternalLinks } from "../composables/useReaderEbookInternalLinks";
 import SmartFormatReviewBar from "./SmartFormatReviewBar.vue";
 import { icons } from "../icons";
+import {
+  READER_RULER_DIM_CSS_VAR,
+  READER_RULER_DIM_STICKY_CLASS,
+  READER_RULER_EDITOR_CLASS,
+  READER_RULER_FADE_MS,
+  READER_RULER_FOCUS_CLASS,
+  READER_RULER_FOCUS_OUT_CLASS,
+  READER_RULER_TRANSITION_CLASS,
+  buildRulerFocusDecorations,
+  collectSelectionVisualRows,
+  collectVisualRowsFromAnchor,
+  scrollTopToCenterVisualBand,
+  seedRulerAnchorFromViewport,
+  rulerAnchorForContentEdgeBand,
+  advanceRulerAnchorByContentLines,
+  focusBandTouchesContentEdge,
+  snapRulerPosToContent,
+  positionsEqual,
+  visualRowStart,
+  isRulerLineInModel,
+  type ReadingRulerPos,
+} from "../reader/readingRuler";
 
 /** 与 `READER_HL_FLOAT_ROOT_Z_INDEX` 同步；低于 `AppModal` 蒙层（6000） */
 const HL_FLOAT_Z_INDEX = READER_HL_FLOAT_ROOT_Z_INDEX;
@@ -349,6 +386,8 @@ const annotationDecorationsCollection =
   shallowRef<monaco.editor.IEditorDecorationsCollection | null>(null);
 const voiceReadDecorationsCollection =
   shallowRef<monaco.editor.IEditorDecorationsCollection | null>(null);
+const readingRulerDecorationsCollection =
+  shallowRef<monaco.editor.IEditorDecorationsCollection | null>(null);
 /** 编辑态小地图：无选区时为当前行铺灰底（与蓝色选区区分） */
 const minimapCursorLineDecorationsCollection =
   shallowRef<monaco.editor.IEditorDecorationsCollection | null>(null);
@@ -357,6 +396,11 @@ const chapterMinimapDecorationsCollection =
   shallowRef<monaco.editor.IEditorDecorationsCollection | null>(null);
 /** 朗读高亮行（供上一行/下一行以「正在播的行」为锚点） */
 const voiceReadHighlightLine = ref<number | null>(null);
+/** 阅读尺文档锚点（聚焦带中间视觉行）；null 表示下次刷新时从视口取样 */
+let readingRulerAnchor: ReadingRulerPos | null = null;
+/** 尺自己引发的滚动：跟视口时若仍停在这次目标上则不重新采锚 */
+let readingRulerSkipFollowResync = false;
+let readingRulerOwnedScrollTop: number | null = null;
 const imageLightboxSrc = ref("");
 const imageViewZoneIds = ref<string[]>([]);
 /** 滚动时与 View Zone 合成对齐：取消未执行的 rAF，避免 dispose 后仍 render */
@@ -468,6 +512,16 @@ const props = withDefaults(
     readerClickMode?: boolean;
     /** 按住 Alt 临时切换交互模式（此时拖选须当普通连续选区，不能走 Monaco 列选） */
     readerClickModeAltHeld?: boolean;
+    /** 阅读尺：聚焦视觉行、淡化其余行（仅只读） */
+    readingRulerEnabled?: boolean;
+    readingRulerFocusLines?: number;
+    readingRulerDimOpacity?: number;
+    /** 阅读尺开启时是否淡化粘性章节标题 */
+    readingRulerDimStickyTitle?: boolean;
+    /** 阅读尺焦点行切换过渡动画 */
+    readingRulerTransitionEnabled?: boolean;
+    /** Markdown 块级插图 ViewZone 内容高度（px） */
+    markdownImageHeightPx?: number;
     /** 编辑模式下是否显示行号（只读模式始终关闭） */
     readerEditShowLineNumbers?: boolean;
     readerEditMinimap?: boolean;
@@ -511,12 +565,7 @@ const props = withDefaults(
     /** 语音朗读播放中：禁止用户滚动（遮罩 + 滚轮拦截） */
     voiceReadScrollLocked?: boolean;
     /**
-     * 只读空格翻页前调用。返回 true 表示已处理（例如找书在章节边界切章），
-     * 不再执行默认的 `scrollByPageStep`。
-     */
-    interceptReadonlySpacePageDown?: () => boolean;
-    /**
-     * 只读翻页前调用（点击模式左/右键，以及可与空格共用）。
+     * 只读翻页时调用：阅读尺关闭时在滚动前；阅读尺开启时在尺已无法再移之后。
      * 返回 true 表示已处理（例如找书在章节边界切章）。
      */
     interceptReadonlyPageStep?: (direction: -1 | 1) => boolean;
@@ -575,6 +624,12 @@ const props = withDefaults(
     stickyChapterTitleEnabled: defaultStickyChapterTitleEnabled,
     readerClickMode: defaultReaderClickMode,
     readerClickModeAltHeld: false,
+    readingRulerEnabled: defaultReadingRulerEnabled,
+    readingRulerFocusLines: defaultReadingRulerFocusLines,
+    readingRulerDimOpacity: defaultReadingRulerDimOpacity,
+    readingRulerDimStickyTitle: defaultReadingRulerDimStickyTitle,
+    readingRulerTransitionEnabled: defaultReadingRulerTransitionEnabled,
+    markdownImageHeightPx: defaultMarkdownImageHeightPx,
     selectionToolbarButtons: () => ({ ...defaultSelectionToolbarButtons }),
     dictionarySettings: () => mergeDictionarySettings(undefined),
     webSearchSettings: () => mergeWebSearchSettings(undefined),
@@ -599,7 +654,6 @@ const props = withDefaults(
     beforeRevealFindWidget: undefined,
     voiceReadBlocksFind: false,
     voiceReadScrollLocked: false,
-    interceptReadonlySpacePageDown: undefined,
     interceptReadonlyPageStep: undefined,
     voiceReadPaused: false,
     readerEditMode: false,
@@ -618,7 +672,13 @@ const props = withDefaults(
 );
 
 const emit = defineEmits<{
-  probeLineChange: [probeLine: number, fromScroll?: boolean];
+  probeLineChange: [
+    probeLine: number,
+    /** 用户阅读滚动（非 jumpTo 等程序性滚动） */
+    fromReadingScroll?: boolean,
+    /** 任意滚动，含侧栏跳转 / 切章 / 定时滚动自身 */
+    fromAnyScroll?: boolean,
+  ];
   viewportTopLineChange: [lineNumber: number];
   viewportEndLineChange: [lineNumber: number];
   viewportVisualProgressChange: [percent: number, atBottom: boolean];
@@ -680,7 +740,8 @@ const horizontalInsetDesired = computed(
 const appliedHorizontalInsetPx = ref(0);
 
 const horizontalInsetActive = computed(
-  () => appliedHorizontalInsetPx.value > 0,
+  () =>
+    appliedHorizontalInsetPx.value > 0 && !smartFormatReviewActive.value,
 );
 
 /** 窗口模式：把竖条 fixed 到窗格右缘时用的视口坐标 */
@@ -965,6 +1026,7 @@ function applyReaderMonacoModeOptions(editMode: boolean) {
     ),
   );
   applyReaderClickModeMouseStyle();
+  syncReadingRulerEditorClass();
 }
 
 async function loadReaderEditFromDisk() {
@@ -1513,6 +1575,19 @@ watch(
 );
 
 watch(
+  () => props.markdownImageHeightPx,
+  (px) => {
+    const e = editor.value;
+    if (!e || imageViewZoneIds.value.length === 0) return;
+    syncReaderImageViewZonesLineSpacing(
+      e,
+      imageViewZoneIds.value,
+      clampMarkdownImageHeightPx(px),
+    );
+  },
+);
+
+watch(
   () => props.letterSpacingPx,
   (px) => {
     setLetterSpacingPx(px);
@@ -1702,53 +1777,61 @@ async function setFullText(
   if (!m || !e) return;
   const heavy = opts?.heavy === true;
   const resetScroll = opts?.resetScroll === true;
-  if (heavy) {
-    setReaderSyntaxHighlightEnabled(
-      monaco,
-      false,
-      props.readerSurfaceLight,
-      props.readerSurfaceDark,
-      props.highlightColors,
-    );
-  }
-  /** `setValue` 整文替换会使行内装饰失效；须使下次 `setChapters` 强制重建（仅切换行首缩进时行号不变） */
-  lastChapterTitleDecorationsLineKey = "";
-  if (heavy) {
-    const langId = m.getLanguageId();
-    const nextModel = monaco.editor.createModel(
-      text,
-      langId,
-      monaco.Uri.parse(`colortxt-reader://${Date.now()}`),
-    );
-    e.setModel(nextModel);
-    model.value = nextModel;
-    m.dispose();
-    annotationDecorationsCollection.value?.clear();
-    annotationDecorationsCollection.value = e.createDecorationsCollection();
-    if (resetScroll) {
-      e.setScrollTop(0, monaco.editor.ScrollType.Immediate);
-      e.setPosition({ lineNumber: 1, column: 1 });
+  beginReadingRulerModelSwap();
+  try {
+    if (heavy) {
+      setReaderSyntaxHighlightEnabled(
+        monaco,
+        false,
+        props.readerSurfaceLight,
+        props.readerSurfaceDark,
+        props.highlightColors,
+      );
     }
-  } else {
-    if (resetScroll) {
-      beginProgrammaticScroll();
-      e.setScrollTop(0, monaco.editor.ScrollType.Immediate);
-      e.setPosition({ lineNumber: 1, column: 1 });
+    /** `setValue` 整文替换会使行内装饰失效；须使下次 `setChapters` 强制重建（仅切换行首缩进时行号不变） */
+    lastChapterTitleDecorationsLineKey = "";
+    if (heavy) {
+      const langId = m.getLanguageId();
+      const nextModel = monaco.editor.createModel(
+        text,
+        langId,
+        monaco.Uri.parse(`colortxt-reader://${Date.now()}`),
+      );
+      e.setModel(nextModel);
+      model.value = nextModel;
+      m.dispose();
+      annotationDecorationsCollection.value?.clear();
+      annotationDecorationsCollection.value = e.createDecorationsCollection();
+      if (resetScroll) {
+        e.setScrollTop(0, monaco.editor.ScrollType.Immediate);
+        e.setPosition({ lineNumber: 1, column: 1 });
+      }
+    } else {
+      if (resetScroll) {
+        beginProgrammaticScroll();
+        e.setScrollTop(0, monaco.editor.ScrollType.Immediate);
+        e.setPosition({ lineNumber: 1, column: 1 });
+      }
+      m.setValue(text);
     }
-    m.setValue(text);
+    await yieldToUi();
+    await afterNextPaints();
+    if (resetScroll) {
+      scrollToDocumentStart(false);
+    }
+    if (heavy && props.monacoCustomHighlight) {
+      window.setTimeout(() => applyReaderSyntaxFromProps(), 0);
+    }
+  } finally {
+    endReadingRulerModelSwap();
   }
-  await yieldToUi();
-  await new Promise<void>((resolve) => {
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => resolve());
-    });
-  });
-  if (resetScroll) {
-    scrollToDocumentStart(false);
+  invalidateReadingRulerAnchor();
+  if (heavy) {
+    readingRulerDecorationsCollection.value?.clear();
+    readingRulerDecorationsCollection.value = e.createDecorationsCollection();
   }
-  if (heavy && props.monacoCustomHighlight) {
-    window.setTimeout(() => applyReaderSyntaxFromProps(), 0);
-  }
+  syncReadingRulerEditorClass();
+  refreshReadingRulerDecorations();
 }
 
 function flushStreamCarriageReturn() {
@@ -1820,7 +1903,7 @@ async function applyEmbeddedImageAnchors(
   const raw = m.getValue();
   const isMd = !props.readerEditMode && isMarkdownReaderPath(p);
   const result = await replaceImgAnchorLinesWithViewZones(monaco, e, p, {
-    zoneHeightPx: 100,
+    zoneHeightPx: clampMarkdownImageHeightPx(props.markdownImageHeightPx),
     sourceText: raw,
     blockImages: isMd ? collectBlockMarkdownImageLines(raw, p) : [],
   });
@@ -1844,35 +1927,44 @@ function clear(opts?: ReaderClearOptions) {
   inlineSearch.clearInlineSearchState();
   annotationDecorationsCollection.value?.clear();
   voiceReadDecorationsCollection.value?.clear();
+  readingRulerDecorationsCollection.value?.clear();
   minimapCursorLineDecorationsCollection.value?.clear();
   chapterMinimapDecorationsCollection.value?.clear();
 
   e?.updateOptions({ stickyScroll: { enabled: false } });
 
-  if (e && prevModel) {
-    const next = monaco.editor.createModel("", languageId);
-    e.setModel(next);
-    prevModel.dispose();
-    model.value = next;
-    chapterTitleDecorationsCollection.value = e.createDecorationsCollection();
-    inlineSearchDecorationsCollection.value = e.createDecorationsCollection();
-    annotationDecorationsCollection.value = e.createDecorationsCollection();
-    voiceReadDecorationsCollection.value = e.createDecorationsCollection();
-    minimapCursorLineDecorationsCollection.value =
-      e.createDecorationsCollection();
-    chapterMinimapDecorationsCollection.value =
-      e.createDecorationsCollection();
-    e.setPosition({ lineNumber: 1, column: 1 });
-    e.setScrollTop(0);
-    e.layout();
-    bindAnnotationScrollSync(e);
-  } else {
-    prevModel?.setValue("");
+  beginReadingRulerModelSwap();
+  try {
+    if (e && prevModel) {
+      const next = monaco.editor.createModel("", languageId);
+      e.setModel(next);
+      prevModel.dispose();
+      model.value = next;
+      chapterTitleDecorationsCollection.value = e.createDecorationsCollection();
+      inlineSearchDecorationsCollection.value = e.createDecorationsCollection();
+      annotationDecorationsCollection.value = e.createDecorationsCollection();
+      voiceReadDecorationsCollection.value = e.createDecorationsCollection();
+      readingRulerDecorationsCollection.value = e.createDecorationsCollection();
+      minimapCursorLineDecorationsCollection.value =
+        e.createDecorationsCollection();
+      chapterMinimapDecorationsCollection.value =
+        e.createDecorationsCollection();
+      e.setPosition({ lineNumber: 1, column: 1 });
+      e.setScrollTop(0);
+      e.layout();
+      bindAnnotationScrollSync(e);
+    } else {
+      prevModel?.setValue("");
+    }
+  } finally {
+    endReadingRulerModelSwap();
   }
 
   if (!opts?.keepStickyHiddenForStream) {
     syncStickyScrollToStreamState();
   }
+  invalidateReadingRulerAnchor();
+  syncReadingRulerEditorClass();
 }
 
 function setChapters(chapters: ChapterStickyLine[]) {
@@ -2407,6 +2499,585 @@ function setVoiceReadLineHighlight(lineNumber: number | null) {
   ]);
 }
 
+function isVoiceReadSessionActive(): boolean {
+  return props.voiceReadScrollLocked === true || props.voiceReadPaused === true;
+}
+
+function isReadingRulerActive(): boolean {
+  return (
+    props.readingRulerEnabled === true &&
+    !props.readerEditMode &&
+    !isVoiceReadSessionActive()
+  );
+}
+
+function readingRulerFocusLineCount(): number {
+  return clampReadingRulerFocusLines(props.readingRulerFocusLines ?? 1);
+}
+
+function syncReadingRulerEditorClass() {
+  const e = editor.value;
+  if (!e) return;
+  const active = isReadingRulerActive();
+  const classes: string[] = [];
+  if (active) {
+    classes.push(READER_RULER_EDITOR_CLASS);
+    if (props.readingRulerDimStickyTitle) {
+      classes.push(READER_RULER_DIM_STICKY_CLASS);
+    }
+    if (props.readingRulerTransitionEnabled !== false) {
+      classes.push(READER_RULER_TRANSITION_CLASS);
+    }
+  }
+  e.updateOptions({
+    extraEditorClassName: classes.join(" "),
+  });
+  const dim = clampReadingRulerDimOpacity(
+    props.readingRulerDimOpacity ?? defaultReadingRulerDimOpacity,
+  );
+  e.getDomNode()?.style.setProperty(READER_RULER_DIM_CSS_VAR, String(dim));
+}
+
+function invalidateReadingRulerAnchor() {
+  readingRulerAnchor = null;
+}
+
+/** 整文替换期间暂停跟尺：`setValue` 会先清空再写入，旧行号会触发 Monaco Illegal lineNumber。 */
+let readingRulerRefreshPaused = 0;
+
+function beginReadingRulerModelSwap() {
+  readingRulerRefreshPaused++;
+  cancelReadingRulerFollowViewport();
+  readingRulerSkipFollowResync = false;
+  readingRulerOwnedScrollTop = null;
+  clearReadingRulerFade();
+  invalidateReadingRulerAnchor();
+}
+
+function endReadingRulerModelSwap() {
+  readingRulerRefreshPaused = Math.max(0, readingRulerRefreshPaused - 1);
+}
+
+/** 按当前视口中间视觉行重新采锚（该行为聚焦带中间行，不滚动）。用于启用尺、恢复阅读进度、滚正文后跟视口。 */
+function resyncReadingRulerFromViewport() {
+  if (readingRulerRefreshPaused > 0) return;
+  if (!isReadingRulerActive()) return;
+  invalidateReadingRulerAnchor();
+  refreshReadingRulerDecorations();
+}
+
+let readingRulerFollowRaf: number | null = null;
+let readingRulerFollowGen = 0;
+
+function cancelReadingRulerFollowViewport() {
+  readingRulerFollowGen++;
+  if (readingRulerFollowRaf == null) return;
+  cancelAnimationFrame(readingRulerFollowRaf);
+  readingRulerFollowRaf = null;
+}
+
+function beginReadingRulerOwnedScroll(expectedTop?: number) {
+  readingRulerSkipFollowResync = true;
+  const e = editor.value;
+  if (expectedTop != null && Number.isFinite(expectedTop)) {
+    readingRulerOwnedScrollTop = Math.max(0, expectedTop);
+    return;
+  }
+  readingRulerOwnedScrollTop = e ? Math.max(0, e.getScrollTop()) : null;
+}
+
+function readingRulerScrollMatchesOwned(): boolean {
+  if (readingRulerOwnedScrollTop == null) return false;
+  const e = editor.value;
+  if (!e) return false;
+  return Math.abs(Math.max(0, e.getScrollTop()) - readingRulerOwnedScrollTop) <= 1;
+}
+
+/**
+ * 阅读尺开启：用户滚正文（拖滚动条 / 点击模式拖动抓取 / 小地图 /
+ * 侧栏搜索·书签 / 书钉返回等跳转）时，把视口中间视觉行采为聚焦带中间行（只改装饰，不改 scrollTop）。
+ * 尺自己移锚点、切章居中标题时不跟；朗读锁滚动时不跟。
+ */
+function scheduleReadingRulerFollowViewport() {
+  if (readingRulerRefreshPaused > 0) return;
+  if (!isReadingRulerActive()) return;
+  if (voiceReadScrollLocked.value) return;
+  const e = editor.value;
+  if (!e) return;
+  if (readingRulerSkipFollowResync) {
+    scheduleReadingRulerOwnedScrollWatch();
+    return;
+  }
+  scheduleReadingRulerLiveFollowFrame();
+}
+
+function scheduleReadingRulerLiveFollowFrame() {
+  if (readingRulerFollowRaf != null) return;
+  const gen = readingRulerFollowGen;
+  readingRulerFollowRaf = requestAnimationFrame(() => {
+    readingRulerFollowRaf = null;
+    if (gen !== readingRulerFollowGen) return;
+    if (readingRulerRefreshPaused > 0) return;
+    if (!isReadingRulerActive()) return;
+    if (voiceReadScrollLocked.value) return;
+    if (readingRulerSkipFollowResync) {
+      scheduleReadingRulerOwnedScrollWatch();
+      return;
+    }
+    resyncReadingRulerFromViewport();
+  });
+}
+
+/** 尺自己引发的平滑滚动：等停在目标 scrollTop 后再决定是否跟视口，避免中途把锚点采跑。 */
+function scheduleReadingRulerOwnedScrollWatch() {
+  const e = editor.value;
+  if (!e) return;
+  cancelReadingRulerFollowViewport();
+  const gen = readingRulerFollowGen;
+  let lastTop = e.getScrollTop();
+  let stableFrames = 0;
+  let frames = 0;
+  const tick = () => {
+    readingRulerFollowRaf = null;
+    if (gen !== readingRulerFollowGen) return;
+    if (readingRulerRefreshPaused > 0) return;
+    if (!isReadingRulerActive()) return;
+    if (voiceReadScrollLocked.value) return;
+    frames++;
+    const top = editor.value?.getScrollTop() ?? lastTop;
+    if (top === lastTop) stableFrames++;
+    else {
+      stableFrames = 0;
+      lastTop = top;
+    }
+    if ((stableFrames >= 2 && frames >= 2) || frames > 60) {
+      if (readingRulerSkipFollowResync) {
+        const stillProgrammatic =
+          programmaticScrollDepth > 0 && frames <= 90;
+        if (readingRulerScrollMatchesOwned()) {
+          if (stillProgrammatic) {
+            readingRulerFollowRaf = requestAnimationFrame(tick);
+            return;
+          }
+          // 居中滚动已到位：不要改锚点，但必须放开跟视口，
+          // 否则下一次拖动仍走「等停稳」而不会按帧跟随。
+          readingRulerSkipFollowResync = false;
+          readingRulerOwnedScrollTop = null;
+          return;
+        }
+        if (stillProgrammatic) {
+          readingRulerFollowRaf = requestAnimationFrame(tick);
+          return;
+        }
+        readingRulerSkipFollowResync = false;
+        readingRulerOwnedScrollTop = null;
+      }
+      resyncReadingRulerFromViewport();
+      return;
+    }
+    readingRulerFollowRaf = requestAnimationFrame(tick);
+  };
+  readingRulerFollowRaf = requestAnimationFrame(tick);
+}
+
+/** 把指定行滚到视口（扣粘性条）垂直中间，与启用尺时的采锚几何一致。 */
+function scrollLineToReadingRulerViewportCenter(
+  lineNumber: number,
+  smooth = true,
+) {
+  const e = editor.value;
+  const m = model.value;
+  if (!e || !m) return;
+  beginProgrammaticScroll();
+  const lineCount = m.getLineCount();
+  const line = Math.max(
+    1,
+    Math.min(Math.floor(lineNumber), Math.max(1, lineCount)),
+  );
+  const scrollType = monacoScrollType(smooth);
+  e.layout();
+  const stickyHeight = getStickyChapterScrollHeight(e);
+  const layoutH = Math.max(1, e.getLayoutInfo().height);
+  const visibleH = Math.max(1, layoutH - stickyHeight);
+  const top = e.getTopForLineNumber(line);
+  const bottom = e.getBottomForLineNumber(line);
+  if (!Number.isFinite(top) || !Number.isFinite(bottom)) return;
+  const blockCenter = (top + bottom) / 2;
+  const maxTop = Math.max(0, e.getScrollHeight() - layoutH);
+  const targetTop = Math.max(
+    0,
+    Math.min(maxTop, blockCenter - stickyHeight - visibleH / 2),
+  );
+  e.setScrollTop(targetTop, scrollType);
+}
+
+/** 切章：章节标题滚到视口中间，并作为聚焦带中间行（不把整条聚焦带再居中）。 */
+function scrollChapterTitleToRulerFocus(lineNumber: number, smooth = true) {
+  const e = editor.value;
+  const m = model.value;
+  if (!e || !m) return;
+  const lineCount = m.getLineCount();
+  const line = Math.max(
+    1,
+    Math.min(Math.floor(lineNumber), Math.max(1, lineCount)),
+  );
+  const stickyHeight = getStickyChapterScrollHeight(e);
+  const layoutH = Math.max(1, e.getLayoutInfo().height);
+  const visibleH = Math.max(1, layoutH - stickyHeight);
+  const top = e.getTopForLineNumber(line);
+  const bottom = e.getBottomForLineNumber(line);
+  if (Number.isFinite(top) && Number.isFinite(bottom)) {
+    const blockCenter = (top + bottom) / 2;
+    const maxTop = Math.max(0, e.getScrollHeight() - layoutH);
+    const targetTop = Math.max(
+      0,
+      Math.min(maxTop, blockCenter - stickyHeight - visibleH / 2),
+    );
+    beginReadingRulerOwnedScroll(targetTop);
+  } else {
+    beginReadingRulerOwnedScroll();
+  }
+  scrollLineToReadingRulerViewportCenter(line, smooth);
+  if (isReadingRulerActive()) {
+    setReadingRulerAnchorFromPos(visualRowStart(e, line, 1), false);
+  }
+  scheduleReadingRulerFollowViewport();
+}
+
+function ensureReadingRulerAnchor() {
+  const e = editor.value;
+  const m = model.value;
+  if (!e || !m) return;
+  if (!readingRulerAnchor) {
+    readingRulerAnchor = snapRulerPosToContent(
+      e,
+      m,
+      seedRulerAnchorFromViewport(e, m, readingRulerFocusLineCount()),
+    );
+  } else {
+    readingRulerAnchor = snapRulerPosToContent(e, m, readingRulerAnchor);
+  }
+}
+
+let readingRulerLiveFocusKeys = new Set<string>();
+const readingRulerFadingOut = new Map<string, ReadingRulerPos>();
+let readingRulerFadeTimer: number | null = null;
+let readingRulerFadeGen = 0;
+
+function prefersReadingRulerFade(): boolean {
+  return (
+    props.readingRulerTransitionEnabled !== false &&
+    !window.matchMedia("(prefers-reduced-motion: reduce)").matches
+  );
+}
+
+function prefersReadingRulerFadeOut(): boolean {
+  return prefersReadingRulerFade() && props.monacoSmoothScrolling === true;
+}
+
+function clearReadingRulerFade() {
+  readingRulerFadeGen++;
+  if (readingRulerFadeTimer != null) {
+    window.clearTimeout(readingRulerFadeTimer);
+    readingRulerFadeTimer = null;
+  }
+  readingRulerLiveFocusKeys.clear();
+  readingRulerFadingOut.clear();
+}
+
+function refreshReadingRulerDecorations() {
+  if (readingRulerRefreshPaused > 0) return;
+  const col = readingRulerDecorationsCollection.value;
+  const e = editor.value;
+  const m = model.value;
+  if (!col || !e || !m) return;
+  if (!isReadingRulerActive()) {
+    clearReadingRulerFade();
+    col.clear();
+    syncReadingRulerImageFocus([]);
+    return;
+  }
+  ensureReadingRulerAnchor();
+  if (!readingRulerAnchor) {
+    clearReadingRulerFade();
+    col.clear();
+    syncReadingRulerImageFocus([]);
+    return;
+  }
+  for (const [key, pos] of readingRulerFadingOut) {
+    if (!isRulerLineInModel(m, pos.lineNumber)) readingRulerFadingOut.delete(key);
+  }
+  const windowRows = collectVisualRowsFromAnchor(
+    e,
+    m,
+    readingRulerAnchor,
+    readingRulerFocusLineCount(),
+  );
+  const selRows = collectSelectionVisualRows(e, m);
+  const liveRows: ReadingRulerPos[] = [];
+  const liveKeys = new Set<string>();
+  for (const row of [...windowRows, ...selRows]) {
+    if (!isRulerLineInModel(m, row.lineNumber)) continue;
+    const start = visualRowStart(e, row.lineNumber, row.column);
+    if (!isRulerLineInModel(m, start.lineNumber)) continue;
+    const key = `${start.lineNumber}:${start.column}`;
+    if (liveKeys.has(key)) continue;
+    liveKeys.add(key);
+    liveRows.push(start);
+  }
+  if (prefersReadingRulerFadeOut() && readingRulerLiveFocusKeys.size > 0) {
+    for (const key of readingRulerLiveFocusKeys) {
+      if (liveKeys.has(key)) continue;
+      const colon = key.indexOf(":");
+      const lineNumber = Number(key.slice(0, colon));
+      const column = Number(key.slice(colon + 1));
+      if (!Number.isFinite(lineNumber) || !Number.isFinite(column)) continue;
+      if (!isRulerLineInModel(m, lineNumber)) continue;
+      readingRulerFadingOut.set(key, { lineNumber, column });
+    }
+    for (const key of liveKeys) readingRulerFadingOut.delete(key);
+  } else {
+    readingRulerFadingOut.clear();
+  }
+  const fadingRows = [...readingRulerFadingOut.values()].filter((pos) =>
+    isRulerLineInModel(m, pos.lineNumber),
+  );
+  syncReadingRulerImageFocus([...liveRows, ...fadingRows]);
+  col.set([
+    ...buildRulerFocusDecorations(e, m, liveRows, READER_RULER_FOCUS_CLASS),
+    ...buildRulerFocusDecorations(
+      e,
+      m,
+      fadingRows,
+      READER_RULER_FOCUS_OUT_CLASS,
+    ),
+  ]);
+  readingRulerLiveFocusKeys = liveKeys;
+  if (readingRulerFadeTimer != null) {
+    window.clearTimeout(readingRulerFadeTimer);
+    readingRulerFadeTimer = null;
+  }
+  if (fadingRows.length === 0) return;
+  const gen = ++readingRulerFadeGen;
+  readingRulerFadeTimer = window.setTimeout(() => {
+    readingRulerFadeTimer = null;
+    if (gen !== readingRulerFadeGen) return;
+    readingRulerFadingOut.clear();
+    refreshReadingRulerDecorations();
+  }, READER_RULER_FADE_MS);
+}
+
+function syncReadingRulerImageFocus(focusedRows: readonly ReadingRulerPos[]) {
+  const e = editor.value;
+  const m = model.value;
+  const keys = new Set(
+    focusedRows.map((r) => `${r.lineNumber}:${r.column}`),
+  );
+  const hasRow = (pos: ReadingRulerPos) =>
+    keys.has(`${pos.lineNumber}:${pos.column}`);
+  forEachReaderImageViewZone(imageViewZoneIds.value, (dom, afterLine) => {
+    let on = false;
+    if (e && m && afterLine > 0 && isRulerLineInModel(m, afterLine)) {
+      on = hasRow(
+        visualRowStart(e, afterLine, m.getLineMaxColumn(afterLine)),
+      );
+    }
+    if (!on && e && m) {
+      const nextLine = afterLine + 1;
+      if (nextLine >= 1 && isRulerLineInModel(m, nextLine)) {
+        on = hasRow(visualRowStart(e, nextLine, 1));
+      }
+    }
+    dom.classList.toggle("readerRulerFocus", on);
+  });
+}
+
+function setReadingRulerAnchorFromPos(pos: ReadingRulerPos, scrollToCenter: boolean) {
+  const e = editor.value;
+  const m = model.value;
+  if (!e || !m || !isReadingRulerActive()) return;
+  readingRulerAnchor = snapRulerPosToContent(e, m, pos);
+  refreshReadingRulerDecorations();
+  if (!scrollToCenter) return;
+  const rows = collectVisualRowsFromAnchor(
+    e,
+    m,
+    readingRulerAnchor,
+    readingRulerFocusLineCount(),
+  );
+  const top = scrollTopToCenterVisualBand(e, rows);
+  if (top == null) return;
+  beginReadingRulerOwnedScroll(top);
+  beginProgrammaticScroll();
+  e.setScrollTop(top, monacoScrollType(true));
+  scheduleReadingRulerFollowViewport();
+}
+
+/** 视口已在文首/文末时，聚焦带贴该侧（锚点取带的自然中间行，不改滚动）。 */
+function syncReadingRulerToDocumentContentEdge(direction: -1 | 1) {
+  const e = editor.value;
+  const m = model.value;
+  if (!e || !m || !isReadingRulerActive()) return;
+  beginReadingRulerOwnedScroll();
+  setReadingRulerAnchorFromPos(
+    rulerAnchorForContentEdgeBand(
+      e,
+      m,
+      direction,
+      readingRulerFocusLineCount(),
+    ),
+    false,
+  );
+  scheduleReadingRulerFollowViewport();
+}
+
+function peekReadingRulerMove(
+  direction: -1 | 1,
+  stepCount: number,
+): ReadingRulerPos | null {
+  const e = editor.value;
+  const m = model.value;
+  if (!e || !m || !isReadingRulerActive()) return null;
+  ensureReadingRulerAnchor();
+  if (!readingRulerAnchor) return null;
+  if (
+    focusBandTouchesContentEdge(
+      e,
+      m,
+      readingRulerAnchor,
+      readingRulerFocusLineCount(),
+      direction,
+    )
+  ) {
+    return readingRulerAnchor;
+  }
+  return advanceRulerAnchorByContentLines(
+    e,
+    m,
+    readingRulerAnchor,
+    direction,
+    stepCount,
+    readingRulerFocusLineCount(),
+  );
+}
+
+/** 尺已贴文首/文末，再沿该方向移一条有内容的视觉行也不会动 */
+function readingRulerCannotMove(direction: -1 | 1): boolean {
+  if (!isReadingRulerActive()) return false;
+  const next = peekReadingRulerMove(direction, 1);
+  if (!next || !readingRulerAnchor) return true;
+  return positionsEqual(next, readingRulerAnchor);
+}
+
+/** 按有内容的视觉行移动锚点，并把聚焦带滚到视口中央。未移动则返回 false。 */
+function moveReadingRulerByContentLines(
+  direction: -1 | 1,
+  stepCount: number,
+): boolean {
+  if (!isReadingRulerActive()) return false;
+  const next = peekReadingRulerMove(direction, stepCount);
+  if (!next || !readingRulerAnchor) return false;
+  if (positionsEqual(next, readingRulerAnchor)) return false;
+  setReadingRulerAnchorFromPos(next, true);
+  return true;
+}
+
+function finishReadingRulerMoveOrBound(direction: -1 | 1) {
+  props.interceptReadonlyPageStep?.(direction);
+}
+
+/**
+ * 阅读尺开启：滚轮按滚动倍率（Alt 为加速倍率）移动锚点。
+ * 鼠标一格多为 ±100～120 像素（不足 120 时若按 120 累加，隔几格会缺一次）。
+ * 幅度够一格的事件直接按整行走并清余数；触控板小位移仍累计。
+ * 同一事件只处理一次（全屏空白 / 左右留白 / 正文捕获会重复进）。
+ */
+let readingRulerWheelAcc = 0;
+let lastHandledReadingRulerWheel: WheelEvent | null = null;
+const READING_RULER_WHEEL_PIXELS_PER_LINE = 120;
+
+function wheelEventToRulerLineDelta(ev: WheelEvent): number {
+  let dy = ev.deltaY;
+  if (ev.deltaMode === WheelEvent.DOM_DELTA_LINE) {
+    // already in lines
+  } else if (ev.deltaMode === WheelEvent.DOM_DELTA_PAGE) {
+    dy *= readingRulerFocusLineCount();
+  } else {
+    dy /= READING_RULER_WHEEL_PIXELS_PER_LINE;
+  }
+  let sens = clampMouseWheelScrollSensitivity(
+    props.mouseWheelScrollSensitivity ?? defaultMouseWheelScrollSensitivity,
+  );
+  if (ev.altKey) {
+    sens *= clampFastScrollSensitivity(
+      props.fastScrollSensitivity ?? defaultFastScrollSensitivity,
+    );
+  }
+  return dy * sens;
+}
+
+function isDiscreteReadingRulerWheel(ev: WheelEvent): boolean {
+  if (ev.deltaMode === WheelEvent.DOM_DELTA_LINE) return true;
+  if (ev.deltaMode === WheelEvent.DOM_DELTA_PAGE) return true;
+  return (
+    Math.abs(ev.deltaY) >= READING_RULER_WHEEL_PIXELS_PER_LINE * 0.5
+  );
+}
+
+function applyReadingRulerWheelSteps(lineDelta: number) {
+  if (!Number.isFinite(lineDelta) || lineDelta === 0) return;
+  const direction: -1 | 1 = lineDelta > 0 ? 1 : -1;
+  let left = Math.abs(lineDelta);
+  while (left >= 1) {
+    if (!moveReadingRulerByContentLines(direction, 1)) {
+      readingRulerWheelAcc = 0;
+      finishReadingRulerMoveOrBound(direction);
+      return;
+    }
+    left -= 1;
+  }
+}
+
+function tryHandleReadingRulerWheel(ev: WheelEvent): boolean {
+  if (lastHandledReadingRulerWheel === ev) return true;
+  if (!isReadingRulerActive() || voiceReadScrollLocked.value) {
+    readingRulerWheelAcc = 0;
+    return false;
+  }
+  if (isClickModeIgnoredTarget(ev.target, ev.clientX, ev.clientY)) {
+    return false;
+  }
+  if (ev.deltaY === 0) return false;
+
+  lastHandledReadingRulerWheel = ev;
+  ev.preventDefault();
+  ev.stopPropagation();
+
+  const lines = wheelEventToRulerLineDelta(ev);
+  if (
+    (readingRulerWheelAcc > 0 && lines < 0) ||
+    (readingRulerWheelAcc < 0 && lines > 0)
+  ) {
+    readingRulerWheelAcc = 0;
+  }
+
+  if (isDiscreteReadingRulerWheel(ev)) {
+    const step = Math.round(Math.abs(lines));
+    if (step >= 1) {
+      readingRulerWheelAcc = 0;
+      applyReadingRulerWheelSteps(Math.sign(lines) * step);
+      return true;
+    }
+  }
+
+  readingRulerWheelAcc += lines;
+  applyReadingRulerWheelSteps(
+    Math.trunc(readingRulerWheelAcc) || 0,
+  );
+  readingRulerWheelAcc -= Math.trunc(readingRulerWheelAcc);
+  return true;
+}
+
 function suppressHighlightTipForProgrammaticSelection() {
   readerAnn.setSuppressToolbarUntilMs(Date.now() + 300);
   readerAnn.closeToolbarUi();
@@ -2925,6 +3596,7 @@ function scrollByDeltaY(deltaY: number) {
  * `delegateScrollFromMouseWheelEvent` 在运行时的 CodeEditorWidget 上存在，但未写入 monaco d.ts。
  */
 function delegateEditorWheelFromBrowserEvent(ev: WheelEvent) {
+  if (tryHandleReadingRulerWheel(ev)) return;
   const e = editor.value;
   if (!e) return;
   const ed = e as monaco.editor.IStandaloneCodeEditor & {
@@ -2982,7 +3654,6 @@ function isClickModeIgnoredTarget(
 }
 
 function runClickModePage(direction: -1 | 1) {
-  if (props.interceptReadonlyPageStep?.(direction)) return;
   scrollByPageStep(direction);
 }
 
@@ -3023,6 +3694,8 @@ type ClickModePointerGesture = {
   startScrollTop: number;
   dragged: boolean;
   captureEl: Element | null;
+  /** 按下时已有弹层：松开不翻页，仍可拖动滚动 */
+  suppressPageOnRelease: boolean;
 };
 
 let clickModeGesture: ClickModePointerGesture | null = null;
@@ -3060,7 +3733,8 @@ function endClickModePointerGesture(commitClick: boolean) {
   unbindClickModeGestureListeners();
   setClickModeDraggingClass(false);
   if (g) releaseClickModePointerCapture(g);
-  if (!g || !commitClick || g.dragged) return;
+  if (g?.dragged) scheduleReadingRulerFollowViewport();
+  if (!g || !commitClick || g.dragged || g.suppressPageOnRelease) return;
   if (!readerClickTurnPageActive.value) return;
   runClickModePointerAction(g.button === 2 ? -1 : 1);
 }
@@ -3117,11 +3791,14 @@ function onClickModeWindowBlur() {
   endClickModePointerGesture(false);
 }
 
-/** 按下开始手势；松开且未拖动才翻页。正文与全屏两侧空白共用。 */
+/** 按下开始手势；松开且未拖动才翻页（阅读尺开启时按聚焦行数移尺）。正文与全屏两侧空白共用。 */
 function beginClickModePointerGesture(ev: MouseEvent): boolean {
   if (!readerClickTurnPageActive.value) return false;
   if (ev.button !== 0 && ev.button !== 2) return false;
   if (clickModeGesture) return true;
+  // 点击模式会 preventDefault，浏览器不会把焦点交给阅读区；
+  // ↑↓ / PageUp / PageDown 在侧栏列表上会让给列表，须把焦点从侧栏拿走。
+  focusEditor();
   const pointerId = clickModeGesturePointerId(ev);
   let captureEl: Element | null = null;
   const el = ev.currentTarget;
@@ -3141,6 +3818,7 @@ function beginClickModePointerGesture(ev: MouseEvent): boolean {
     startScrollTop: editor.value?.getScrollTop() ?? 0,
     dragged: false,
     captureEl,
+    suppressPageOnRelease: shouldSkipClickModePageForOverlay(),
   };
   window.addEventListener("pointermove", onClickModePointerMove, true);
   window.addEventListener("pointerup", onClickModePointerUp, true);
@@ -3151,6 +3829,51 @@ function beginClickModePointerGesture(ev: MouseEvent): boolean {
 
 function shouldSuppressClickModeContextMenu(): boolean {
   return readerClickTurnPageActive.value;
+}
+
+/**
+ * 弹层在 window 捕获阶段仍开着：本轮松开不翻页，仍开始拖动手势。
+ * 顶栏「转换/更多」在 document 捕获里关菜单，必须提前记下。
+ * 窗口失焦后点阅读区重新激活：同样当次不翻页。
+ */
+let skipClickModePageUntilPointerUp = false;
+let clickModeWindowWasBlurred = false;
+let clickModeLastWindowFocusAt = 0;
+const CLICK_MODE_FOCUS_ACTIVATE_MS = 400;
+
+function onClickModeTrackWindowBlur() {
+  clickModeWindowWasBlurred = true;
+}
+
+function onClickModeTrackWindowFocus() {
+  clickModeLastWindowFocusAt = performance.now();
+}
+
+function armClickModeOverlaySkipIfNeeded(ev: PointerEvent) {
+  if (ev.button !== 0 && ev.button !== 2) return;
+  if (hasDismissibleOverlay()) skipClickModePageUntilPointerUp = true;
+  if (
+    !document.hasFocus() ||
+    (clickModeWindowWasBlurred &&
+      performance.now() - clickModeLastWindowFocusAt <
+        CLICK_MODE_FOCUS_ACTIVATE_MS)
+  ) {
+    skipClickModePageUntilPointerUp = true;
+  }
+  clickModeWindowWasBlurred = false;
+}
+
+function armClickModePageSkip() {
+  skipClickModePageUntilPointerUp = true;
+}
+
+function clearClickModeOverlaySkip(ev: PointerEvent) {
+  if (ev.button !== 0 && ev.button !== 2) return;
+  skipClickModePageUntilPointerUp = false;
+}
+
+function shouldSkipClickModePageForOverlay(): boolean {
+  return skipClickModePageUntilPointerUp;
 }
 
 /**
@@ -3200,11 +3923,25 @@ onMounted(() => {
   for (const type of TEMP_SELECT_STRIP_ALT_EVENTS) {
     window.addEventListener(type, onTempSelectStripAltMouse, true);
   }
+  window.addEventListener("pointerdown", armClickModeOverlaySkipIfNeeded, true);
+  window.addEventListener("pointerup", clearClickModeOverlaySkip, true);
+  window.addEventListener("pointercancel", clearClickModeOverlaySkip, true);
+  window.addEventListener("blur", onClickModeTrackWindowBlur);
+  window.addEventListener("focus", onClickModeTrackWindowFocus);
 });
 onBeforeUnmount(() => {
   for (const type of TEMP_SELECT_STRIP_ALT_EVENTS) {
     window.removeEventListener(type, onTempSelectStripAltMouse, true);
   }
+  window.removeEventListener(
+    "pointerdown",
+    armClickModeOverlaySkipIfNeeded,
+    true,
+  );
+  window.removeEventListener("pointerup", clearClickModeOverlaySkip, true);
+  window.removeEventListener("pointercancel", clearClickModeOverlaySkip, true);
+  window.removeEventListener("blur", onClickModeTrackWindowBlur);
+  window.removeEventListener("focus", onClickModeTrackWindowFocus);
 });
 
 function applyReaderClickModeMouseStyle() {
@@ -3238,6 +3975,7 @@ function eventOverHorizontalInsetGutter(ev: MouseEvent | WheelEvent): boolean {
 function onHorizontalInsetGutterWheel(ev: WheelEvent) {
   if (!eventOverHorizontalInsetGutter(ev)) return;
   if (props.voiceReadScrollLocked) return;
+  if (tryHandleReadingRulerWheel(ev)) return;
   // 须先委托：Monaco 若见 defaultPrevented 会直接 return
   delegateEditorWheelFromBrowserEvent(ev);
   ev.preventDefault();
@@ -3265,6 +4003,11 @@ function onHorizontalInsetGutterContextMenu(ev: MouseEvent) {
 }
 
 function scrollByLineStep(direction: -1 | 1) {
+  if (isReadingRulerActive()) {
+    if (moveReadingRulerByContentLines(direction, 1)) return;
+    finishReadingRulerMoveOrBound(direction);
+    return;
+  }
   const e = editor.value;
   if (!e) return;
   const lineHeight = Math.max(
@@ -3419,6 +4162,16 @@ function scheduleAfterPageTurnScrollSettled(
 }
 
 function scrollByPageStep(direction: -1 | 1) {
+  if (isReadingRulerActive()) {
+    if (
+      moveReadingRulerByContentLines(direction, readingRulerFocusLineCount())
+    ) {
+      return;
+    }
+    finishReadingRulerMoveOrBound(direction);
+    return;
+  }
+  if (props.interceptReadonlyPageStep?.(direction)) return;
   const e = editor.value;
   if (!e) return;
   cancelPageTurnStickyAlign();
@@ -3531,7 +4284,15 @@ function normalizeScrollAfterEmbeddedViewZones() {
     }
   };
   runPass();
-  requestAnimationFrame(runPass);
+  if (!readingRulerSkipFollowResync) {
+    resyncReadingRulerFromViewport();
+  }
+  requestAnimationFrame(() => {
+    runPass();
+    if (!readingRulerSkipFollowResync) {
+      resyncReadingRulerFromViewport();
+    }
+  });
 }
 
 function getScrollTop(): number {
@@ -3590,6 +4351,7 @@ function restoreEditorViewState(state: unknown): boolean {
   beginProgrammaticScroll();
   try {
     e.restoreViewState(state as monaco.editor.ICodeEditorViewState);
+    scheduleReaderBackgroundStickyAlign();
     return true;
   } catch {
     return false;
@@ -3731,7 +4493,7 @@ function emitProbeLine(fromScroll = false) {
   const atBottom = maxTop <= 0 ? true : scrollTop >= maxTop - 1;
   const percent =
     maxTop <= 0 ? 100 : floorReadingPercentFromScrollRatio(scrollTop / maxTop);
-  emit("probeLineChange", probeLine, fromReadingScroll);
+  emit("probeLineChange", probeLine, fromReadingScroll, fromScroll);
   emit("viewportTopLineChange", startLine);
   emit("viewportEndLineChange", endLine);
   emit("viewportVisualProgressChange", percent, atBottom);
@@ -4178,6 +4940,11 @@ defineExpose({
   getViewportStartModelLine,
   setVoiceReadLineHighlight,
   getVoiceReadHighlightedLine: () => voiceReadHighlightLine.value,
+  isReadingRulerActive,
+  readingRulerCannotMove,
+  resyncReadingRulerFromViewport,
+  syncReadingRulerToDocumentContentEdge,
+  scrollChapterTitleToRulerFocus,
   jumpToSearchMatchCentered: inlineSearch.jumpToSearchMatchCentered,
   jumpToNextInlineSearchMatch: inlineSearch.jumpToNextInlineSearchMatch,
   hasInlineSearchQuery: inlineSearch.hasInlineSearchQuery,
@@ -4224,7 +4991,9 @@ defineExpose({
   focusEditor,
   scrollByDeltaY,
   delegateEditorWheelFromBrowserEvent,
+  tryHandleReadingRulerWheel,
   beginClickModePointerGesture,
+  armClickModePageSkip,
   shouldSuppressClickModeContextMenu,
   scrollByLineStep,
   scrollByPageStep,
@@ -4433,6 +5202,8 @@ onMounted(() => {
     editor.value.createDecorationsCollection();
   voiceReadDecorationsCollection.value =
     editor.value.createDecorationsCollection();
+  readingRulerDecorationsCollection.value =
+    editor.value.createDecorationsCollection();
   minimapCursorLineDecorationsCollection.value =
     editor.value.createDecorationsCollection();
   chapterMinimapDecorationsCollection.value =
@@ -4440,6 +5211,7 @@ onMounted(() => {
 
   bindAnnotationScrollSync(editor.value);
   rebuildAnnotationIndex();
+  syncReadingRulerEditorClass();
 
   const e = editor.value;
   if (e) {
@@ -4452,13 +5224,21 @@ onMounted(() => {
     }
     const d1 = e.onDidScrollChange(() => {
       emitProbeLine(true);
+      scheduleReaderBackgroundStickyAlign();
+      scheduleReadingRulerFollowViewport();
     });
+    const dLayout = e.onDidLayoutChange(() => {
+      scheduleReaderBackgroundStickyAlign();
+      refreshReadingRulerDecorations();
+    });
+    window.addEventListener("resize", scheduleReaderBackgroundStickyAlign);
     const d2 = e.onDidChangeCursorPosition(() => {
       emitProbeLine(false);
       syncMinimapCursorLineDecoration();
       if (!smartFormatReviewActive.value) emitReaderEditCursorStatus();
     });
     const dSel = e.onDidChangeCursorSelection(() => {
+      refreshReadingRulerDecorations();
       if (!smartFormatReviewActive.value) emitReaderEditCursorStatus();
       if (readerAnn.shouldSuppressToolbar()) {
         closeHighlightFloatUi();
@@ -4473,12 +5253,12 @@ onMounted(() => {
     const d3 = installReaderScrollKeyHandler(monaco, e, {
       onSpacePageDown: () => {
         if (props.voiceReadScrollLocked) return;
-        if (props.interceptReadonlySpacePageDown?.()) return;
         scrollByPageStep(1);
       },
       shouldInterceptReadOnlyKeys: () =>
         !props.readerEditMode && !props.voiceReadScrollLocked,
     });
+    const dReadOnlyIme = installReaderReadOnlyImeGuard(monaco, e);
     function openEditorEditContextMenu(clientX: number, clientY: number) {
       if (smartFormatReviewActive.value) return;
       if (props.readerEditMode && smartFormatRunning.value) return;
@@ -4600,6 +5380,13 @@ onMounted(() => {
       onReaderContextMenuCapture,
       true,
     );
+    const onReaderRulerWheelCapture = (ev: WheelEvent) => {
+      tryHandleReadingRulerWheel(ev);
+    };
+    editorHost?.addEventListener("wheel", onReaderRulerWheelCapture, {
+      capture: true,
+      passive: false,
+    });
     /** 查找栏下一处/上一处：先把视口外光标挪到视口首行，再让 Monaco 从该锚点搜 */
     const onFindNavigateAnchorCapture = (ev: Event) => {
       const t = ev.target;
@@ -4627,9 +5414,12 @@ onMounted(() => {
     window.addEventListener("keydown", onFindNavigateKeyCapture, true);
     onBeforeUnmount(() => {
       d1.dispose();
+      dLayout.dispose();
+      window.removeEventListener("resize", scheduleReaderBackgroundStickyAlign);
       d2.dispose();
       dSel.dispose();
       d3.dispose();
+      dReadOnlyIme.dispose();
       saveCommandDisposable?.dispose();
       saveCommandDisposable = null;
       editorHost?.removeEventListener(
@@ -4645,6 +5435,11 @@ onMounted(() => {
       editorHost?.removeEventListener(
         "contextmenu",
         onReaderContextMenuCapture,
+        true,
+      );
+      editorHost?.removeEventListener(
+        "wheel",
+        onReaderRulerWheelCapture,
         true,
       );
       editorHost?.removeEventListener("click", onFindNavigateAnchorCapture, true);
@@ -4668,6 +5463,8 @@ onBeforeUnmount(() => {
     stickyChapterScrollRefreshRaf = null;
   }
   cancelPageTurnStickyAlign();
+  cancelReadingRulerFollowViewport();
+  clearReadingRulerFade();
   notifyChapterStickyFoldingRanges = null;
   disposeEbookInternalLinks();
   cancelImageViewZoneScrollRender();
@@ -4686,6 +5483,39 @@ onBeforeUnmount(() => {
   for (const d of providersDisposables) d.dispose();
   providersDisposables = [];
 });
+
+watch(
+  () =>
+    [
+      props.readingRulerEnabled,
+      props.readingRulerFocusLines,
+      props.readingRulerDimOpacity,
+      props.readingRulerDimStickyTitle,
+      props.readingRulerTransitionEnabled,
+      props.readerEditMode,
+      props.voiceReadScrollLocked,
+      props.voiceReadPaused,
+    ] as const,
+  (curr, prev) => {
+    const nowActive =
+      curr[0] === true && !curr[5] && !curr[6] && !curr[7];
+    const wasActive = prev
+      ? prev[0] === true && !prev[5] && !prev[6] && !prev[7]
+      : false;
+    if (nowActive && !wasActive) {
+      invalidateReadingRulerAnchor();
+    }
+    if (!nowActive) {
+      cancelReadingRulerFollowViewport();
+      readingRulerSkipFollowResync = false;
+      readingRulerOwnedScrollTop = null;
+      clearReadingRulerFade();
+      readingRulerDecorationsCollection.value?.clear();
+    }
+    syncReadingRulerEditorClass();
+    refreshReadingRulerDecorations();
+  },
+);
 
 watch(
   () => [props.readerEditMode, props.physicalReaderPath] as const,
@@ -4782,9 +5612,13 @@ onMounted(() => {
 watch(smartFormatReviewActive, (active) => {
   removeSmartFormatReviewKeyCapture?.();
   removeSmartFormatReviewKeyCapture = null;
+  void nextTick(() => {
+    setupHorizontalInsetLayout();
+    layoutDiffEditor();
+    editor.value?.layout();
+  });
   if (!active) {
     closeDiffReviewContextMenu();
-    requestAnimationFrame(() => editor.value?.layout());
     void nextTick(() => emitReaderEditCursorStatus());
     return;
   }
@@ -4810,7 +5644,7 @@ watch(smartFormatReviewActive, (active) => {
 <template>
   <main
     ref="contentRootEl"
-    class="content"
+    class="content readerSurfaceBg"
     :class="{
       'content--readerEdit': readerEditMode,
       'content--readerEditMinimap': readerEditMode && readerEditMinimap,
@@ -4965,7 +5799,7 @@ watch(smartFormatReviewActive, (active) => {
 <style scoped>
 .content {
   height: 100%;
-  background: var(--reader-bg);
+  background-color: var(--reader-bg);
   overflow: hidden;
   min-height: 0;
   user-select: text;
@@ -4973,6 +5807,7 @@ watch(smartFormatReviewActive, (active) => {
 
 .editorShell {
   position: relative;
+  z-index: 1;
   height: 100%;
   width: 100%;
   min-height: 0;
@@ -5043,11 +5878,15 @@ watch(smartFormatReviewActive, (active) => {
 }
 
 .editorHost {
+  /* 查找栏 tooltip 走 Monaco ContextView（position:absolute 挂在本节点）。
+   * 须自己形成定位包含块，否则会落到带左右 padding 的 .editorShell 上，tips 偏左。 */
+  position: relative;
   flex: 1;
   min-height: 0;
   width: 100%;
   overflow: hidden;
   user-select: text;
+  background-color: transparent;
 }
 
 .hlFloatRoot {
@@ -5059,6 +5898,22 @@ watch(smartFormatReviewActive, (active) => {
 :deep(.monaco-editor),
 :deep(.monaco-editor *) {
   user-select: text;
+}
+
+/*
+ * 只读正文由 Monaco 画 `.selected-text`。上面这条 `* { user-select: text }`
+ * 会让 Chromium 再叠一层原生 `::selection`；大行高中文经常只剩选区顶/底一条细线。
+ * 编辑模式走 EditContext，不会在 view-lines 上画原生选区。
+ */
+.content:not(.content--readerEdit) :deep(.monaco-editor .view-lines),
+.content:not(.content--readerEdit) :deep(.monaco-editor .view-lines *) {
+  user-select: none;
+  -webkit-user-select: none;
+}
+.content:not(.content--readerEdit) :deep(.monaco-editor .view-lines ::selection),
+.content:not(.content--readerEdit) :deep(.monaco-editor .view-lines *::selection) {
+  background: transparent !important;
+  color: inherit !important;
 }
 
 .content.content--clickMode:not(.content--readerEdit) .editorHost,

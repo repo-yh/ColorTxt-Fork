@@ -15,8 +15,10 @@ import {
   bindAppShortcuts,
   type AppShortcutActions,
 } from "../../services/shortcutService";
-import { mergeShortcutBindings } from "../../services/shortcutUtils";
-import { hasEscBeforeModalLayers } from "../../utils/modalStack";
+import {
+  mergeShortcutBindings,
+  shortcutBindingOverridesForPersist,
+} from "../../services/shortcutUtils";
 import { appAlert } from "../../services/appDialog";
 import type { FindBookSettingsTabId } from "../components/FindBookSettingsTabBar.vue";
 
@@ -31,6 +33,7 @@ const PANEL_ACTIONS_WHEN_READER_OPEN = new Set<keyof AppShortcutActions>([
   "openFindBook",
   "openNewWindow",
   "openBookSource",
+  "toggleTheme",
 ]);
 
 function loadMainShortcutBindings():
@@ -42,10 +45,6 @@ function loadMainShortcutBindings():
 
 /** 找书窗口：设置 / 配色 / 主界面 / 新窗口 / 书源管理快捷键在找书面板内始终可用（与主界面同一套绑定） */
 export function useFindBookPanelShortcuts(deps: {
-  showSettingsPanel: Ref<boolean>;
-  showColorSchemePanel: Ref<boolean>;
-  showShortcutPanel: Ref<boolean>;
-  showBookSourcePanel: Ref<boolean>;
   showBookReader: Ref<boolean>;
   openSettings: (tab?: FindBookSettingsTabId) => void;
   openColorScheme: () => void;
@@ -53,6 +52,7 @@ export function useFindBookPanelShortcuts(deps: {
   /** 找书窗内：同一绑定（默认 F7）→ 主界面 */
   goMain: () => void;
   openNewWindow: () => void;
+  toggleTheme: () => void;
 }) {
   const shortcutBindings = ref<ShortcutBindingMap>(
     mergeShortcutBindings(defaultShortcutBindings, loadMainShortcutBindings()),
@@ -80,7 +80,12 @@ export function useFindBookPanelShortcuts(deps: {
       return;
     }
     shortcutBindings.value = merged;
-    patchPersistedMainSettings({ shortcutBindings: merged });
+    patchPersistedMainSettings({
+      shortcutBindings: shortcutBindingOverridesForPersist(
+        defaultShortcutBindings,
+        merged,
+      ),
+    });
   }
 
   function syncShortcutBindingsFromMain() {
@@ -107,12 +112,23 @@ export function useFindBookPanelShortcuts(deps: {
         openFindBook: () => {
           deps.goMain();
         },
+        enterStealthReader: () => {},
         toggleFullscreen: () => {},
         increaseFontSize: () => {},
         decreaseFontSize: () => {},
         increaseLineHeight: () => {},
         decreaseLineHeight: () => {},
+        increaseLetterSpacing: () => {},
+        decreaseLetterSpacing: () => {},
+        increaseParagraphSpacing: () => {},
+        decreaseParagraphSpacing: () => {},
+        increaseHorizontalInset: () => {},
+        decreaseHorizontalInset: () => {},
         toggleSidebar: () => {},
+        toggleMinimalistView: () => {},
+        toggleTheme: () => {
+          deps.toggleTheme();
+        },
         openNewWindow: () => {
           deps.openNewWindow();
         },
@@ -124,6 +140,9 @@ export function useFindBookPanelShortcuts(deps: {
         jumpToNextChapter: () => {},
         toggleFind: () => {},
         openSidebarSearch: () => {},
+        openSidebarFiles: () => {},
+        openSidebarChapters: () => {},
+        openSidebarAiAssistant: () => {},
         toggleReaderEdit: () => {},
         editSelectedText: () => {},
         scrollDownLine: () => {},
@@ -132,15 +151,13 @@ export function useFindBookPanelShortcuts(deps: {
         scrollPageDown: () => {},
       },
       () => shortcutBindings.value,
-      () =>
-        !deps.showSettingsPanel.value &&
-        !deps.showColorSchemePanel.value &&
-        !deps.showShortcutPanel.value &&
-        !deps.showBookSourcePanel.value &&
-        !hasEscBeforeModalLayers(),
+      undefined,
       (action) =>
         deps.showBookReader.value &&
         !PANEL_ACTIONS_WHEN_READER_OPEN.has(action),
+      undefined,
+      undefined,
+      false,
     );
   }
 

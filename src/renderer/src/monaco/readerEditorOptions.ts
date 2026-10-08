@@ -26,40 +26,17 @@ export const READER_EDITOR_DEFAULT_FONT_FAMILY = getPresetCssStack("kinghwa");
 
 export const READER_EDITOR_PADDING = { top: 10, bottom: 10 } as const;
 
-/** 垂直滚动条常显（Monaco 默认 `auto` 会在失焦后淡出） */
+/** 垂直滚动条由 Monaco 常显；全屏/极简只读的淡出走 CSS（随光标 `fullscreen--cursorHidden`） */
 const READER_SCROLLBAR_VERTICAL_VISIBLE = {
   vertical: "visible" as const,
 };
 
-/**
- * 全屏只读：`auto` 失焦淡出；窗口只读与任意编辑：`visible` 常显。
- */
-export function buildReaderVerticalScrollbarVisibility(
-  editMode: boolean,
-  fullscreen: boolean,
-): "auto" | "visible" {
-  if (!editMode && fullscreen) return "auto";
-  return "visible";
-}
-
-/** 全屏只读不绘概览尺左边线；其余由 Monaco Canvas 绘制（细线） */
+/** Monaco 概览尺左边线（与竖条同宽重叠）。全屏也曾关掉，以免 `auto` 淡出后剩一条线；现随光标一起藏，窗口/极简/全屏都绘。 */
 export function buildReaderOverviewRulerBorder(
-  editMode: boolean,
-  fullscreen: boolean,
+  _editMode: boolean,
+  _fullscreen: boolean,
 ): boolean {
-  if (!editMode && fullscreen) return false;
   return true;
-}
-
-function withReaderVerticalScrollbar(
-  scrollbar: ReaderMonacoConfigurableOptions["scrollbar"] | undefined,
-  editMode: boolean,
-  fullscreen: boolean,
-): NonNullable<ReaderMonacoConfigurableOptions["scrollbar"]> {
-  return {
-    ...scrollbar,
-    vertical: buildReaderVerticalScrollbarVisibility(editMode, fullscreen),
-  };
 }
 
 export function readerEditorLineHeight(
@@ -125,6 +102,7 @@ export function buildReaderEditorSharedCoreOptions(
   | "stopRenderingLineAfter"
   | "largeFileOptimizations"
   | "disableMonospaceOptimizations"
+  | "roundedSelection"
 > {
   const {
     fontSize,
@@ -192,6 +170,11 @@ export function buildReaderEditorSharedCoreOptions(
      * 往往因伪斜体/粗体字宽不一致而被判非等宽。阅读器一律关闭该优化。
      */
     disableMonospaceOptimizations: true,
+    /**
+     * 阅读器底色透明以透出纹理。圆角选区会在列重叠处铺 `.cslr` 再用底色抠内角，
+     * 实心 `--reader-bg` 会盖住背景图，关掉圆角即可。
+     */
+    roundedSelection: false,
   };
 }
 
@@ -205,6 +188,7 @@ export function buildReaderEditorReadOnlyModeChromeOptions(): ReaderMonacoConfig
     showFoldingControls: "never",
     scrollbar: {
       horizontal: "hidden",
+      ...READER_SCROLLBAR_VERTICAL_VISIBLE,
     },
     guides: {
       indentation: false,
@@ -277,6 +261,7 @@ export function buildReaderEditorReadOnlyInteractionOptions(): Pick<
   | "readOnly"
   | "domReadOnly"
   | "readOnlyMessage"
+  | "editContext"
   | "cursorBlinking"
   | "cursorWidth"
   | "renderLineHighlight"
@@ -286,6 +271,12 @@ export function buildReaderEditorReadOnlyInteractionOptions(): Pick<
     readOnly: true,
     domReadOnly: true,
     readOnlyMessage: { value: "" },
+    /**
+     * Monaco 0.55 默认 `editContext: true`（Chromium EditContext）。
+     * 只读时仍会开输入法：光标处出现空白合成框，且 `updateSelectionBounds`
+     * 会把视口拽回光标。查找栏有独立 input，不受此项影响。
+     */
+    editContext: false,
     cursorBlinking: "solid",
     cursorWidth: 0,
     renderLineHighlight: "none",
@@ -298,6 +289,7 @@ export function buildReaderEditorEditableInteractionOptions(): Pick<
   editor.IEditorOptions,
   | "readOnly"
   | "domReadOnly"
+  | "editContext"
   | "cursorBlinking"
   | "cursorWidth"
   | "renderLineHighlight"
@@ -306,6 +298,7 @@ export function buildReaderEditorEditableInteractionOptions(): Pick<
   return {
     readOnly: false,
     domReadOnly: false,
+    editContext: true,
     cursorBlinking: "blink",
     cursorWidth: 2,
     renderLineHighlight: "none",
@@ -365,7 +358,6 @@ export function buildReaderMonacoModeEditorOptions(
       ...buildReaderEditorEditableInteractionOptions(),
       ...lineNumberOptions,
       ...minimapOptions,
-      scrollbar: withReaderVerticalScrollbar(mode.scrollbar, true, fullscreen),
       overviewRulerBorder: buildReaderOverviewRulerBorder(true, fullscreen),
     };
   }
@@ -375,7 +367,6 @@ export function buildReaderMonacoModeEditorOptions(
     ...buildReaderEditorReadOnlyInteractionOptions(),
     ...lineNumberOptions,
     ...minimapOptions,
-    scrollbar: withReaderVerticalScrollbar(mode.scrollbar, false, fullscreen),
     overviewRulerBorder: buildReaderOverviewRulerBorder(false, fullscreen),
   };
 }

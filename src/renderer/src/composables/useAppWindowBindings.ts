@@ -1,4 +1,4 @@
-import { nextTick, onBeforeUnmount, onMounted, type Ref } from "vue";
+import { nextTick, onBeforeUnmount, onMounted, watch, type Ref } from "vue";
 import type ReaderMain from "../components/ReaderMain.vue";
 import { isPlainTextBookPath, isSupportedBookPath } from "../ebook/ebookFormat";
 import {
@@ -15,10 +15,11 @@ import { appAlert } from "../services/appDialog";
 import {
   bindAppShortcuts,
   EDIT_MODE_MONACO_DEFERRED_ACTIONS,
+  READER_SCROLL_SHORTCUT_ACTIONS,
   VOICE_READ_SCROLL_BLOCKED_ACTIONS,
 } from "../services/shortcutService";
 import { hasModalOrEscBeforeModalLayer } from "../utils/modalStack";
-import { keyboardEventFromReaderSidebar } from "../utils/readerSidebarKeyboard";
+import { shouldDeferShortcutForReaderSidebar } from "../utils/readerSidebarKeyboard";
 import { useAppFileSession } from "./useAppFileSession";
 import { useTxtStreamPipeline } from "./useTxtStreamPipeline";
 import type { ShortcutBindingMap } from "../services/shortcutRegistry";
@@ -38,6 +39,7 @@ function keyboardTargetInsideReaderMonacoEditor(
 ): boolean {
   const t = ev.target;
   if (!(t instanceof Node)) return false;
+  if (t instanceof Element && t.closest(".content--readerEdit")) return true;
   const root = readerRef.value?.getReaderEditorDomNode?.() ?? null;
   return Boolean(root && root.contains(t));
 }
@@ -56,6 +58,8 @@ export function useAppWindowBindings(deps: {
   persistFileListCache: () => void;
   persistSidebarWidth: () => void;
   isFullscreenView: Ref<boolean>;
+  /** 全屏或极简：边缘感应 / 光标隐藏 / 指针记录 */
+  chromeAutoHide: Ref<boolean>;
   showSidebar: Ref<boolean>;
   sidebarWidth: Ref<number>;
   /** 全屏时非 null，与 sidebarWidth 分离；拖拽只改此值 */
@@ -69,11 +73,15 @@ export function useAppWindowBindings(deps: {
   updateFullscreenSidebarHover: (ev: MouseEvent) => void;
   endSidebarResize: () => void;
   dismissFullscreenChromeForNativeExit: () => void;
-  /** 全屏下鼠标移动时重置「空闲隐藏光标」计时 */
+  /** 极简 / 全屏 Esc：关蒙版后的查找栏、浮动栏、连按两次退出全屏 */
+  handleReaderChromeEscape: (ev: KeyboardEvent) => boolean;
+  /** chrome 自动隐藏时鼠标移动重置「空闲隐藏光标」计时 */
   bumpFullscreenCursorIdle: () => void;
-  /** 全屏下记录指针坐标，供侧栏浮层关闭后判断是否应收起 */
+  /** chrome 自动隐藏时记录指针坐标，供侧栏浮层关闭后判断是否应收起 */
   recordFullscreenPointer?: (ev: MouseEvent) => void;
   enterOrExitFullscreenView: () => Promise<void>;
+  toggleMinimalistView: () => void;
+  toggleTheme: () => void;
   pulseChapterListCenter: (smooth: boolean) => void;
   syncChaptersAfterViewportSettled: () => void | Promise<void>;
   currentTheme: Ref<string>;
@@ -106,6 +114,12 @@ export function useAppWindowBindings(deps: {
   decreaseFontSize: () => void;
   increaseLineHeight: () => void;
   decreaseLineHeight: () => void;
+  increaseLetterSpacing: () => void;
+  decreaseLetterSpacing: () => void;
+  increaseParagraphSpacing: () => void;
+  decreaseParagraphSpacing: () => void;
+  increaseHorizontalInset: () => void;
+  decreaseHorizontalInset: () => void;
   openNewWindow: () => void;
   openFileViaDialog: () => Promise<void>;
   pickTxtDirectory: () => Promise<void>;
@@ -116,10 +130,16 @@ export function useAppWindowBindings(deps: {
   openSettings: () => void;
   openColorScheme: () => void;
   openFindBook: () => void;
+  enterStealthReader: () => void;
   /** 主窗口无书源面板；找书窗口内由对应快捷键处理 */
   openBookSource?: () => void;
   toggleFind: () => void;
   openSidebarSearch: () => void;
+  openSidebarFiles: () => void;
+  openSidebarChapters: () => void;
+  openSidebarAiAssistant: () => void;
+  /** 极简 / 全屏下快捷键唤出浮动侧栏（不改 `showSidebar`） */
+  revealFullscreenSidebar: () => void;
   toggleReaderEdit: () => void;
   editSelectedText: () => void;
   scrollDownLine: () => void;
@@ -156,6 +176,23 @@ export function useAppWindowBindings(deps: {
   onVoiceReadPlayNextLine?: () => void;
 }) {
   const unsubscribers: Array<() => void> = [];
+  const flushChapterListAfterChromeLayoutMs = 50;
+
+  function pulseChapterListAfterChromeLayout() {
+    void nextTick(() => {
+      requestAnimationFrame(() => {
+        window.setTimeout(() => {
+          deps.pulseChapterListCenter(false);
+        }, flushChapterListAfterChromeLayoutMs);
+      });
+    });
+  }
+
+  /** 退出极简（或 chrome 自动隐藏）后侧栏回到文档流，VirtualList 高度变了，需再居中当前章 */
+  watch(deps.chromeAutoHide, (hidden, wasHidden) => {
+    if (!wasHidden || hidden) return;
+    pulseChapterListAfterChromeLayout();
+  });
 
   onMounted(async () => {
     deps.readerRef.value?.setTheme(deps.currentTheme.value);
@@ -167,8 +204,6 @@ export function useAppWindowBindings(deps: {
     deps.readerRef.value?.setLetterSpacingPx(deps.readerLetterSpacingPx.value);
     deps.readerRef.value?.setFontFamily(deps.monacoFontFamily.value);
 
-    const flushChapterListAfterFullscreenMs = 50;
-
     const onFullscreenChange = (payload: { isFullscreen: boolean }) => {
       const inFs = payload.isFullscreen;
       deps.isFullscreenView.value = inFs;
@@ -178,61 +213,24 @@ export function useAppWindowBindings(deps: {
             deps.readerRef.value?.focusEditor?.();
             window.setTimeout(() => {
               deps.pulseChapterListCenter(false);
-            }, flushChapterListAfterFullscreenMs);
+            }, flushChapterListAfterChromeLayoutMs);
           });
         });
         return;
       }
-      if (!inFs) {
-        deps.dismissFullscreenChromeForNativeExit();
-        void nextTick(() => {
-          requestAnimationFrame(() => {
-            window.setTimeout(() => {
-              deps.pulseChapterListCenter(false);
-            }, flushChapterListAfterFullscreenMs);
-          });
-        });
-      }
+      deps.dismissFullscreenChromeForNativeExit();
+      pulseChapterListAfterChromeLayout();
     };
     unsubscribers.push(window.colorTxt.onFullscreenChanged(onFullscreenChange));
 
-    const onDocumentKeydownEscapeFullscreen = (ev: KeyboardEvent) => {
-      if (ev.key !== "Escape") return;
-      if (!deps.isFullscreenView.value) return;
-      const target = ev.target;
-      if (
-        target instanceof HTMLElement &&
-        target.classList.contains("fileItemRenameInput")
-      ) {
-        // 文件重命名输入框优先处理 Esc（取消重命名），不应触发退出全屏。
-        return;
-      }
-      // 有模态时仅由 modalStack 的捕获监听 resolve 一次；此处再 resolve 会关两层
-      if (hasModalOrEscBeforeModalLayer()) return;
-      if (keyboardEventFromReaderSidebar(ev)) return;
-      if (
-        deps.readerEditMode.value &&
-        keyboardTargetInsideReaderMonacoEditor(ev, deps.readerRef)
-      ) {
-        return;
-      }
-      ev.preventDefault();
-      ev.stopPropagation();
-      if (deps.readerRef.value?.isFindWidgetRevealed?.()) {
-        deps.readerRef.value?.toggleFindWidget?.();
-        return;
-      }
-      void window.colorTxt.setFullscreen(false).catch(() => {});
+    const onDocumentKeydownEscapeChrome = (ev: KeyboardEvent) => {
+      deps.handleReaderChromeEscape(ev);
     };
-    document.addEventListener(
-      "keydown",
-      onDocumentKeydownEscapeFullscreen,
-      true,
-    );
+    document.addEventListener("keydown", onDocumentKeydownEscapeChrome, true);
     unsubscribers.push(() =>
       document.removeEventListener(
         "keydown",
-        onDocumentKeydownEscapeFullscreen,
+        onDocumentKeydownEscapeChrome,
         true,
       ),
     );
@@ -252,15 +250,28 @@ export function useAppWindowBindings(deps: {
           openSettings: deps.openSettings,
           openColorScheme: deps.openColorScheme,
           openFindBook: deps.openFindBook,
+          enterStealthReader: deps.enterStealthReader,
           openBookSource: deps.openBookSource ?? (() => {}),
           toggleFullscreen: deps.enterOrExitFullscreenView,
           increaseFontSize: deps.increaseFontSize,
           decreaseFontSize: deps.decreaseFontSize,
           increaseLineHeight: deps.increaseLineHeight,
           decreaseLineHeight: deps.decreaseLineHeight,
+          increaseLetterSpacing: deps.increaseLetterSpacing,
+          decreaseLetterSpacing: deps.decreaseLetterSpacing,
+          increaseParagraphSpacing: deps.increaseParagraphSpacing,
+          decreaseParagraphSpacing: deps.decreaseParagraphSpacing,
+          increaseHorizontalInset: deps.increaseHorizontalInset,
+          decreaseHorizontalInset: deps.decreaseHorizontalInset,
           toggleSidebar: () => {
+            if (deps.chromeAutoHide.value) {
+              deps.revealFullscreenSidebar();
+              return;
+            }
             deps.showSidebar.value = !deps.showSidebar.value;
           },
+          toggleMinimalistView: deps.toggleMinimalistView,
+          toggleTheme: deps.toggleTheme,
           openNewWindow: deps.openNewWindow,
           openFile: deps.openFileViaDialog,
           pickTxtDirectory: deps.pickTxtDirectory,
@@ -273,6 +284,9 @@ export function useAppWindowBindings(deps: {
           jumpToNextChapter: deps.jumpToNextChapter,
           toggleFind: deps.toggleFind,
           openSidebarSearch: deps.openSidebarSearch,
+          openSidebarFiles: deps.openSidebarFiles,
+          openSidebarChapters: deps.openSidebarChapters,
+          openSidebarAiAssistant: deps.openSidebarAiAssistant,
           toggleReaderEdit: deps.toggleReaderEdit,
           editSelectedText: deps.editSelectedText,
           scrollDownLine: deps.scrollDownLine,
@@ -281,10 +295,15 @@ export function useAppWindowBindings(deps: {
           scrollPageDown: deps.scrollPageDown,
         },
         () => deps.shortcutBindings.value,
-        (ev) =>
-          !hasModalOrEscBeforeModalLayer() &&
-          !keyboardEventFromReaderSidebar(ev),
+        undefined,
         (action, ev) => {
+          if (shouldDeferShortcutForReaderSidebar(action, ev)) return true;
+          if (
+            hasModalOrEscBeforeModalLayer() &&
+            READER_SCROLL_SHORTCUT_ACTIONS.has(action)
+          ) {
+            return true;
+          }
           if (
             keyboardTargetInsideFindWidget(ev) &&
             (action === "scrollUpLine" || action === "scrollDownLine")
@@ -301,11 +320,15 @@ export function useAppWindowBindings(deps: {
           Boolean(deps.voiceReadScrollLocked?.value) &&
           VOICE_READ_SCROLL_BLOCKED_ACTIONS.has(action),
         {
-          isActive: () => Boolean(deps.isVoiceReadActive?.value),
+          isActive: () =>
+            Boolean(deps.isVoiceReadActive?.value) &&
+            !hasModalOrEscBeforeModalLayer(),
           togglePlayPause: () => deps.onVoiceReadTogglePlayPause?.(),
           playPrevLine: () => deps.onVoiceReadPlayPrevLine?.(),
           playNextLine: () => deps.onVoiceReadPlayNextLine?.(),
         },
+        true,
+        () => deps.readerEditMode.value,
       ),
     );
 
@@ -725,10 +748,10 @@ export function useAppWindowBindings(deps: {
       deps.updateFullscreenHeaderHover(ev);
       deps.updateFullscreenFooterHover(ev);
       deps.updateFullscreenSidebarHover(ev);
-      if (deps.isFullscreenView.value) {
+      if (deps.chromeAutoHide.value) {
         deps.recordFullscreenPointer?.(ev);
       }
-      if (deps.isFullscreenView.value && !deps.resizingSidebar.value) {
+      if (deps.chromeAutoHide.value && !deps.resizingSidebar.value) {
         deps.bumpFullscreenCursorIdle();
       }
     };

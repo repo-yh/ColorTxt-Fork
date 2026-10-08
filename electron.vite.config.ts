@@ -498,6 +498,15 @@ export default defineConfig({
         input: {
           index: resolve(__electronViteConfigDir, "src/renderer/index.html"),
           "find-book": resolve(__electronViteConfigDir, "src/renderer/find-book.html"),
+          eyedropper: resolve(__electronViteConfigDir, "src/renderer/eyedropper.html"),
+          "stealth-reader": resolve(
+            __electronViteConfigDir,
+            "src/renderer/stealth-reader.html",
+          ),
+          "stealth-settings": resolve(
+            __electronViteConfigDir,
+            "src/renderer/stealth-settings.html",
+          ),
         },
       },
     },

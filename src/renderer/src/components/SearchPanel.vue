@@ -270,6 +270,7 @@ function buildSegmentsByRanges(text: string, ranges: SearchRange[]) {
           :item-count="props.results.length"
           :row-stride="READER_SIDEBAR_ROW_STRIDE"
           :overscan="12"
+          arrow-nav
           :item-key="
             (i) => {
               const r = props.results[i];
@@ -282,6 +283,7 @@ function buildSegmentsByRanges(text: string, ranges: SearchRange[]) {
           <template #default="{ index }">
             <button
               type="button"
+              tabindex="-1"
               class="searchResultItem"
               :class="{
                 active: isActiveSearchResult(

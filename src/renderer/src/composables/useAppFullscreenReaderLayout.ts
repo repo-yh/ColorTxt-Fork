@@ -143,6 +143,7 @@ export function useAppFullscreenReaderLayout(deps: {
     if (!deps.isFullscreenView.value) return;
     if (eventInvolvesFullscreenSidebar(ev)) return;
     if (!isFullscreenBlankSide(ev)) return;
+    if (deps.readerRef.value?.tryHandleReadingRulerWheel?.(ev)) return;
     // 必须先委托：Monaco 的 scrollable 在 `_onMouseWheel` 开头若发现 `defaultPrevented` 会直接 return。
     deps.readerRef.value?.delegateEditorWheelFromBrowserEvent?.(ev);
     ev.preventDefault();

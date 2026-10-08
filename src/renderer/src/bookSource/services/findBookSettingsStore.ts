@@ -7,6 +7,7 @@ import {
   defaultFullscreenReaderWidthPercent,
   defaultFullscreenShowSystemTime,
   defaultShowSidebar,
+  defaultIsMinimalistView,
   defaultLeadIndentFullWidth,
   defaultMonacoAdvancedWrapping,
   defaultMonacoCjkWrapOptimize,
@@ -28,6 +29,15 @@ import {
   clampReaderHorizontalInsetPx,
   defaultStickyChapterTitleEnabled,
   defaultReaderClickMode,
+  defaultReadingRulerEnabled,
+  defaultReadingRulerFocusLines,
+  defaultReadingRulerDimOpacity,
+  defaultReadingRulerDimStickyTitle,
+  defaultReadingRulerTransitionEnabled,
+  clampReadingRulerFocusLines,
+  clampReadingRulerDimOpacity,
+  defaultMarkdownImageHeightPx,
+  clampMarkdownImageHeightPx,
   defaultTxtrDelimitedMatchCrossLine,
   FIND_BOOK_SIDEBAR_MIN_WIDTH,
   normalizeLineHeightMultiple,
@@ -165,6 +175,7 @@ export function snapshotFindBookOnlySettingsFromStore(state: {
   downloadDefaultCategory: string;
   proxy: FindBookProxySettings;
   showSidebar: boolean;
+  isMinimalistView: boolean;
   sidebarWidth: number;
   showChapterTag: boolean;
 }): PersistedFindBookSettings {
@@ -176,6 +187,7 @@ export function snapshotFindBookOnlySettingsFromStore(state: {
     downloadDefaultCategory: state.downloadDefaultCategory.trim(),
     proxy: normalizeFindBookProxySettings(state.proxy),
     showSidebar: state.showSidebar,
+    isMinimalistView: state.isMinimalistView,
     sidebarWidth: state.sidebarWidth,
     showChapterTag: state.showChapterTag,
   };
@@ -205,6 +217,12 @@ export type SharedReaderSettingsSnapshot = {
   fastScrollSensitivity: number;
   stickyChapterTitleEnabled: boolean;
   readerClickMode: boolean;
+  readingRulerEnabled: boolean;
+  readingRulerFocusLines: number;
+  readingRulerDimOpacity: number;
+  readingRulerDimStickyTitle: boolean;
+  readingRulerTransitionEnabled: boolean;
+  markdownImageHeightPx: number;
   chapterNavToolbarEnabled: boolean;
   findBookChapterAdvanceEnabled: boolean;
   readerEditShowLineNumbers: boolean;
@@ -308,6 +326,33 @@ export function sharedReaderSettingsFromMainData(
       typeof data.readerClickMode === "boolean"
         ? data.readerClickMode
         : defaultReaderClickMode,
+    readingRulerEnabled:
+      typeof data.readingRulerEnabled === "boolean"
+        ? data.readingRulerEnabled
+        : defaultReadingRulerEnabled,
+    readingRulerFocusLines: clampReadingRulerFocusLines(
+      typeof data.readingRulerFocusLines === "number"
+        ? data.readingRulerFocusLines
+        : defaultReadingRulerFocusLines,
+    ),
+    readingRulerDimOpacity: clampReadingRulerDimOpacity(
+      typeof data.readingRulerDimOpacity === "number"
+        ? data.readingRulerDimOpacity
+        : defaultReadingRulerDimOpacity,
+    ),
+    readingRulerDimStickyTitle:
+      typeof data.readingRulerDimStickyTitle === "boolean"
+        ? data.readingRulerDimStickyTitle
+        : defaultReadingRulerDimStickyTitle,
+    readingRulerTransitionEnabled:
+      typeof data.readingRulerTransitionEnabled === "boolean"
+        ? data.readingRulerTransitionEnabled
+        : defaultReadingRulerTransitionEnabled,
+    markdownImageHeightPx: clampMarkdownImageHeightPx(
+      typeof data.markdownImageHeightPx === "number"
+        ? data.markdownImageHeightPx
+        : defaultMarkdownImageHeightPx,
+    ),
     chapterNavToolbarEnabled:
       typeof data.chapterNavToolbarEnabled === "boolean"
         ? data.chapterNavToolbarEnabled
@@ -372,6 +417,12 @@ export function snapshotSharedReaderSettingsForMain(
     fastScrollSensitivity: state.fastScrollSensitivity,
     stickyChapterTitleEnabled: state.stickyChapterTitleEnabled,
     readerClickMode: state.readerClickMode,
+    readingRulerEnabled: state.readingRulerEnabled,
+    readingRulerFocusLines: state.readingRulerFocusLines,
+    readingRulerDimOpacity: state.readingRulerDimOpacity,
+    readingRulerDimStickyTitle: state.readingRulerDimStickyTitle,
+    readingRulerTransitionEnabled: state.readingRulerTransitionEnabled,
+    markdownImageHeightPx: state.markdownImageHeightPx,
     chapterNavToolbarEnabled: state.chapterNavToolbarEnabled,
     findBookChapterAdvanceEnabled: state.findBookChapterAdvanceEnabled,
     readerEditShowLineNumbers: state.readerEditShowLineNumbers,
@@ -418,6 +469,10 @@ export function createInitialFindBookSettingsState() {
       typeof data.showSidebar === "boolean"
         ? data.showSidebar
         : defaultShowSidebar,
+    isMinimalistView:
+      typeof data.isMinimalistView === "boolean"
+        ? data.isMinimalistView
+        : defaultIsMinimalistView,
     sidebarWidth:
       typeof data.sidebarWidth === "number" && Number.isFinite(data.sidebarWidth)
         ? Math.max(

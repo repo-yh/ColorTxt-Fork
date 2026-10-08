@@ -9,7 +9,7 @@ export const TIMED_SCROLL_RANGE_OPTIONS: {
   id: TimedScrollRange;
   label: string;
 }[] = [
-  { id: "screen", label: "一屏" },
+  { id: "screen", label: "一页" },
   { id: "line", label: "一行" },
 ];
 

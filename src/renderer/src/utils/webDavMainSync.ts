@@ -3,7 +3,16 @@ import {
   stripVoiceReadProfileApiKeysForDisk,
   stripVoiceReadSettingsApiKeysForDisk,
 } from "@shared/voiceReadProfiles";
-import { persistKey } from "../constants/appUi";
+import { persistKey, persistedSettingsChangedEvent } from "../constants/appUi";
+import { parseReaderBackgroundState } from "../constants/readerBackground";
+import {
+  deleteUnreferencedLocalBackgroundFiles,
+  downloadReaderBackgroundFiles,
+  pruneRemoteOrphanBackgroundFiles,
+  readerBackgroundFromLocalStorage,
+  uniqueCustomBackgroundFileNames,
+  uploadReaderBackgroundFiles,
+} from "./webDavReaderBackgroundSync";
 
 const REPLACE_APP = "colortxt:replaceRules:app";
 
@@ -38,6 +47,8 @@ export async function uploadMainConfig(
   if (!api) return { ok: false, error: "WebDAV 接口不可用" };
   const ensure = await api.ensureLayout(auth);
   if (!ensure.ok) return ensure;
+  const files = await uploadReaderBackgroundFiles(auth);
+  if (!files.ok) return files;
   const settingsBody = buildMainSettingsJsonForSync();
   let rulesBody = "[]";
   try {
@@ -53,7 +64,7 @@ export async function uploadMainConfig(
     rulesBody.endsWith("\n") ? rulesBody : `${rulesBody}\n`,
   );
   if (!r2.ok) return r2;
-  return { ok: true };
+  return pruneRemoteOrphanBackgroundFiles(auth);
 }
 
 export async function downloadMainConfig(
@@ -63,12 +74,25 @@ export async function downloadMainConfig(
   if (!api) return { ok: false, error: "WebDAV 接口不可用" };
   const s = await api.getText(auth, "Main/settings.json");
   if (!s.ok) return s;
+  const prevNames = uniqueCustomBackgroundFileNames(
+    readerBackgroundFromLocalStorage(),
+  );
   try {
     const parsed = JSON.parse(s.text) as unknown;
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
       return { ok: false, error: "远端 settings.json 格式无效" };
     }
+    const nextBg = parseReaderBackgroundState(
+      (parsed as Record<string, unknown>).readerBackground,
+    );
+    const files = await downloadReaderBackgroundFiles(auth, nextBg);
+    if (!files.ok) return files;
     localStorage.setItem(persistKey, JSON.stringify(parsed));
+    await deleteUnreferencedLocalBackgroundFiles(
+      prevNames,
+      uniqueCustomBackgroundFileNames(nextBg),
+    );
+    window.dispatchEvent(new Event(persistedSettingsChangedEvent));
   } catch (e) {
     return {
       ok: false,

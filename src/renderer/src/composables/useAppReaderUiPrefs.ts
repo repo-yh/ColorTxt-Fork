@@ -1,12 +1,18 @@
 import { nextTick, type Ref } from "vue";
 import type ReaderMain from "../components/ReaderMain.vue";
 import {
+  clampLetterSpacingPx,
+  clampLineSpacingPx,
+  clampReaderHorizontalInsetPx,
+  letterSpacingPxStep,
   lineHeightMultipleStep,
+  lineSpacingPxStep,
   maxFontSize,
   maxLineHeightMultipleForFontSize,
   minFontSize,
   minLineHeightMultiple,
   normalizeLineHeightMultiple,
+  readerHorizontalInsetPxStep,
 } from "../constants/appUi";
 import type { useTxtStreamPipeline } from "./useTxtStreamPipeline";
 import type {
@@ -20,6 +26,9 @@ export function useAppReaderUiPrefs(deps: {
   readerRef: Ref<InstanceType<typeof ReaderMain> | null>;
   readerFontSize: Ref<number>;
   readerLineHeightMultiple: Ref<number>;
+  readerLineSpacingPx: Ref<number>;
+  readerLetterSpacingPx: Ref<number>;
+  readerHorizontalInsetPx: Ref<number>;
   monacoFontFamily: Ref<string>;
   pinnedOtherFonts: Ref<string[]>;
   monacoCustomHighlight: Ref<boolean>;
@@ -42,6 +51,8 @@ export function useAppReaderUiPrefs(deps: {
   viewportAtBottom: Ref<boolean>;
   /** 语音朗读播放中：禁止打开查找栏 */
   isVoiceReadBlocksFind?: Ref<boolean>;
+  /** 快捷键调节排版时，阅读区中央胶囊（如「字号：20」「字间距：0.5」） */
+  showReaderHudTip?: (text: string) => void;
 }) {
   function onViewportTopLineChange(lineNumber: number) {
     deps.viewportTopLine.value = lineNumber;
@@ -56,8 +67,19 @@ export function useAppReaderUiPrefs(deps: {
     deps.viewportAtBottom.value = atBottom;
   }
 
+  function formatHudNumber(n: number): string {
+    return Number.isInteger(n) ? String(n) : n.toFixed(1);
+  }
+
+  function hudLayout(label: string, value: string) {
+    deps.showReaderHudTip?.(`${label}：${value}`);
+  }
+
   function increaseFontSize() {
-    if (deps.readerFontSize.value >= maxFontSize) return;
+    if (deps.readerFontSize.value >= maxFontSize) {
+      hudLayout("字号", String(deps.readerFontSize.value));
+      return;
+    }
     deps.readerFontSize.value += 1;
     deps.readerRef.value?.setFontSize(deps.readerFontSize.value);
     const cap = maxLineHeightMultipleForFontSize(deps.readerFontSize.value);
@@ -66,13 +88,18 @@ export function useAppReaderUiPrefs(deps: {
       deps.readerRef.value?.setLineHeightMultiple(cap);
     }
     deps.persistSettings();
+    hudLayout("字号", String(deps.readerFontSize.value));
   }
 
   function decreaseFontSize() {
-    if (deps.readerFontSize.value <= minFontSize) return;
+    if (deps.readerFontSize.value <= minFontSize) {
+      hudLayout("字号", String(deps.readerFontSize.value));
+      return;
+    }
     deps.readerFontSize.value -= 1;
     deps.readerRef.value?.setFontSize(deps.readerFontSize.value);
     deps.persistSettings();
+    hudLayout("字号", String(deps.readerFontSize.value));
   }
 
   function increaseLineHeight() {
@@ -82,23 +109,112 @@ export function useAppReaderUiPrefs(deps: {
     if (
       next >
       maxLineHeightMultipleForFontSize(deps.readerFontSize.value) + 1e-6
-    )
+    ) {
+      hudLayout(
+        "行间距",
+        normalizeLineHeightMultiple(
+          deps.readerLineHeightMultiple.value,
+        ).toFixed(1),
+      );
       return;
-    if (next === deps.readerLineHeightMultiple.value) return;
-    deps.readerLineHeightMultiple.value = next;
-    deps.readerRef.value?.setLineHeightMultiple(next);
-    deps.persistSettings();
+    }
+    if (next !== deps.readerLineHeightMultiple.value) {
+      deps.readerLineHeightMultiple.value = next;
+      deps.readerRef.value?.setLineHeightMultiple(next);
+      deps.persistSettings();
+    }
+    hudLayout("行间距", next.toFixed(1));
   }
 
   function decreaseLineHeight() {
     const next = normalizeLineHeightMultiple(
       deps.readerLineHeightMultiple.value - lineHeightMultipleStep,
     );
-    if (next < minLineHeightMultiple - 1e-6) return;
-    if (next === deps.readerLineHeightMultiple.value) return;
-    deps.readerLineHeightMultiple.value = next;
-    deps.readerRef.value?.setLineHeightMultiple(next);
-    deps.persistSettings();
+    if (next < minLineHeightMultiple - 1e-6) {
+      hudLayout(
+        "行间距",
+        normalizeLineHeightMultiple(
+          deps.readerLineHeightMultiple.value,
+        ).toFixed(1),
+      );
+      return;
+    }
+    if (next !== deps.readerLineHeightMultiple.value) {
+      deps.readerLineHeightMultiple.value = next;
+      deps.readerRef.value?.setLineHeightMultiple(next);
+      deps.persistSettings();
+    }
+    hudLayout("行间距", next.toFixed(1));
+  }
+
+  function increaseLetterSpacing() {
+    const next = clampLetterSpacingPx(
+      deps.readerLetterSpacingPx.value + letterSpacingPxStep,
+    );
+    if (next !== deps.readerLetterSpacingPx.value) {
+      deps.readerLetterSpacingPx.value = next;
+      deps.readerRef.value?.setLetterSpacingPx(next);
+      deps.persistSettings();
+    }
+    hudLayout("字间距", formatHudNumber(next));
+  }
+
+  function decreaseLetterSpacing() {
+    const next = clampLetterSpacingPx(
+      deps.readerLetterSpacingPx.value - letterSpacingPxStep,
+    );
+    if (next !== deps.readerLetterSpacingPx.value) {
+      deps.readerLetterSpacingPx.value = next;
+      deps.readerRef.value?.setLetterSpacingPx(next);
+      deps.persistSettings();
+    }
+    hudLayout("字间距", formatHudNumber(next));
+  }
+
+  function increaseParagraphSpacing() {
+    const next = clampLineSpacingPx(
+      deps.readerLineSpacingPx.value + lineSpacingPxStep,
+    );
+    if (next !== deps.readerLineSpacingPx.value) {
+      deps.readerLineSpacingPx.value = next;
+      void deps.readerRef.value?.setLineSpacingPx?.(next);
+      deps.persistSettings();
+    }
+    hudLayout("段间距", formatHudNumber(next));
+  }
+
+  function decreaseParagraphSpacing() {
+    const next = clampLineSpacingPx(
+      deps.readerLineSpacingPx.value - lineSpacingPxStep,
+    );
+    if (next !== deps.readerLineSpacingPx.value) {
+      deps.readerLineSpacingPx.value = next;
+      void deps.readerRef.value?.setLineSpacingPx?.(next);
+      deps.persistSettings();
+    }
+    hudLayout("段间距", formatHudNumber(next));
+  }
+
+  function increaseHorizontalInset() {
+    const next = clampReaderHorizontalInsetPx(
+      deps.readerHorizontalInsetPx.value + readerHorizontalInsetPxStep,
+    );
+    if (next !== deps.readerHorizontalInsetPx.value) {
+      deps.readerHorizontalInsetPx.value = next;
+      deps.persistSettings();
+    }
+    hudLayout("左右边距", formatHudNumber(next));
+  }
+
+  function decreaseHorizontalInset() {
+    const next = clampReaderHorizontalInsetPx(
+      deps.readerHorizontalInsetPx.value - readerHorizontalInsetPxStep,
+    );
+    if (next !== deps.readerHorizontalInsetPx.value) {
+      deps.readerHorizontalInsetPx.value = next;
+      deps.persistSettings();
+    }
+    hudLayout("左右边距", formatHudNumber(next));
   }
 
   function setMonacoFontFamily(fontFamily: string) {
@@ -250,6 +366,12 @@ export function useAppReaderUiPrefs(deps: {
     decreaseFontSize,
     increaseLineHeight,
     decreaseLineHeight,
+    increaseLetterSpacing,
+    decreaseLetterSpacing,
+    increaseParagraphSpacing,
+    decreaseParagraphSpacing,
+    increaseHorizontalInset,
+    decreaseHorizontalInset,
     setMonacoFontFamily,
     togglePinnedOtherFont,
     toggleMonacoCustomHighlight,

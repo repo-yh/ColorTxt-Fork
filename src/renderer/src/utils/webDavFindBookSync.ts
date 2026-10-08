@@ -5,7 +5,16 @@ import {
   stripVoiceReadProfileApiKeysForDisk,
   stripVoiceReadSettingsApiKeysForDisk,
 } from "@shared/voiceReadProfiles";
-import { persistKey } from "../constants/appUi";
+import { persistKey, persistedSettingsChangedEvent } from "../constants/appUi";
+import { parseReaderBackgroundState } from "../constants/readerBackground";
+import {
+  deleteUnreferencedLocalBackgroundFiles,
+  downloadReaderBackgroundFiles,
+  pruneRemoteOrphanBackgroundFiles,
+  readerBackgroundFromLocalStorage,
+  uniqueCustomBackgroundFileNames,
+  uploadReaderBackgroundFiles,
+} from "./webDavReaderBackgroundSync";
 import {
   loadFindBookBookshelf,
   saveFindBookBookshelf,
@@ -50,15 +59,27 @@ const UI_READER_KEYS = [
   "fastScrollSensitivity",
   "stickyChapterTitleEnabled",
   "readerClickMode",
+  "readingRulerEnabled",
+  "readingRulerFocusLines",
+  "readingRulerDimOpacity",
+  "readingRulerDimStickyTitle",
+  "readingRulerTransitionEnabled",
+  "markdownImageHeightPx",
   "chapterNavToolbarEnabled",
   "readerEditShowLineNumbers",
   "readerEditMinimap",
   "editAutoRefreshChapterList",
   "timedScroll",
-  "readerPaletteOverridesLight",
-  "readerPaletteOverridesDark",
+  "readerPaletteColorEnabledOverrides",
   "readerPaletteColorEnabledOverridesLight",
   "readerPaletteColorEnabledOverridesDark",
+  "readerPaletteUserPresets",
+  "readerPaletteSelectedIdLight",
+  "readerPaletteSelectedIdDark",
+  // 旧覆盖色：仅给对端尚未迁 selectedId 的远端；读盘后 migrateLegacyReaderPaletteOverrides 会消化并删掉
+  "readerPaletteOverridesLight",
+  "readerPaletteOverridesDark",
+  "readerBackground",
   "highlightColorsLight",
   "highlightColorsDark",
   "lineationColorsLight",
@@ -172,6 +193,17 @@ function applyUiReaderJson(text: string): void {
     if (k in patch) raw[k] = patch[k];
   }
   localStorage.setItem(persistKey, JSON.stringify(raw));
+}
+
+function peekReaderBackgroundAfterUiReader(text: string) {
+  const patch = JSON.parse(text) as Record<string, unknown>;
+  if (!patch || typeof patch !== "object") {
+    throw new Error("ui-reader.json 格式无效");
+  }
+  if ("readerBackground" in patch) {
+    return parseReaderBackgroundState(patch.readerBackground);
+  }
+  return readerBackgroundFromLocalStorage();
 }
 
 function lsGet(key: string, fallback: string): string {
@@ -418,18 +450,20 @@ export async function uploadFindBookSettings(
   if (!api) return { ok: false, error: "WebDAV 接口不可用" };
   const ensure = await api.ensureLayout(auth);
   if (!ensure.ok) return ensure;
+  const files = await uploadReaderBackgroundFiles(auth);
+  if (!files.ok) return files;
 
-  const files: [string, string][] = [
+  const filesJson: [string, string][] = [
     ["FindBook/ui-reader.json", buildUiReaderJson()],
     ["FindBook/settings.json", lsGet(FB_SETTINGS, "{}")],
     ["FindBook/replaceRules.json", lsGet(REPLACE_FB, "[]")],
     ["FindBook/searchHistory.json", lsGet(FB_SEARCH, "[]")],
   ];
-  for (const [path, body] of files) {
+  for (const [path, body] of filesJson) {
     const r = await putTextLines(auth, path, body);
     if (!r.ok) return r;
   }
-  return { ok: true };
+  return pruneRemoteOrphanBackgroundFiles(auth);
 }
 
 /** 更新找书设置 */
@@ -444,7 +478,18 @@ export async function downloadFindBookSettings(
   const ui = await tryGet("FindBook/ui-reader.json");
   if (ui.ok) {
     try {
+      const prevNames = uniqueCustomBackgroundFileNames(
+        readerBackgroundFromLocalStorage(),
+      );
+      const nextBg = peekReaderBackgroundAfterUiReader(ui.text);
+      const files = await downloadReaderBackgroundFiles(auth, nextBg);
+      if (!files.ok) return files;
       applyUiReaderJson(ui.text);
+      await deleteUnreferencedLocalBackgroundFiles(
+        prevNames,
+        uniqueCustomBackgroundFileNames(nextBg),
+      );
+      window.dispatchEvent(new Event(persistedSettingsChangedEvent));
     } catch (e) {
       return {
         ok: false,

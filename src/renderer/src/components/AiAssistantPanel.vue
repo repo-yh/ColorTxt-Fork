@@ -72,6 +72,7 @@ import AppCustomSelect, { type CustomSelectItem } from "./AppCustomSelect.vue";
 import { icons } from "../icons";
 import { appAlert } from "../services/appDialog";
 import { appToast } from "../services/appToast";
+import { syncDismissibleOverlay } from "../utils/dismissibleOverlayStack";
 import { APP_DISPLAY_NAME } from "../constants/appUi";
 
 /** 导出对话下拉菜单固定宽度（与内容版式一致，不作视口/触发器推算） */
@@ -321,6 +322,11 @@ watch(
   },
   { immediate: true },
 );
+
+const aiAssistantTeleportMenusOpen = computed(
+  () => historyOpen.value || exportMenuOpen.value,
+);
+syncDismissibleOverlay(aiAssistantTeleportMenusOpen);
 
 const composerInputRef =
   useTemplateRef<HTMLTextAreaElement>("composerInputRef");
@@ -1894,11 +1900,13 @@ function onHistoryDocKeydown(ev: KeyboardEvent) {
   if (ev.key !== "Escape") return;
   if (historyOpen.value) {
     ev.preventDefault();
+    ev.stopPropagation();
     historyOpen.value = false;
     return;
   }
   if (exportMenuOpen.value) {
     ev.preventDefault();
+    ev.stopPropagation();
     exportMenuOpen.value = false;
   }
 }

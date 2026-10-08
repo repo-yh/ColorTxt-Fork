@@ -33,7 +33,7 @@ import type { FindBookSettingsTabId } from "./FindBookSettingsTabBar.vue";
 import { useFindBookSettings } from "../composables/useFindBookSettings";
 import { useFindBookReaderSettings } from "../composables/useFindBookReaderSettings";
 import { useFindBookPanelShortcuts } from "../composables/useFindBookPanelShortcuts";
-import { acceleratorToDisplayText } from "../../services/shortcutUtils";
+import { acceleratorToDisplayText, titleWithShortcut } from "../../services/shortcutUtils";
 import { runFindBookDownloadAfterAction } from "../services/findBookDownloadActions";
 import {
   addFindBookSearchHistory,
@@ -332,10 +332,11 @@ const findBookSettings = useFindBookSettings();
 const fbReaderSettings = useFindBookReaderSettings();
 const {
   currentTheme: colorSchemeTheme,
-  readerSurfaceLight: colorSchemeSurfaceLight,
-  readerSurfaceDark: colorSchemeSurfaceDark,
-  readerPaletteColorEnabledLight: colorSchemeColorEnabledLight,
-  readerPaletteColorEnabledDark: colorSchemeColorEnabledDark,
+  readerPaletteColorEnabled: colorSchemeColorEnabled,
+  readerPaletteUserPresets: colorSchemeUserPresets,
+  readerPaletteSelectedIdLight: colorSchemeSelectedIdLight,
+  readerPaletteSelectedIdDark: colorSchemeSelectedIdDark,
+  readerBackground: colorSchemeBackground,
   monacoFontFamily: colorSchemeFontFamily,
   applyReaderPalettes,
 } = fbReaderSettings;
@@ -348,6 +349,9 @@ const effectiveDownloadDir = findBookSettings.effectiveDownloadDir;
 
 const showSettingsPanel = ref(false);
 const showColorSchemePanel = ref(false);
+const colorSchemePanelRef = ref<InstanceType<typeof ColorSchemePanel> | null>(
+  null,
+);
 const showShortcutPanel = ref(false);
 const showDisclaimerPanel = ref(false);
 const showAboutPanel = ref(false);
@@ -780,10 +784,6 @@ const {
   defaultShortcutBindings,
   applyShortcutBindings,
 } = useFindBookPanelShortcuts({
-  showSettingsPanel,
-  showColorSchemePanel,
-  showShortcutPanel,
-  showBookSourcePanel,
   showBookReader,
   openSettings,
   openColorScheme,
@@ -793,6 +793,7 @@ const {
     closeMoreMenu();
     window.colorTxt.openNewFindBookWindow();
   },
+  toggleTheme: onToggleTheme,
 });
 
 const isMacPlatform = /mac|iphone|ipad|ipod/i.test(navigator.platform || "");
@@ -816,6 +817,22 @@ const findBookShortcutLabel = computed(() =>
 );
 const newWindowShortcutLabel = computed(() =>
   acceleratorToDisplayText(shortcutBindings.value.openNewWindow, isMacPlatform),
+);
+const themeToggleTitle = computed(() =>
+  titleWithShortcut(
+    currentTheme.value === "vs"
+      ? "当前亮色，点击切换暗色"
+      : "当前暗色，点击切换亮色",
+    shortcutBindings.value.toggleTheme,
+    isMacPlatform,
+  ),
+);
+const goMainTitle = computed(() =>
+  titleWithShortcut(
+    "主界面",
+    shortcutBindings.value.openFindBook,
+    isMacPlatform,
+  ),
 );
 
 function bookshelfBookIdentity(item: SearchBookItem): string {
@@ -1091,15 +1108,25 @@ function syncWebDavEnabledFromStorage() {
   webDavEnabled.value = loaded?.data?.webDavEnabled === true;
 }
 
-function onToggleTheme() {
-  const next: AppShellTheme = currentTheme.value === "vs" ? "vs-dark" : "vs";
+function applyFindBookTheme(next: AppShellTheme) {
   currentTheme.value = next;
+  colorSchemeTheme.value = next;
   applyAppShellTheme(next);
   const loaded = loadPersistedSettingsData(localStorage, persistKey);
   persistSettingsData(localStorage, persistKey, {
     ...(loaded?.data ?? {}),
     theme: next,
   });
+}
+
+function onToggleTheme() {
+  if (colorSchemePanelRef.value?.isThemeLocked()) return;
+  applyFindBookTheme(currentTheme.value === "vs" ? "vs-dark" : "vs");
+}
+
+function onColorSchemeChangeTheme(theme: string) {
+  if (colorSchemePanelRef.value?.isThemeLocked()) return;
+  applyFindBookTheme(theme === "vs-dark" ? "vs-dark" : "vs");
 }
 
 function refreshFindBookAfterWebDavDownload() {
@@ -1384,8 +1411,8 @@ function onBack() {
             v-if="standalone"
             type="button"
             class="findBookHomeBtn"
-            title="主界面"
-            aria-label="主界面"
+            :title="goMainTitle"
+            :aria-label="goMainTitle"
             @click="onGoMain"
           >
             <span class="findBookHomeIcon findBookHomeIcon--colorful" aria-hidden="true" v-html="icons.home" />
@@ -1427,12 +1454,8 @@ function onBack() {
           </div>
           <IconButton
             :icon-html="currentTheme === 'vs' ? icons.light : icons.dark"
-            :title="
-              currentTheme === 'vs'
-                ? '当前亮色，点击切换暗色'
-                : '当前暗色，点击切换亮色'
-            "
-            aria-label="切换主题色"
+            :title="themeToggleTitle"
+            :aria-label="themeToggleTitle"
             @click="onToggleTheme"
           />
           <div ref="moreBtnRef" class="findBookHeaderMore">
@@ -2080,15 +2103,18 @@ function onBack() {
     />
 
     <ColorSchemePanel
+      ref="colorSchemePanelRef"
       v-model="showColorSchemePanel"
-      :current-theme="colorSchemeTheme"
-      :reader-surface-light="colorSchemeSurfaceLight"
-      :reader-surface-dark="colorSchemeSurfaceDark"
-      :reader-palette-color-enabled-light="colorSchemeColorEnabledLight"
-      :reader-palette-color-enabled-dark="colorSchemeColorEnabledDark"
+      :current-theme="currentTheme"
+      :reader-palette-color-enabled="colorSchemeColorEnabled"
+      :reader-palette-user-presets="colorSchemeUserPresets"
+      :reader-palette-selected-id-light="colorSchemeSelectedIdLight"
+      :reader-palette-selected-id-dark="colorSchemeSelectedIdDark"
+      :reader-background="colorSchemeBackground"
       :monaco-font-family="colorSchemeFontFamily"
       :visible-tabs="['reader']"
       @apply="onApplyColorScheme"
+      @change-theme="onColorSchemeChangeTheme"
     />
 
     <ShortcutPanel

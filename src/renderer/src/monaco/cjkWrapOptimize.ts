@@ -23,7 +23,7 @@ export function isCjkWrapOptimizeEnabled(): boolean {
  * 中文字体里这些常占约 1em，半角估算会让简单换行右侧溢出。
  */
 export function isCjkWrapOptimizeFullWidthCodePoint(charCode: number): boolean {
-  // # % + - / <=> @ ~
+  // # % + - / \ <=> @ | ~
   if (charCode < 0x80) {
     return (
       charCode === 0x23 ||
@@ -31,8 +31,10 @@ export function isCjkWrapOptimizeFullWidthCodePoint(charCode: number): boolean {
       charCode === 0x2b ||
       charCode === 0x2d ||
       charCode === 0x2f ||
+      charCode === 0x5c ||
       (charCode >= 0x3c && charCode <= 0x3e) ||
       charCode === 0x40 ||
+      charCode === 0x7c ||
       charCode === 0x7e
     );
   }
@@ -52,8 +54,12 @@ export function isCjkWrapOptimizeFullWidthCodePoint(charCode: number): boolean {
   if (charCode >= 0x2020 && charCode <= 0x2026) return true;
   // ‰‱′″‴‵※‼‾ 及 ‹›
   if (charCode >= 0x2030 && charCode <= 0x203e) return true;
-  // ←↑→↓
-  if (charCode >= 0x2190 && charCode <= 0x2193) return true;
+  // ←↑→↓ 及对角、双向箭头
+  if (charCode >= 0x2190 && charCode <= 0x2199) return true;
+  // Ⅰ-Ⅻ ⅰ-ⅹ 等 Number Forms
+  if (charCode >= 0x2160 && charCode <= 0x2188) return true;
+  // ①-⑳⑴-⒇⒈-⒛ 等 Enclosed Alphanumerics
+  if (charCode >= 0x2460 && charCode <= 0x24ff) return true;
   // ⋯ √
   if (charCode === 0x22ef || charCode === 0x221a) return true;
   // 盒线 / 方块 / 几何 / 杂项符号（♡♥☆★）/ Dingbats（✲❈✔✘）

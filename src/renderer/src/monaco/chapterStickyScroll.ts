@@ -1,6 +1,7 @@
 import type * as monaco from "monaco-editor";
 import { Emitter, editor as monacoEditor } from "monaco-editor";
 import { chapterTitleForDisplay } from "../chapter";
+import { scheduleReaderBackgroundStickyAlign } from "../constants/readerBackground";
 
 /** 与 `setChapters` / 粘性滚动大纲一致的单条章节信息 */
 export type ChapterStickyLine = {
@@ -34,19 +35,21 @@ export function ensureStickyChapterBarClickDisabled(): void {
   el.textContent = `
 .readerPane .monaco-editor .sticky-widget {
   pointer-events: none !important;
+  isolation: isolate;
+  overflow: hidden;
   background-color: var(--reader-bg) !important;
+  box-shadow: none !important;
 }
-/* 子区域仍用 VS Code 变量；编辑器背景透明后需与阅读区底色一致，避免透出正文 */
-.readerPane .monaco-editor .sticky-widget .sticky-widget-line-numbers {
-  background-color: var(--reader-bg) !important;
-}
-.readerPane .monaco-editor .sticky-widget .sticky-widget-lines-scrollable {
-  background-color: var(--reader-bg) !important;
-}
+/* 子层透明，透出条上的底色 + 对齐后的纹理，避免挡住叠层 */
+.readerPane .monaco-editor .sticky-widget .sticky-widget-line-numbers,
+.readerPane .monaco-editor .sticky-widget .sticky-widget-lines-scrollable,
+.readerPane .monaco-editor .sticky-widget .sticky-line-content,
 .readerPane .monaco-editor .sticky-widget .sticky-line-content:hover {
-  background-color: var(--reader-bg) !important;
+  background-color: transparent !important;
 }
 .readerPane .monaco-editor .sticky-widget .sticky-line-content {
+  position: relative;
+  z-index: 1;
   color: var(--reader-chapter-title) !important;
 }
 `;
@@ -291,6 +294,8 @@ export function refreshStickyChapterScrollWidget(
     if (editor.getScrollTop() !== scrollTop) {
       editor.setScrollTop(scrollTop);
     }
+    scheduleReaderBackgroundStickyAlign();
+    requestAnimationFrame(() => scheduleReaderBackgroundStickyAlign());
   });
 }
 

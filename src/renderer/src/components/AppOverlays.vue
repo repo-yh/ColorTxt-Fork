@@ -11,7 +11,7 @@ import type { VoiceReadSettings } from "../constants/voiceRead";
 import type { TimedScrollSettings } from "../constants/timedScroll";
 import type { PomodoroSettings } from "../constants/pomodoro";
 import type { VoiceReadProfile } from "@shared/voiceReadProfiles";
-import type { ChapterTitleBlankMode } from "../constants/appUi";
+import type { ChapterTitleBlankMode, ReaderBackgroundState } from "../constants/appUi";
 import type { CharacterRosterEntry } from "@shared/characterTypes";
 import { bookmarkNoteInputRefKey } from "../injectionKeys";
 import type { FileBookmarkItem } from "../stores/fileMetaStore";
@@ -38,6 +38,7 @@ import DragDropChoiceModal from "./DragDropChoiceModal.vue";
 import type { ShortcutBindingMap } from "../services/shortcutRegistry";
 import type { ReaderSurfacePalette, DragDropAction } from "../constants/appUi";
 import type { ReaderSurfaceColorEnabled } from "../constants/readerPalette";
+import type { ReaderPalettePreset } from "../constants/readerPalettePresets";
 import { readerEbookConvertingHintText, readerBookPackUnpackingHintText } from "../constants/appUi";
 import LoadingDotsBounce from "./LoadingDotsBounce.vue";
 
@@ -64,6 +65,12 @@ const props = defineProps<{
   mouseWheelScrollSensitivity: number;
   fastScrollSensitivity: number;
   stickyChapterTitleEnabled: boolean;
+  readingRulerEnabled: boolean;
+  readingRulerFocusLines: number;
+  readingRulerDimOpacity: number;
+  readingRulerDimStickyTitle: boolean;
+  readingRulerTransitionEnabled: boolean;
+  markdownImageHeightPx: number;
   chapterNavToolbarEnabled: boolean;
   chapterCharCountExact: boolean;
   readerEditShowLineNumbers: boolean;
@@ -105,11 +112,13 @@ const props = defineProps<{
   shortcutBindings: ShortcutBindingMap;
   defaultShortcutBindings: ShortcutBindingMap;
   currentTheme: string;
-  readerSurfaceLight: ReaderSurfacePalette;
-  readerSurfaceDark: ReaderSurfacePalette;
-  readerPaletteColorEnabledLight: ReaderSurfaceColorEnabled;
-  readerPaletteColorEnabledDark: ReaderSurfaceColorEnabled;
+  readerPaletteColorEnabled: ReaderSurfaceColorEnabled;
+  readerPaletteUserPresets: ReaderPalettePreset[];
+  readerPaletteSelectedIdLight: string;
+  readerPaletteSelectedIdDark: string;
+  readerBackground: ReaderBackgroundState;
   monacoFontFamily: string;
+  pinnedOtherFonts: string[];
   highlightColorsLight: string[];
   highlightColorsDark: string[];
   lineationColorsLight: string[];
@@ -141,12 +150,14 @@ const props = defineProps<{
 const emit = defineEmits<{
   applySettings: [payload: SettingsApplyPayload];
   dragDropChoice: [index: number];
+  togglePinOtherFont: [fontName: string];
   applyChapterRules: [payload: { rules: ChapterMatchRule[] }];
   confirmAddBookmark: [];
   updateBookmarkToCurrentViewportLine: [];
   confirmRemoveActiveBookmark: [];
   applyShortcutBindings: [payload: ShortcutBindingMap];
   applyColorScheme: [payload: ColorSchemeApplyPayload];
+  changeTheme: [theme: string];
   applyReplaceRuleFormat: [rules: ReplaceRule[]];
   openReadingData: [];
   clearReadingDataPaths: [paths: string[]];
@@ -217,9 +228,14 @@ const bookmarkNoteInput = defineModel<string>("bookmarkNoteInput", {
 });
 
 const appUpdateFlowRef = ref<InstanceType<typeof AppUpdateFlow> | null>(null);
+const colorSchemePanelRef = ref<InstanceType<typeof ColorSchemePanel> | null>(
+  null,
+);
 
 defineExpose({
   checkForUpdates: () => appUpdateFlowRef.value?.checkForUpdates(),
+  isColorSchemeThemeLocked: () =>
+    colorSchemePanelRef.value?.isThemeLocked() === true,
 });
 
 function bindBookmarkInput(el: Element | ComponentPublicInstance | null) {
@@ -281,6 +297,8 @@ const busyOverlayText = computed(() => {
     :fullscreen-reader-width-percent="fullscreenReaderWidthPercent"
     :fullscreen-show-system-time="fullscreenShowSystemTime"
     :reader-font-size="readerFontSize"
+    :monaco-font-family="monacoFontFamily"
+    :pinned-other-fonts="pinnedOtherFonts"
     :reader-line-height-multiple="readerLineHeightMultiple"
     :reader-line-spacing-px="readerLineSpacingPx"
     :reader-letter-spacing-px="readerLetterSpacingPx"
@@ -291,6 +309,12 @@ const busyOverlayText = computed(() => {
     :mouse-wheel-scroll-sensitivity="mouseWheelScrollSensitivity"
     :fast-scroll-sensitivity="fastScrollSensitivity"
     :sticky-chapter-title-enabled="stickyChapterTitleEnabled"
+    :reading-ruler-enabled="readingRulerEnabled"
+    :reading-ruler-focus-lines="readingRulerFocusLines"
+    :reading-ruler-dim-opacity="readingRulerDimOpacity"
+    :reading-ruler-dim-sticky-title="readingRulerDimStickyTitle"
+    :reading-ruler-transition-enabled="readingRulerTransitionEnabled"
+    :markdown-image-height-px="markdownImageHeightPx"
     :chapter-nav-toolbar-enabled="chapterNavToolbarEnabled"
     :chapter-char-count-exact="chapterCharCountExact"
     :reader-edit-show-line-numbers="readerEditShowLineNumbers"
@@ -320,6 +344,7 @@ const busyOverlayText = computed(() => {
     :active-voice-read-profile-id="activeVoiceReadProfileId"
     :character-roster="characterRoster"
     @apply="emit('applySettings', $event)"
+    @toggle-pin-other-font="emit('togglePinOtherFont', $event)"
     @open-reading-data="emit('openReadingData')"
     @open-dictionary-manage="emit('openDictionaryManage')"
     @open-web-search-manage="emit('openWebSearchManage')"
@@ -365,18 +390,21 @@ const busyOverlayText = computed(() => {
   />
 
   <ColorSchemePanel
+    ref="colorSchemePanelRef"
     v-model="showColorSchemePanel"
     :current-theme="currentTheme"
-    :reader-surface-light="readerSurfaceLight"
-    :reader-surface-dark="readerSurfaceDark"
-    :reader-palette-color-enabled-light="readerPaletteColorEnabledLight"
-    :reader-palette-color-enabled-dark="readerPaletteColorEnabledDark"
+    :reader-palette-color-enabled="readerPaletteColorEnabled"
+    :reader-palette-user-presets="readerPaletteUserPresets"
+    :reader-palette-selected-id-light="readerPaletteSelectedIdLight"
+    :reader-palette-selected-id-dark="readerPaletteSelectedIdDark"
+    :reader-background="readerBackground"
     :monaco-font-family="monacoFontFamily"
     :highlight-colors-light="highlightColorsLight"
     :highlight-colors-dark="highlightColorsDark"
     :lineation-colors-light="lineationColorsLight"
     :lineation-colors-dark="lineationColorsDark"
     @apply="emit('applyColorScheme', $event)"
+    @change-theme="emit('changeTheme', $event)"
   />
 
   <AppModal

@@ -1,9 +1,20 @@
 <script setup lang="ts">
+import { computed } from "vue";
 import FontPicker from "./FontPicker.vue";
 import IconButton from "./IconButton.vue";
 import { icons } from "../icons";
+import {
+  lineHeightMultipleStep,
+  maxFontSize,
+  maxLineHeightMultipleForFontSize,
+  minFontSize,
+  minLineHeightMultiple,
+  normalizeLineHeightMultiple,
+} from "../constants/appUi";
+import type { ShortcutBindingMap } from "../services/shortcutRegistry";
+import { titleWithShortcut } from "../services/shortcutUtils";
 
-defineProps<{
+const props = defineProps<{
   monacoFontFamily: string;
   pinnedOtherFonts?: string[];
   disabled?: boolean;
@@ -11,6 +22,9 @@ defineProps<{
   canDecreaseFont: boolean;
   canIncreaseLineHeight: boolean;
   canDecreaseLineHeight: boolean;
+  fontSize: number;
+  lineHeightMultiple: number;
+  shortcutBindings?: ShortcutBindingMap;
 }>();
 
 const emit = defineEmits<{
@@ -21,6 +35,72 @@ const emit = defineEmits<{
   increaseLineHeight: [];
   decreaseLineHeight: [];
 }>();
+
+function valueChangeTitle(label: string, from: string, next: string): string {
+  return from === next ? `${label}：${from}` : `${label}：${from} → ${next}`;
+}
+
+const isMacPlatform = /mac|iphone|ipad|ipod/i.test(navigator.platform || "");
+
+function withAccel(
+  label: string,
+  action:
+    | "increaseFontSize"
+    | "decreaseFontSize"
+    | "increaseLineHeight"
+    | "decreaseLineHeight",
+): string {
+  const accel = props.shortcutBindings?.[action];
+  return accel ? titleWithShortcut(label, accel, isMacPlatform) : label;
+}
+
+function formatLineHeight(m: number): string {
+  return normalizeLineHeightMultiple(m).toFixed(1);
+}
+
+const decreaseFontSizeTitle = computed(() => {
+  const from = props.fontSize;
+  const next = Math.max(minFontSize, from - 1);
+  return valueChangeTitle(
+    withAccel("减小字号", "decreaseFontSize"),
+    String(from),
+    String(next),
+  );
+});
+const increaseFontSizeTitle = computed(() => {
+  const from = props.fontSize;
+  const next = Math.min(maxFontSize, from + 1);
+  return valueChangeTitle(
+    withAccel("加大字号", "increaseFontSize"),
+    String(from),
+    String(next),
+  );
+});
+const decreaseLineHeightTitle = computed(() => {
+  const from = normalizeLineHeightMultiple(props.lineHeightMultiple);
+  const next = Math.max(
+    minLineHeightMultiple,
+    normalizeLineHeightMultiple(from - lineHeightMultipleStep),
+  );
+  return valueChangeTitle(
+    withAccel("减小行间距", "decreaseLineHeight"),
+    formatLineHeight(from),
+    formatLineHeight(next),
+  );
+});
+const increaseLineHeightTitle = computed(() => {
+  const from = normalizeLineHeightMultiple(props.lineHeightMultiple);
+  const cap = maxLineHeightMultipleForFontSize(props.fontSize);
+  const next = Math.min(
+    cap,
+    normalizeLineHeightMultiple(from + lineHeightMultipleStep),
+  );
+  return valueChangeTitle(
+    withAccel("加大行间距", "increaseLineHeight"),
+    formatLineHeight(from),
+    formatLineHeight(next),
+  );
+});
 </script>
 
 <template>
@@ -34,29 +114,29 @@ const emit = defineEmits<{
     />
     <IconButton
       :icon-html="icons.fontSizeDown"
-      title="减小字号"
-      aria-label="减小字号"
+      :title="decreaseFontSizeTitle"
+      :aria-label="decreaseFontSizeTitle"
       :disabled="disabled || !canDecreaseFont"
       @click="emit('decreaseFontSize')"
     />
     <IconButton
       :icon-html="icons.fontSizeUp"
-      title="加大字号"
-      aria-label="加大字号"
+      :title="increaseFontSizeTitle"
+      :aria-label="increaseFontSizeTitle"
       :disabled="disabled || !canIncreaseFont"
       @click="emit('increaseFontSize')"
     />
     <IconButton
       :icon-html="icons.lineHeightDown"
-      title="减小行间距"
-      aria-label="减小行间距"
+      :title="decreaseLineHeightTitle"
+      :aria-label="decreaseLineHeightTitle"
       :disabled="disabled || !canDecreaseLineHeight"
       @click="emit('decreaseLineHeight')"
     />
     <IconButton
       :icon-html="icons.lineHeightUp"
-      title="加大行间距"
-      aria-label="加大行间距"
+      :title="increaseLineHeightTitle"
+      :aria-label="increaseLineHeightTitle"
       :disabled="disabled || !canIncreaseLineHeight"
       @click="emit('increaseLineHeight')"
     />

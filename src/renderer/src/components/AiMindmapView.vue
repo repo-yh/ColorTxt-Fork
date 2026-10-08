@@ -13,6 +13,7 @@ import { Markmap } from "markmap-view";
 import { icons } from "../icons";
 import type { Chapter } from "../chapter";
 import { substituteAiChapterMarkersWithTitles } from "../utils/aiMarkdownChapterRef";
+import { pushEscBeforeModal } from "../utils/modalStack";
 
 type MarkmapInst = Markmap;
 
@@ -58,6 +59,7 @@ const fullscreenSvgRef = ref<SVGSVGElement | null>(null);
 const markmapRef = ref<MarkmapHandle | null>(null);
 const fullscreenMarkmapRef = ref<MarkmapHandle | null>(null);
 const expanded = ref(false);
+let removeEscBeforeModal: (() => void) | null = null;
 
 let inlineLayoutObserver: ResizeObserver | null = null;
 let fullscreenLayoutObserver: ResizeObserver | null = null;
@@ -659,6 +661,7 @@ async function handleDownload() {
 function onKeydown(ev: KeyboardEvent) {
   if (expanded.value && ev.key === "Escape") {
     ev.preventDefault();
+    ev.stopPropagation();
     closeFullscreen();
   }
 }
@@ -697,7 +700,12 @@ watch(svgRef, (svg) => {
 });
 
 watch(expanded, async (v) => {
+  removeEscBeforeModal?.();
+  removeEscBeforeModal = null;
   if (v) {
+    removeEscBeforeModal = pushEscBeforeModal(() => {
+      if (expanded.value) closeFullscreen();
+    });
     await nextTick();
     attachLayoutObservers();
     requestAnimationFrame(() => refreshMapsWhenReady());
@@ -736,6 +744,8 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  removeEscBeforeModal?.();
+  removeEscBeforeModal = null;
   window.removeEventListener("keydown", onKeydown);
   readyPass += 1;
   if (layoutDebounceTimer) clearTimeout(layoutDebounceTimer);

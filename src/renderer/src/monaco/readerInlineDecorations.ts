@@ -37,6 +37,7 @@ function readerEditorHighlightColors(
 ): Pick<
   Record<string, string>,
   | "editor.lineHighlightBackground"
+  | "editor.lineHighlightBorder"
   | "editor.selectionBackground"
   | "minimap.selectionHighlight"
   | "minimap.selectionOccurrenceHighlight"
@@ -44,6 +45,7 @@ function readerEditorHighlightColors(
   if (variant === "dark") {
     return {
       "editor.lineHighlightBackground": hex8("#ffffff", 0.07),
+      "editor.lineHighlightBorder": "#00000000",
       "editor.selectionBackground": hex8("#264F78", 0.45),
       /** 小地图选区：Monaco 行高亮会再叠 50% 透明，字符级选区为实色 */
       "minimap.selectionHighlight": "#264F78",
@@ -52,6 +54,7 @@ function readerEditorHighlightColors(
   }
   return {
     "editor.lineHighlightBackground": hex8("#000000", 0.05),
+    "editor.lineHighlightBorder": "#00000000",
     "editor.selectionBackground": hex8("#ADD6FF", 0.55),
     "minimap.selectionHighlight": "#ADD6FF",
     "minimap.selectionOccurrenceHighlight": hex8("#c9c9c9", 0.55),
@@ -75,8 +78,8 @@ function readerChromeThemeColors(
     "editor.background": EDITOR_BACKGROUND_TRANSPARENT,
     "editor.foreground": palette.bodyText,
     "minimap.background": surfaceBg,
-    /** 滚动条轨道与小地图同色；光标标记在概览尺 Canvas 上，叠在轨道之上（见 readerMainMonaco.css） */
-    "scrollbar.background": surfaceBg,
+    /** 轨道透明，露出阅读区背景图；点击/拖动仍落在 `.scrollbar` 上 */
+    "scrollbar.background": EDITOR_BACKGROUND_TRANSPARENT,
     /** 概览尺 Canvas 透明底，仅绘制光标/装饰标记 */
     "editorOverviewRuler.background": EDITOR_BACKGROUND_TRANSPARENT,
     "editorOverviewRuler.border": READER_OVERVIEW_RULER_BORDER,
@@ -172,7 +175,7 @@ export function readerMonacoThemeForAppTheme(themeName: string): string {
 
 /**
  * 注入阅读器 Monarch token 颜色；编辑器背景透明以透出 var(--reader-bg)。
- * 圆角选区内角抠图另见 `readerMainMonaco.css`（`.cslr.monaco-editor-background`）。
+ * 阅读器已关 `roundedSelection`，避免列重叠选区的抠图层盖住背景图。
  * 应在注册 Monarch 之后、setTheme 之前调用一次；调色板变更时可再调用。
  */
 export function ensureReaderSyntaxThemes(

@@ -27,6 +27,15 @@ import {
   minReaderHorizontalInsetPx,
   maxReaderHorizontalInsetPx,
   readerHorizontalInsetPxStep,
+  minReadingRulerFocusLines,
+  maxReadingRulerFocusLines,
+  readingRulerFocusLinesStep,
+  minReadingRulerDimOpacity,
+  maxReadingRulerDimOpacity,
+  readingRulerDimOpacityStep,
+  minMarkdownImageHeightPx,
+  maxMarkdownImageHeightPx,
+  markdownImageHeightPxStep,
   type ChapterTitleBlankMode,
 } from "../constants/appUi";
 import {
@@ -46,11 +55,21 @@ import {
   type SelectionToolbarFindTarget,
 } from "../constants/selectionToolbar";
 import SettingsSelectionToolbarPreview from "./SettingsSelectionToolbarPreview.vue";
+import FontPicker from "./FontPicker.vue";
+import {
+  detectFontPickerSelection,
+  getPresetLabel,
+} from "../utils/presetFontDefinitions";
 import { computed } from "vue";
 import { icons } from "../icons.js";
 
+/** 高于设置弹层（约 6000），避免菜单被挡住 */
+const SETTINGS_FONT_PICKER_MENU_Z = 9000;
+
 const props = withDefaults(
   defineProps<{
+    draftFontFamily: string;
+    pinnedOtherFonts?: string[];
     draftFontSize: number;
     draftLineHeightMultiple: number;
     draftLineSpacingPx: number;
@@ -77,6 +96,12 @@ const props = withDefaults(
     draftTimedScrollIntervalMs: number;
     draftSelectionToolbarButtons: SelectionToolbarButtons;
     monacoCustomHighlight: boolean;
+    draftMarkdownImageHeightPx: number;
+    draftReadingRulerEnabled: boolean;
+    draftReadingRulerFocusLines: number;
+    draftReadingRulerDimOpacity: number;
+    draftReadingRulerDimStickyTitle: boolean;
+    draftReadingRulerTransitionEnabled: boolean;
     /** 主界面显示「查找」应用目标；找书窗口无全文搜索侧栏，不展示该项 */
     showFindTargetOption?: boolean;
     /**
@@ -95,11 +120,14 @@ const props = withDefaults(
     showAskAi: true,
     draftFindBookChapterAdvanceEnabled: true,
     showFindBookChapterAdvanceOption: false,
+    pinnedOtherFonts: () => [],
   },
 );
 
 defineEmits<{
+  "update:draftFontFamily": [v: string];
   "update:draftFontSize": [v: number];
+  togglePinOtherFont: [fontName: string];
   "update:draftLineHeightMultiple": [v: number];
   "update:draftLineSpacingPx": [v: number];
   "update:draftLetterSpacingPx": [v: number];
@@ -111,7 +139,13 @@ defineEmits<{
   "update:draftFastScrollSensitivity": [v: number];
   "update:draftStickyChapterTitleEnabled": [v: boolean];
   "update:draftChapterNavToolbarEnabled": [v: boolean];
+  "update:draftReadingRulerEnabled": [v: boolean];
+  "update:draftReadingRulerFocusLines": [v: number];
+  "update:draftReadingRulerDimOpacity": [v: number];
+  "update:draftReadingRulerDimStickyTitle": [v: boolean];
+  "update:draftReadingRulerTransitionEnabled": [v: boolean];
   "update:draftFindBookChapterAdvanceEnabled": [v: boolean];
+  "update:draftMarkdownImageHeightPx": [v: number];
   "update:draftChapterTitleBlankMode": [v: ChapterTitleBlankMode];
   "update:draftCompressBlankKeepOneBlank": [v: boolean];
   "update:draftTxtrDelimitedMatchCrossLine": [v: boolean];
@@ -133,6 +167,13 @@ const draftMaxLineHeightMultiple = computed(() =>
   maxLineHeightMultipleForFontSize(props.draftFontSize),
 );
 
+const draftFontDisplayLabel = computed(() => {
+  const sel = detectFontPickerSelection(props.draftFontFamily);
+  return sel.key === "other"
+    ? sel.otherName || "系统字体"
+    : getPresetLabel(sel.key);
+});
+
 const chapterTitleBlankSelectItems = computed<CustomSelectItem[]>(() =>
   CHAPTER_TITLE_BLANK_MODE_OPTIONS.map((o) => ({
     kind: "item" as const,
@@ -146,6 +187,27 @@ const selectListsEmpty: CustomSelectItem[] = [];
 <template>
   <div class="settingsReadingRoot">
     <div class="settingsBody">
+      <div class="settingsRow">
+        <div class="settingsRowMain">
+          <span class="settingsLabel short">字体</span>
+          <div class="settingsFontControl">
+            <span
+              class="settingsFontValue"
+              :style="{ fontFamily: draftFontFamily }"
+              :title="draftFontDisplayLabel"
+              >{{ draftFontDisplayLabel }}</span
+            >
+            <FontPicker
+              :monaco-font-family="draftFontFamily"
+              :pinned-other-fonts="pinnedOtherFonts"
+              :menu-z-index="SETTINGS_FONT_PICKER_MENU_Z"
+              @set-monaco-font="$emit('update:draftFontFamily', $event)"
+              @toggle-pin-other-font="$emit('togglePinOtherFont', $event)"
+            />
+          </div>
+        </div>
+      </div>
+
       <div class="settingsRow">
         <div class="settingsRowMain">
           <span class="settingsLabel short">字号（{{ draftFontSize }} px）</span>
@@ -312,6 +374,116 @@ const selectListsEmpty: CustomSelectItem[] = [];
         <p class="settingsHint">
           阅读到章节边界后再次滚动（滚轮、空格、<code>PageUp</code> / <code>PageDown</code>、方向键）时跳转到邻章。
         </p>
+      </div>
+    </div>
+
+    <div class="settingsBody settingsBody--markdown">
+      <h3 class="settingsSectionTitle settingsSectionTitle--markdown">Markdown</h3>
+      <div class="settingsRow">
+        <div class="settingsRowMain">
+          <span class="settingsLabel short"
+            >插图高度（{{ draftMarkdownImageHeightPx }} px）</span
+          >
+          <RangeSlider
+            :model-value="draftMarkdownImageHeightPx"
+            :min="minMarkdownImageHeightPx"
+            :max="maxMarkdownImageHeightPx"
+            :step="markdownImageHeightPxStep"
+            :show-percent="false"
+            aria-label="Markdown 插图高度"
+            @update:model-value="
+              $emit('update:draftMarkdownImageHeightPx', $event)
+            "
+          />
+        </div>
+      </div>
+    </div>
+
+    <div class="settingsBody settingsBody--readingRuler">
+      <h3 class="settingsSectionTitle settingsSectionTitle--readingRuler">
+        <span class="settingsIcon" v-html="icons.readingRuler" />
+        阅读尺
+      </h3>
+      <p class="settingsHint">
+        适合注意力不容易集中的人，聚焦阅读行，淡化其他行。
+      </p>
+
+      <div class="settingsRow">
+        <div class="settingsRowMain">
+          <span class="settingsLabel">启用阅读尺</span>
+          <SwitchToggle
+            :model-value="draftReadingRulerEnabled"
+            aria-label="启用阅读尺"
+            @update:model-value="$emit('update:draftReadingRulerEnabled', $event)"
+          />
+        </div>
+        <p class="settingsHint">
+          翻页行为会变为按「聚焦行数」移动阅读尺；跳转行为会将阅读尺移到视口中间。
+        </p>
+      </div>
+
+      <div class="settingsRow">
+        <div class="settingsRowMain">
+          <span class="settingsLabel short"
+            >聚焦行数（{{ draftReadingRulerFocusLines }}）</span
+          >
+          <RangeSlider
+            :model-value="draftReadingRulerFocusLines"
+            :min="minReadingRulerFocusLines"
+            :max="maxReadingRulerFocusLines"
+            :step="readingRulerFocusLinesStep"
+            :show-percent="false"
+            aria-label="聚焦阅读行数"
+            @update:model-value="
+              $emit('update:draftReadingRulerFocusLines', $event)
+            "
+          />
+        </div>
+      </div>
+
+      <div class="settingsRow">
+        <div class="settingsRowMain">
+          <span class="settingsLabel short"
+            >非聚焦行不透明度（{{ draftReadingRulerDimOpacity }}）</span
+          >
+          <RangeSlider
+            :model-value="draftReadingRulerDimOpacity"
+            :min="minReadingRulerDimOpacity"
+            :max="maxReadingRulerDimOpacity"
+            :step="readingRulerDimOpacityStep"
+            :show-percent="false"
+            aria-label="其他行不透明度"
+            @update:model-value="
+              $emit('update:draftReadingRulerDimOpacity', $event)
+            "
+          />
+        </div>
+      </div>
+
+      <div class="settingsRow">
+        <div class="settingsRowMain">
+          <span class="settingsLabel">过渡动画</span>
+          <SwitchToggle
+            :model-value="draftReadingRulerTransitionEnabled"
+            aria-label="阅读尺过渡动画"
+            @update:model-value="
+              $emit('update:draftReadingRulerTransitionEnabled', $event)
+            "
+          />
+        </div>
+      </div>
+
+      <div class="settingsRow">
+        <div class="settingsRowMain">
+          <span class="settingsLabel">淡化粘性章节标题</span>
+          <SwitchToggle
+            :model-value="draftReadingRulerDimStickyTitle"
+            aria-label="淡化粘性章节标题"
+            @update:model-value="
+              $emit('update:draftReadingRulerDimStickyTitle', $event)
+            "
+          />
+        </div>
       </div>
     </div>
 
@@ -730,6 +902,25 @@ const selectListsEmpty: CustomSelectItem[] = [];
   color: var(--muted);
 }
 
+.settingsFontControl {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex: 1 1 70%;
+  min-width: 0;
+}
+
+.settingsFontValue {
+  font-size: 13px;
+  color: var(--fg);
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+}
+
 .settingsSectionTitle:has(+ .settingsHint) {
   margin-bottom: 0;
 }
@@ -770,17 +961,37 @@ const selectListsEmpty: CustomSelectItem[] = [];
 .settingsBody--pomodoro,
 .settingsBody--timedScroll,
 .settingsBody--toolbar,
-.settingsBody--webSearch {
+.settingsBody--webSearch,
+.settingsBody--markdown,
+.settingsBody--readingRuler {
   gap: 10px;
 }
 
 .settingsSectionTitle--scroll,
 .settingsSectionTitle--fullscreen,
 .settingsSectionTitle--pomodoro,
-.settingsSectionTitle--timedScroll {
+.settingsSectionTitle--timedScroll,
+.settingsSectionTitle--markdown,
+.settingsSectionTitle--readingRuler {
   margin-bottom: 10px;
 }
 .settingsSectionTitle--toolbar {
   margin-bottom: 5px;
+}
+
+.settingsHintIcon {
+  display: inline-flex;
+  width: 14px;
+  height: 14px;
+  margin: 0 2px;
+  vertical-align: -2px;
+}
+.settingsHintIcon :deep(svg) {
+  width: 14px;
+  height: 14px;
+  display: block;
+}
+.settingsHintIcon :deep(svg path) {
+  fill: currentColor;
 }
 </style>

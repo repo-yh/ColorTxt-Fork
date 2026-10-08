@@ -8,6 +8,8 @@ import type {
   FileSortMode,
 } from "../constants/fileCategories";
 import { SIDEBAR_ACTIVITY_BAR_WIDTH } from "../constants/appUi";
+import type { ShortcutBindingMap } from "../services/shortcutRegistry";
+import { titleWithShortcut } from "../services/shortcutUtils";
 import type { TxtFileItem } from "../services/fileListService";
 import type { SidebarFileItem } from "../composables/useReaderSidebarLists";
 import type { CategoryEditorRow } from "../constants/fileCategories";
@@ -156,6 +158,7 @@ const props = withDefaults(
     showEditChapterRefreshButton?: boolean;
     /** 设置已启用 WebDAV 时在活动栏显示同步入口 */
     webDavEnabled?: boolean;
+    shortcutBindings?: ShortcutBindingMap;
   }>(),
   {
     panelExpanded: true,
@@ -716,6 +719,39 @@ const highlightTabIconMuted = computed(() => {
   return !(hasFile && hasHighlights);
 });
 
+const isMacPlatform = /mac|iphone|ipad|ipod/i.test(navigator.platform || "");
+function activityTabTitle(
+  label: string,
+  action:
+    | "openSidebarSearch"
+    | "openSidebarFiles"
+    | "openSidebarChapters"
+    | "openSidebarAiAssistant"
+    | "openColorScheme"
+    | "openSettings",
+): string {
+  const accel = props.shortcutBindings?.[action];
+  return accel ? titleWithShortcut(label, accel, isMacPlatform) : label;
+}
+const filesTabTitle = computed(() =>
+  activityTabTitle("文件", "openSidebarFiles"),
+);
+const chaptersTabTitle = computed(() =>
+  activityTabTitle("章节", "openSidebarChapters"),
+);
+const searchTabTitle = computed(() =>
+  activityTabTitle("搜索", "openSidebarSearch"),
+);
+const aiAssistantTabTitle = computed(() =>
+  activityTabTitle("AI 阅读助手", "openSidebarAiAssistant"),
+);
+const colorSchemeTabTitle = computed(() =>
+  activityTabTitle("配色", "openColorScheme"),
+);
+const settingsTabTitle = computed(() =>
+  activityTabTitle("设置", "openSettings"),
+);
+
 function onPrimaryTabClick(tab: ReaderSidebarTab) {
   if (props.panelExpanded && props.activeTab === tab) {
     emit("requestCollapsePanel");
@@ -818,8 +854,8 @@ defineExpose({
           type="button"
           class="activityTabBtn"
           :class="{ active: panelExpanded && activeTab === 'files' }"
-          title="文件"
-          aria-label="文件"
+          :title="filesTabTitle"
+          :aria-label="filesTabTitle"
           @click="onPrimaryTabClick('files')"
         >
           <span class="activityIcon" v-html="icons.ebook"></span>
@@ -828,8 +864,8 @@ defineExpose({
           type="button"
           class="activityTabBtn"
           :class="{ active: panelExpanded && activeTab === 'chapters' }"
-          title="章节"
-          aria-label="章节"
+          :title="chaptersTabTitle"
+          :aria-label="chaptersTabTitle"
           @click="onPrimaryTabClick('chapters')"
         >
           <span class="activityIcon" v-html="icons.chapterList"></span>
@@ -838,8 +874,8 @@ defineExpose({
           type="button"
           class="activityTabBtn"
           :class="{ active: panelExpanded && activeTab === 'search' }"
-          title="搜索"
-          aria-label="搜索"
+          :title="searchTabTitle"
+          :aria-label="searchTabTitle"
           @click="onPrimaryTabClick('search')"
         >
           <span class="activityIcon" v-html="icons.find"></span>
@@ -882,8 +918,8 @@ defineExpose({
           type="button"
           class="activityTabBtn"
           :class="{ active: panelExpanded && activeTab === 'aiAssistant' }"
-          title="AI 阅读助手"
-          aria-label="AI 阅读助手"
+          :title="aiAssistantTabTitle"
+          :aria-label="aiAssistantTabTitle"
           @click="onPrimaryTabClick('aiAssistant')"
         >
           <span class="activityIcon" v-html="icons.aiChat"></span>
@@ -915,8 +951,8 @@ defineExpose({
         <button
           type="button"
           class="activityTabBtn color"
-          title="配色"
-          aria-label="配色"
+          :title="colorSchemeTabTitle"
+          :aria-label="colorSchemeTabTitle"
           @click="emit('openColorScheme')"
         >
           <span class="activityIcon" v-html="icons.palette"></span>
@@ -924,8 +960,8 @@ defineExpose({
         <button
           type="button"
           class="activityTabBtn"
-          title="设置"
-          aria-label="设置"
+          :title="settingsTabTitle"
+          :aria-label="settingsTabTitle"
           @click="emit('openSettings')"
         >
           <span class="activityIcon" v-html="icons.setting"></span>

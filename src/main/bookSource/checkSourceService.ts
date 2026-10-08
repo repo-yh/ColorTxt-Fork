@@ -22,6 +22,8 @@ export type CheckSourceConfig = {
   keyword: string;
   /** 单个书源超时（毫秒） */
   timeout: number;
+  /** 同时校验的书源数 */
+  concurrency: number;
   checkSearch: boolean;
   checkDiscovery: boolean;
   checkInfo: boolean;
@@ -61,9 +63,14 @@ export type CheckSourceEvent =
       total: number;
     };
 
+const DEFAULT_CONCURRENCY = 4;
+const MIN_CONCURRENCY = 1;
+const MAX_CONCURRENCY = 32;
+
 const DEFAULT_CONFIG: CheckSourceConfig = {
   keyword: "我的",
   timeout: 180_000,
+  concurrency: DEFAULT_CONCURRENCY,
   checkSearch: true,
   checkDiscovery: true,
   checkInfo: true,
@@ -73,8 +80,10 @@ const DEFAULT_CONFIG: CheckSourceConfig = {
 
 let config: CheckSourceConfig = { ...DEFAULT_CONFIG };
 
-/** 并发校验书源数（对齐搜索服务量级） */
-const CHECK_CONCURRENCY = 4;
+function clampConcurrency(n: number): number {
+  if (!Number.isFinite(n)) return DEFAULT_CONCURRENCY;
+  return Math.min(MAX_CONCURRENCY, Math.max(MIN_CONCURRENCY, Math.floor(n)));
+}
 
 /** 对齐 Legado：仅短消息进列表（msg.length < 30） */
 const CHECK_STATUS_MAX_LEN = 30;
@@ -90,6 +99,14 @@ class TocEmptyError extends Error {
   constructor(message = "目录为空") {
     super(message);
     this.name = "TocEmptyError";
+  }
+}
+
+/** 用户点停止：不把进行中的书源标成失败 */
+class CheckCancelledError extends Error {
+  constructor() {
+    super("已停止校验");
+    this.name = "CheckCancelledError";
   }
 }
 
@@ -118,6 +135,9 @@ export function setCheckSourceConfig(patch: Partial<CheckSourceConfig>): CheckSo
   }
   if (typeof patch.timeout === "number" && patch.timeout > 0) {
     config.timeout = patch.timeout;
+  }
+  if (typeof patch.concurrency === "number") {
+    config.concurrency = clampConcurrency(patch.concurrency);
   }
   if (typeof patch.checkSearch === "boolean") config.checkSearch = patch.checkSearch;
   if (typeof patch.checkDiscovery === "boolean") {
@@ -178,19 +198,25 @@ function createStatusReporter(
 }
 
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  if (cancelled) return Promise.reject(new CheckCancelledError());
   return new Promise<T>((resolve, reject) => {
+    let settled = false;
+    const finish = (action: () => void) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      clearInterval(poll);
+      action();
+    };
     const timer = setTimeout(() => {
-      reject(new Error(`${label}超时`));
+      finish(() => reject(new Error(`${label}超时`)));
     }, ms);
+    const poll = setInterval(() => {
+      if (cancelled) finish(() => reject(new CheckCancelledError()));
+    }, 50);
     promise.then(
-      (v) => {
-        clearTimeout(timer);
-        resolve(v);
-      },
-      (e) => {
-        clearTimeout(timer);
-        reject(e);
-      },
+      (v) => finish(() => resolve(v)),
+      (e) => finish(() => reject(e)),
     );
   });
 }
@@ -214,6 +240,10 @@ function isScriptError(e: unknown): boolean {
   );
 }
 
+function throwIfCancelled(): void {
+  if (cancelled) throw new CheckCancelledError();
+}
+
 async function checkBook(
   item: SearchBookItem,
   source: BookSourceRecord,
@@ -225,6 +255,7 @@ async function checkBook(
   try {
     if (!config.checkInfo) return next;
 
+    throwIfCancelled();
     let tocUrl = "";
     let bookUrl = item.bookUrl;
     let name = item.name;
@@ -260,6 +291,7 @@ async function checkBook(
 
     if (!config.checkCategory) return next;
 
+    throwIfCancelled();
     report("┌获取目录");
     const tocLogs: string[] = [];
     const toc = await getChapterList(source, detail, tocLogs);
@@ -271,6 +303,7 @@ async function checkBook(
     }
     if (!config.checkContent) return next;
 
+    throwIfCancelled();
     report("┌获取正文");
     const first = chapters[0]!;
     const nextChapterUrl = chapters[1]?.url ?? first.url;
@@ -304,12 +337,14 @@ async function doCheckSource(
   source: BookSourceRecord,
   report: StatusReporter,
 ): Promise<BookSourceRecord> {
+  throwIfCancelled();
   let next = removeErrorComment(removeInvalidGroups(source));
 
   if (config.checkSearch) {
     const searchWord = getCheckKeyword(source, config.keyword);
     if (source.searchUrl?.trim()) {
       next = removeBookSourceGroups(next, "搜索链接规则为空");
+      throwIfCancelled();
       report("┌获取书籍列表");
       const logs: string[] = [];
       const searchBooks = await searchBook(source, searchWord, 1, logs);
@@ -317,6 +352,7 @@ async function doCheckSource(
         next = addBookSourceGroups(next, "搜索失效");
       } else {
         next = removeBookSourceGroups(next, "搜索失效");
+        throwIfCancelled();
         report("┌获取详情页链接");
         next = await checkBook(searchBooks[0]!, next, true, report);
       }
@@ -326,6 +362,7 @@ async function doCheckSource(
   }
 
   if (config.checkDiscovery && source.exploreUrl?.trim()) {
+    throwIfCancelled();
     report("┌解析发现");
     const kinds = await getExploreKinds(source);
     const url = kinds.find((k) => k.url?.trim())?.url;
@@ -333,6 +370,7 @@ async function doCheckSource(
       next = addBookSourceGroups(next, "发现规则为空");
     } else {
       next = removeBookSourceGroups(next, "发现规则为空");
+      throwIfCancelled();
       report("┌获取发现列表");
       const logs: string[] = [];
       const exploreBooks = await exploreBook(source, url, 1, logs);
@@ -340,6 +378,7 @@ async function doCheckSource(
         next = addBookSourceGroups(next, "发现失效");
       } else {
         next = removeBookSourceGroups(next, "发现失效");
+        throwIfCancelled();
         report("┌获取详情页链接");
         next = await checkBook(exploreBooks[0]!, next, false, report);
       }
@@ -398,6 +437,9 @@ async function checkOneSource(
     };
   } catch (e) {
     const spending = Date.now() - started;
+    if (e instanceof CheckCancelledError || cancelled) {
+      throw e instanceof CheckCancelledError ? e : new CheckCancelledError();
+    }
     let next = e instanceof CheckFailError ? e.source : original;
     if (isTimeoutError(e) || /超时/.test(e instanceof Error ? e.message : "")) {
       next = addBookSourceGroups(next, "校验超时");
@@ -445,15 +487,20 @@ export function startCheckSource(
   void (async () => {
     try {
       const workers = Array.from(
-        { length: Math.min(CHECK_CONCURRENCY, urls.length) },
+        { length: Math.min(clampConcurrency(config.concurrency), urls.length) },
         async () => {
           while (cursor < urls.length) {
             if (cancelled) return;
             const sourceUrl = urls[cursor++]!;
             const source = getBookSource(sourceUrl);
             const sourceName = source?.bookSourceName ?? sourceUrl;
-            const result = await checkOneSource(sourceUrl, emit);
-            if (cancelled) return;
+            let result: Awaited<ReturnType<typeof checkOneSource>>;
+            try {
+              result = await checkOneSource(sourceUrl, emit);
+            } catch (e) {
+              if (e instanceof CheckCancelledError) return;
+              throw e;
+            }
             completed += 1;
             emit({
               type: "sourceDone",

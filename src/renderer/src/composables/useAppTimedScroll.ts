@@ -39,6 +39,36 @@ export function useAppTimedScroll(deps: {
     clearTimer();
   }
 
+  function startTimer() {
+    clearTimer();
+    const ms = clampTimedScrollIntervalMs(
+      deps.timedScrollSettings.value.intervalMs,
+    );
+    timerId = setInterval(tick, ms);
+  }
+
+  /** 手动滚动/翻页后重新计满间隔，避免刚操作完立刻再自动滚。 */
+  function nudgeTimedScrollTimer() {
+    if (!active.value) return;
+    if (deps.pauseOnLoading && deps.loading.value) return;
+    startTimer();
+  }
+
+  function startTimedScroll() {
+    if (!canStartTimedScroll.value) return;
+    if (deps.isVoiceReadActive.value) return;
+    active.value = true;
+    startTimer();
+  }
+
+  function toggleTimedScroll() {
+    if (active.value) {
+      stopTimedScroll();
+      return;
+    }
+    startTimedScroll();
+  }
+
   function tick() {
     if (!active.value) return;
     if (deps.viewportAtBottom.value) {
@@ -57,29 +87,6 @@ export function useAppTimedScroll(deps: {
     } else {
       reader.scrollByPageStep?.(1);
     }
-  }
-
-  function startTimer() {
-    clearTimer();
-    const ms = clampTimedScrollIntervalMs(
-      deps.timedScrollSettings.value.intervalMs,
-    );
-    timerId = setInterval(tick, ms);
-  }
-
-  function startTimedScroll() {
-    if (!canStartTimedScroll.value) return;
-    if (deps.isVoiceReadActive.value) return;
-    active.value = true;
-    startTimer();
-  }
-
-  function toggleTimedScroll() {
-    if (active.value) {
-      stopTimedScroll();
-      return;
-    }
-    startTimedScroll();
   }
 
   const canStartTimedScroll = computed(() => {
@@ -138,5 +145,6 @@ export function useAppTimedScroll(deps: {
     canStartTimedScroll,
     toggleTimedScroll,
     stopTimedScroll,
+    nudgeTimedScrollTimer,
   };
 }

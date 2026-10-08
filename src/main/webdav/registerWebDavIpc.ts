@@ -72,6 +72,19 @@ function errMsg(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
+async function mkdirAppLayout(
+  client: WebDavClient,
+  appRoot: string,
+): Promise<void> {
+  const root = appRoot.replace(/\/+$/, "");
+  await client.mkdir(appRoot);
+  await client.mkdir(joinWebDavUrl(root, "Main"));
+  await client.mkdir(joinWebDavUrl(root, "Main", "reader-backgrounds"));
+  await client.mkdir(joinWebDavUrl(root, "Books"));
+  await client.mkdir(joinWebDavUrl(root, "FindBook"));
+  await client.mkdir(joinWebDavUrl(root, "FindBook", "bookshelf"));
+}
+
 export function registerWebDavIpcHandlers(): void {
   ipcMain.handle(WEBDAV_IPC.test, async (_evt, raw: unknown) => {
     const auth = asAuth(raw);
@@ -79,13 +92,7 @@ export function registerWebDavIpcHandlers(): void {
     try {
       const { client, appRoot } = await createClient(auth);
       await client.check(auth.url.endsWith("/") ? auth.url : `${auth.url}/`);
-      await client.mkdir(appRoot);
-      await client.mkdir(joinWebDavUrl(appRoot.replace(/\/+$/, ""), "Main"));
-      await client.mkdir(joinWebDavUrl(appRoot.replace(/\/+$/, ""), "Books"));
-      await client.mkdir(joinWebDavUrl(appRoot.replace(/\/+$/, ""), "FindBook"));
-      await client.mkdir(
-        joinWebDavUrl(appRoot.replace(/\/+$/, ""), "FindBook", "bookshelf"),
-      );
+      await mkdirAppLayout(client, appRoot);
       return { ok: true as const };
     } catch (e) {
       return { ok: false as const, error: errMsg(e) };
@@ -97,13 +104,7 @@ export function registerWebDavIpcHandlers(): void {
     if (!auth) return { ok: false as const, error: "WebDAV 未配置" };
     try {
       const { client, appRoot } = await createClient(auth);
-      await client.mkdir(appRoot);
-      await client.mkdir(joinWebDavUrl(appRoot.replace(/\/+$/, ""), "Main"));
-      await client.mkdir(joinWebDavUrl(appRoot.replace(/\/+$/, ""), "Books"));
-      await client.mkdir(joinWebDavUrl(appRoot.replace(/\/+$/, ""), "FindBook"));
-      await client.mkdir(
-        joinWebDavUrl(appRoot.replace(/\/+$/, ""), "FindBook", "bookshelf"),
-      );
+      await mkdirAppLayout(client, appRoot);
       return { ok: true as const, appRoot };
     } catch (e) {
       return { ok: false as const, error: errMsg(e) };

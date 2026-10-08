@@ -18,7 +18,14 @@ import {
   getPresetLabel,
   type PresetFontKey,
 } from "../utils/presetFontDefinitions";
+import {
+  STEALTH_SYSTEM_UI_FONT,
+  STEALTH_TERMINAL_FONT_MARKER,
+  isStealthSystemUiFont,
+  isStealthTerminalFont,
+} from "../utils/stealthReaderSettings";
 import { useAnchoredAppShellMenu } from "../composables/useAnchoredAppShellMenu";
+import type { AnchoredMenuPlacement } from "../utils/appShellMenuPosition";
 
 const props = withDefaults(
   defineProps<{
@@ -28,8 +35,18 @@ const props = withDefaults(
     disabled?: boolean;
     /** 菜单层叠（Teleport 到 body；需高于外层模态时传入更大值） */
     menuZIndex?: number;
+    /** 摸鱼设置：菜单顶部增加「系统默认」「终端默认」 */
+    showStealthDefaults?: boolean;
+    /** 相对触发器的弹出对齐；窄窗宜用 below-end 以免右侧被裁切 */
+    menuPlacement?: AnchoredMenuPlacement;
   }>(),
-  { pinnedOtherFonts: () => [], disabled: false, menuZIndex: 7200 },
+  {
+    pinnedOtherFonts: () => [],
+    disabled: false,
+    menuZIndex: 7200,
+    showStealthDefaults: false,
+    menuPlacement: "below-center",
+  },
 );
 
 const emit = defineEmits<{
@@ -66,6 +83,15 @@ const selectedFont = computed(() =>
   detectFontPickerSelection(props.monacoFontFamily),
 );
 
+const stealthSystemSelected = computed(
+  () =>
+    props.showStealthDefaults && isStealthSystemUiFont(props.monacoFontFamily),
+);
+const stealthTerminalSelected = computed(
+  () =>
+    props.showStealthDefaults && isStealthTerminalFont(props.monacoFontFamily),
+);
+
 const presetFontMenuItems = computed(() =>
   PRESET_FONT_KEYS.map((key) => ({
     key,
@@ -74,19 +100,37 @@ const presetFontMenuItems = computed(() =>
   })),
 );
 
-const fontPickerButtonTitle = computed(() =>
-  selectedFont.value.key === "other"
+const fontPickerButtonTitle = computed(() => {
+  if (stealthSystemSelected.value) return "字体：系统默认";
+  if (stealthTerminalSelected.value) return "字体：终端默认";
+  return selectedFont.value.key === "other"
     ? `字体：${selectedFont.value.otherName ?? ""}`
-    : `字体：${getPresetLabel(selectedFont.value.key)}`,
-);
+    : `字体：${getPresetLabel(selectedFont.value.key)}`;
+});
 
 const selectedOtherFontNormalized = computed(() => {
+  // 摸鱼「系统默认 / 终端默认」哨兵不是可选「其他字体」，勿出现在外层列表
+  if (stealthSystemSelected.value || stealthTerminalSelected.value) return null;
   if (selectedFont.value.key !== "other") return null;
-  return (selectedFont.value.otherName ?? "").trim();
+  const name = (selectedFont.value.otherName ?? "").trim();
+  if (!name) return null;
+  if (props.showStealthDefaults && isStealthMarkerFontName(name)) return null;
+  return name;
 });
 
 function normalizeOtherFontName(name: string): string {
   return name.trim();
+}
+
+/** CSS 泛型 / 摸鱼哨兵，不应当成可钉的「其他字体」名称 */
+function isStealthMarkerFontName(name: string): boolean {
+  const n = name.trim().toLowerCase();
+  return (
+    n === "system-ui" ||
+    n === "ui-monospace" ||
+    n === STEALTH_SYSTEM_UI_FONT.toLowerCase() ||
+    n === STEALTH_TERMINAL_FONT_MARKER.toLowerCase()
+  );
 }
 
 const outerOtherFontItems = computed(() => {
@@ -95,6 +139,7 @@ const outerOtherFontItems = computed(() => {
   for (const raw of props.pinnedOtherFonts) {
     const name = normalizeOtherFontName(raw);
     if (!name || seen.has(name)) continue;
+    if (props.showStealthDefaults && isStealthMarkerFontName(name)) continue;
     seen.add(name);
     items.push({ name, pinned: true });
   }
@@ -112,10 +157,12 @@ function setFontAndClose(fontFamily: string) {
 
 async function ensureSystemFontsLoaded() {
   if (systemFonts.value.length > 0 || systemFontsLoading.value) return;
-  if (!(window as any).colorTxt?.listSystemFonts) return;
+  const listFn = window.colorTxt?.listSystemFonts;
+  if (typeof listFn !== "function") return;
   systemFontsLoading.value = true;
   try {
-    systemFonts.value = await (window as any).colorTxt.listSystemFonts();
+    const fonts = await listFn();
+    systemFonts.value = Array.isArray(fonts) ? fonts : [];
   } catch {
     systemFonts.value = [];
   } finally {
@@ -127,20 +174,59 @@ function closeFontMenu() {
   fontMenu.closeMenu();
 }
 
+function waitDoubleRaf(): Promise<void> {
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+  });
+}
+
+/** 切换预设 / 系统字体面板时先藏起，等宽度与滚动落稳再显示，避免错位与列表重影闪一帧 */
+const fontMenuLayoutSettled = ref(true);
+
 const fontMenu = useAnchoredAppShellMenu({
   open: fontMenuOpen,
   anchor: fontPickerAnchorEl,
-  placement: "below-center",
-  widthPx: 140,
+  placement: () => props.menuPlacement,
+  /** 仅作定位估算；勿写死 CSS width，外层列表需按最长字体名撑开 */
+  widthPx: () => (showOtherFontsPanel.value ? 280 : 140),
+  applyWidthPx: false,
   gap: 6,
   zIndex: props.menuZIndex,
+  autoFlip: true,
   onClose: () => {
     showOtherFontsPanel.value = false;
     otherFontFilter.value = "";
+    fontMenuLayoutSettled.value = true;
   },
 });
 
-const { panelRef: fontMenuPanelRef, panelStyle: fontMenuPanelStyle } = fontMenu;
+const {
+  panelRef: fontMenuPanelRef,
+  panelStyle: fontMenuPanelStyle,
+  resolvedPlacement: fontMenuPlacement,
+  left: fontMenuLeft,
+} = fontMenu;
+
+const fontMenuOpensAbove = computed(() =>
+  fontMenuPlacement.value.startsWith("above"),
+);
+
+/** 视口夹取后面板左移后，小三角仍对准触发器中心 */
+const fontMenuArrowX = computed(() => {
+  if (!fontMenuOpen.value) return "50%";
+  const anchor = fontPickerAnchorEl.value;
+  if (!anchor) return "50%";
+  const rect = anchor.getBoundingClientRect();
+  const mid = rect.left + rect.width / 2;
+  const panelW = fontMenuPanelRef.value?.offsetWidth ?? 140;
+  const x = mid - fontMenuLeft.value;
+  return `${Math.max(10, Math.min(panelW - 10, x))}px`;
+});
+
+const fontMenuPanelMergedStyle = computed(() => ({
+  ...fontMenuPanelStyle.value,
+  ["--font-menu-arrow-x" as string]: fontMenuArrowX.value,
+}));
 
 function toggleFontMenu() {
   if (props.disabled) return;
@@ -151,17 +237,39 @@ function choosePreset(key: PresetFontKey) {
   setFontAndClose(getPresetCssStack(key));
 }
 
+function chooseStealthSystemUi() {
+  setFontAndClose(STEALTH_SYSTEM_UI_FONT);
+}
+
+function chooseStealthTerminal() {
+  setFontAndClose(STEALTH_TERMINAL_FONT_MARKER);
+}
+
 async function openOtherFonts() {
+  fontMenuLayoutSettled.value = false;
   showOtherFontsPanel.value = true;
   otherFontFilter.value = "";
+  // 先按新宽度重算位置（隐藏期间完成），再显示加载态，避免宽面板错位闪一帧
+  await nextTick();
+  await waitDoubleRaf();
+  await fontMenu.reposition();
+  await waitDoubleRaf();
+  fontMenuLayoutSettled.value = true;
   await ensureSystemFontsLoaded();
   await nextTick();
+  await scrollSelectedOtherFontIntoView();
   otherFontFilterInputRef.value?.focus({ preventScroll: true });
-  requestAnimationFrame(() => {
-    requestAnimationFrame(() => {
-      scrollSelectedOtherFontIntoView();
-    });
-  });
+}
+
+async function backFromOtherFonts() {
+  fontMenuLayoutSettled.value = false;
+  showOtherFontsPanel.value = false;
+  otherFontFilter.value = "";
+  await nextTick();
+  await waitDoubleRaf();
+  await fontMenu.reposition();
+  await waitDoubleRaf();
+  fontMenuLayoutSettled.value = true;
 }
 
 function chooseOtherFont(fontName: string) {
@@ -187,35 +295,21 @@ function isOtherFontSelected(fontName: string) {
   return normalizeOtherFontName(fontName) === selectedOtherFontNormalized.value;
 }
 
-function scrollSelectedOtherFontIntoView() {
+async function scrollSelectedOtherFontIntoView() {
   const selected = selectedOtherFontNormalized.value;
   if (!selected) return;
   const list = filteredSystemFonts.value;
   const idx = list.findIndex((f) => f.trim() === selected.trim());
   if (idx < 0) return;
-  fontOtherVirtualListRef.value?.scrollToIndex(idx, { align: "center" });
+  await fontOtherVirtualListRef.value?.scrollToIndex(idx, { align: "center" });
 }
-
-watch(
-  () => [
-    showOtherFontsPanel.value,
-    systemFontsLoading.value,
-    systemFonts.value,
-  ],
-  ([opened, loading]) => {
-    if (!opened) return;
-    if (loading) return;
-    void nextTick().then(() => {
-      requestAnimationFrame(() => scrollSelectedOtherFontIntoView());
-    });
-  },
-);
 
 watch(otherFontFilter, () => {
   if (!showOtherFontsPanel.value || systemFontsLoading.value) return;
-  void nextTick().then(() => {
+  if (!fontMenuLayoutSettled.value) return;
+  void nextTick().then(async () => {
     fontOtherVirtualListRef.value?.scrollToTop();
-    requestAnimationFrame(() => scrollSelectedOtherFontIntoView());
+    await scrollSelectedOtherFontIntoView();
   });
 });
 
@@ -223,16 +317,6 @@ watch(
   () => props.disabled,
   (locked) => {
     if (locked) closeFontMenu();
-  },
-);
-
-watch(
-  () => showOtherFontsPanel.value,
-  () => {
-    if (!fontMenuOpen.value) return;
-    void nextTick(() => {
-      void fontMenu.reposition();
-    });
   },
 );
 </script>
@@ -254,23 +338,56 @@ watch(
         v-if="fontMenuOpen"
         ref="fontMenuPanelRef"
         class="fontMenu fontMenu--teleport"
-        :class="{ 'fontMenu--other': showOtherFontsPanel }"
+        :class="{
+          'fontMenu--other': showOtherFontsPanel,
+          'fontMenu--above': fontMenuOpensAbove,
+          'fontMenu--layoutPending': !fontMenuLayoutSettled,
+        }"
         data-header-float-panel
+        data-fullscreen-header-float
         :style="{
           position: 'fixed',
-          left: fontMenuPanelStyle.left,
-          top: fontMenuPanelStyle.top,
-          zIndex: fontMenuPanelStyle.zIndex,
+          left: fontMenuPanelMergedStyle.left,
+          top: fontMenuPanelMergedStyle.top,
+          width: fontMenuPanelMergedStyle.width,
+          zIndex: fontMenuPanelMergedStyle.zIndex,
+          '--font-menu-max-height': fontMenuPanelMergedStyle.maxHeight,
+          '--font-menu-arrow-x': fontMenuPanelMergedStyle['--font-menu-arrow-x'],
         }"
         @click.stop
       >
       <div v-if="!showOtherFontsPanel" class="fontMenuList">
         <div class="fontMenuListBody">
+          <template v-if="showStealthDefaults">
+            <button
+              type="button"
+              class="fontMenuItem"
+              :class="{ active: stealthSystemSelected }"
+              @click="chooseStealthSystemUi"
+            >
+              系统默认
+            </button>
+            <button
+              type="button"
+              class="fontMenuItem"
+              :class="{ active: stealthTerminalSelected }"
+              style="font-family: ui-monospace, monospace"
+              @click="chooseStealthTerminal"
+            >
+              终端默认
+            </button>
+            <div class="fontMenuDivider fontMenuDivider--inList"></div>
+          </template>
           <button
             v-for="item in presetFontMenuItems"
             :key="item.key"
             class="fontMenuItem"
-            :class="{ active: selectedFont.key === item.key }"
+            :class="{
+              active:
+                !stealthSystemSelected &&
+                !stealthTerminalSelected &&
+                selectedFont.key === item.key,
+            }"
             :style="{ fontFamily: cssFontFamilyStack(item.stack) }"
             @click="choosePreset(item.key)"
           >
@@ -281,7 +398,12 @@ watch(
             v-for="item in outerOtherFontItems"
             :key="item.name"
             class="fontMenuItemRow"
-            :class="{ active: isOtherFontSelected(item.name) }"
+            :class="{
+              active:
+                !stealthSystemSelected &&
+                !stealthTerminalSelected &&
+                isOtherFontSelected(item.name),
+            }"
           >
             <button
               type="button"
@@ -311,22 +433,14 @@ watch(
         <div class="fontMenuListFooter">
           <div class="fontMenuDivider"></div>
 
-          <button class="fontMenuItem" @click="openOtherFonts">其他字体</button>
+          <button class="fontMenuItem" @click="openOtherFonts">系统字体</button>
         </div>
       </div>
 
       <div v-else class="fontOtherPanel">
         <div class="fontOtherHeader">
           <div class="fontOtherTitle">选择系统字体</div>
-          <button
-            class="btn"
-            @click="
-              showOtherFontsPanel = false;
-              otherFontFilter = '';
-            "
-          >
-            返回
-          </button>
+          <button class="btn" @click="backFromOtherFonts">返回</button>
         </div>
 
         <div v-if="systemFontsLoading" class="fontOtherLoading">
@@ -396,8 +510,9 @@ watch(
 }
 
 .fontMenu--teleport {
+  width: max-content;
   min-width: 140px;
-  max-width: 300px;
+  max-width: min(300px, calc(100vw - 16px));
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -405,11 +520,16 @@ watch(
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
 }
 
+.fontMenu--layoutPending {
+  opacity: 0;
+  pointer-events: none;
+}
+
 .fontMenu--teleport::before,
 .fontMenu--teleport::after {
   content: "";
   position: absolute;
-  left: 50%;
+  left: var(--font-menu-arrow-x, 50%);
   transform: translateX(-50%);
   width: 0;
   height: 0;
@@ -430,12 +550,30 @@ watch(
   border-bottom: 7px solid var(--bg);
 }
 
+.fontMenu--above::before,
+.fontMenu--above::after {
+  top: auto;
+}
+
+.fontMenu--above::before {
+  bottom: -8px;
+  border-bottom: none;
+  border-top: 8px solid var(--border);
+}
+
+.fontMenu--above::after {
+  bottom: -7px;
+  border-bottom: none;
+  border-top: 7px solid var(--bg);
+}
+
 .fontMenu {
   z-index: 7200;
 }
 
 .fontMenu--other {
-  min-width: 220px;
+  min-width: 280px;
+  max-width: min(280px, calc(100vw - 16px));
 }
 
 .fontMenuDivider {
@@ -444,10 +582,14 @@ watch(
   background: var(--border);
 }
 
+.fontMenuDivider--inList {
+  margin: 4px 0 8px;
+}
+
 .fontOtherPanel {
   display: flex;
   flex-direction: column;
-  max-height: 70vh;
+  max-height: var(--font-menu-max-height, 70vh);
   min-height: 0; /* allow inner scroll */
 }
 
@@ -455,7 +597,7 @@ watch(
   display: flex;
   flex-direction: column;
   gap: 4px;
-  max-height: 70vh;
+  max-height: var(--font-menu-max-height, 70vh);
   min-height: 0;
 }
 

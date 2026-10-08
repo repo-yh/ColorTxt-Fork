@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import IconButton from "./IconButton.vue";
 import { icons } from "../icons";
+import { syncDismissibleOverlay } from "../utils/dismissibleOverlayStack";
 import {
   TEXT_CONVERT_WIDTH_EDIT_MENU,
   TEXT_CONVERT_WIDTH_READ_MENU,
@@ -49,6 +50,8 @@ const digitSubOpen = ref(false);
 const zhFlyoutSide = ref<"left" | "right">("right");
 const letterFlyoutSide = ref<"left" | "right">("right");
 const digitFlyoutSide = ref<"left" | "right">("right");
+
+syncDismissibleOverlay(menuOpen);
 
 /** 与 `.convertMenuFlyout` 的 min-width 一致，用于打开前估算能否放在右侧 */
 const CONVERT_FLYOUT_ESTIMATE_WIDTH = 160;
@@ -107,6 +110,17 @@ function onDocPointerDown(ev: PointerEvent) {
   if (!root) return;
   const t = ev.target as Node | null;
   if (t && root.contains(t)) return;
+  closeMenu();
+}
+
+function onDocKeydown(ev: KeyboardEvent) {
+  if (ev.key !== "Escape" || !menuOpen.value) return;
+  ev.preventDefault();
+  ev.stopPropagation();
+  if (zhSubOpen.value || letterSubOpen.value || digitSubOpen.value) {
+    closeSubmenus();
+    return;
+  }
   closeMenu();
 }
 
@@ -188,10 +202,12 @@ function openDigitSubmenu() {
 
 onMounted(() => {
   document.addEventListener("pointerdown", onDocPointerDown, true);
+  document.addEventListener("keydown", onDocKeydown, true);
 });
 
 onBeforeUnmount(() => {
   document.removeEventListener("pointerdown", onDocPointerDown, true);
+  document.removeEventListener("keydown", onDocKeydown, true);
 });
 </script>
 

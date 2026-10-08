@@ -5,8 +5,10 @@ import {
   onBeforeUnmount,
   onMounted,
   ref,
+  toRef,
   watch,
 } from "vue";
+import { syncDismissibleOverlay } from "../utils/dismissibleOverlayStack";
 
 defineOptions({ inheritAttrs: false });
 
@@ -56,6 +58,8 @@ const emit = defineEmits<{
   close: [];
   select: [id: string];
 }>();
+
+syncDismissibleOverlay(toRef(props, "open"));
 
 const menuRef = ref<HTMLElement | null>(null);
 const posX = ref(0);
@@ -199,13 +203,13 @@ function onWindowInvalidate() {
 }
 
 onMounted(() => {
-  document.addEventListener("pointerdown", onDocPointerDown);
+  document.addEventListener("pointerdown", onDocPointerDown, true);
   window.addEventListener("resize", onWindowInvalidate);
   window.addEventListener("blur", onWindowInvalidate);
 });
 
 onBeforeUnmount(() => {
-  document.removeEventListener("pointerdown", onDocPointerDown);
+  document.removeEventListener("pointerdown", onDocPointerDown, true);
   window.removeEventListener("resize", onWindowInvalidate);
   window.removeEventListener("blur", onWindowInvalidate);
 });

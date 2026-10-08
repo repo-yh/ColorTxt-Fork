@@ -92,10 +92,12 @@ defineExpose({
           :row-stride="rowStride"
           :overscan="10"
           :item-key="(i) => i"
+          arrow-nav
         >
           <template #default="{ index }">
             <button
               type="button"
+              tabindex="-1"
               class="sidebarItem"
               :class="{
                 active: index === currentDisplayIndex,
