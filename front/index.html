@@ -33,7 +33,7 @@
   .toolbar button { padding: 4px 16px; border: 1px solid rgba(128,128,128,0.25); border-radius: 4px; background: transparent; cursor: pointer; color: inherit; font-size: 13px; font-family: inherit; transition: background 0.15s; }
   .toolbar button:hover { background: rgba(128,128,128,0.08); }
   .toolbar button:disabled { opacity: 0.4; cursor: not-allowed; }
-  #content { line-height: 1.8; font-size: 16px; word-break: break-all; }
+  #content { line-height: 1.8; font-size: var(--content-size, 16px); word-break: break-all; }
   #content div { min-height: 1em; scroll-margin-top: 64px; }
   #content .chapter-title { font-weight: bold; }
   #stickyChapter { display: none; position: fixed; top: 68px; left: 20px; right: 0; z-index: 11; height: 28px; line-height: 28px; padding: 0 12px; background: #f4ead7; opacity: 1; font-size: 14px; font-weight: bold; border-bottom: 1px solid rgba(128,128,128,0.15); box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
@@ -50,7 +50,8 @@
     #main { padding: 12px 16px; padding-left: 28px; padding-top: 56px; }
     .toolbar { position: fixed; top: 0; left: 28px; right: 0; z-index: 10; display: flex; align-items: center; gap: 8px; padding: 8px 16px 8px 0; background: var(--bg); border-bottom: 1px solid rgba(128,128,128,0.15); }
     .toolbar select { max-width: none; }
-    #content { font-size: 15px; line-height: 1.7; }
+    .toolbar button { padding: 4px 8px; }
+    #content { --content-size: 15px; line-height: 1.7; }
     #content div { scroll-margin-top: 60px; }
     #stickyChapter { top: 56px; left: 28px; z-index: 11; background: #f4ead7; }
     body.dark #stickyChapter { background: #1e1e1e; }
@@ -72,6 +73,8 @@
     <option value="">-- 选择文件 --</option>
   </select>
   <button id="btnRefresh" onclick="loadFile(currentFile, true)">刷新</button>
+  <button id="btnFontMinus" onclick="changeFontSize(-1)">A−</button>
+  <button id="btnFontPlus" onclick="changeFontSize(1)">A+</button>
 </div>
 <div id="content"><div id="status">请选择文件</div></div>
 </div>
@@ -87,6 +90,8 @@ var $sidebarTab = document.getElementById('sidebarTab')
 var $chapterList = document.getElementById('chapterList')
 var $main = document.getElementById('main')
 var $stickyChapter = document.getElementById('stickyChapter')
+var $btnFontMinus = document.getElementById('btnFontMinus')
+var $btnFontPlus = document.getElementById('btnFontPlus')
 var $sentinel = null
 
 // 动态对齐工具栏底边（移动端工具栏fixed，桌面sticky）
@@ -387,6 +392,29 @@ function onFileChange() {
   var v = $select.value
   if (v) loadFile(v)
 }
+
+// ---- 字体大小调节 ----
+
+var FONT_MIN = 12, FONT_MAX = 40
+
+function applyFontSize(size) {
+  $content.style.setProperty('--content-size', size + 'px')
+  $btnFontMinus.disabled = size <= FONT_MIN
+  $btnFontPlus.disabled = size >= FONT_MAX
+}
+
+function changeFontSize(delta) {
+  var cur = parseInt(getComputedStyle($content).getPropertyValue('--content-size')) || 16
+  var next = Math.min(FONT_MAX, Math.max(FONT_MIN, cur + delta))
+  if (next === cur) return
+  applyFontSize(next)
+  try { localStorage.setItem('colortxt_web_font_size', String(next)) } catch(e) {}
+}
+
+try {
+  var savedSize = parseInt(localStorage.getItem('colortxt_web_font_size')) || 0
+  if (savedSize >= FONT_MIN && savedSize <= FONT_MAX) applyFontSize(savedSize)
+} catch(e) {}
 
 loadFiles().then(function() {
   var saved = ''
