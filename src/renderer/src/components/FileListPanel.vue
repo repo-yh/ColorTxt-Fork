@@ -70,6 +70,7 @@ const props = withDefaults(
     currentFilePath: string | null;
     fileFilterQuery: string;
     metaProgressMap?: Map<string, number>;
+    chapterCountMap?: Map<string, number>;
     liveReadingProgressPercent?: number;
     fileCategory: string;
     fileSort: FileSortMode;
@@ -86,6 +87,7 @@ const props = withDefaults(
   }>(),
   {
     metaProgressMap: () => new Map<string, number>(),
+    chapterCountMap: () => new Map<string, number>(),
     liveReadingProgressPercent: undefined,
     fileListViewMode: "list",
     menuAnchorEl: null,
@@ -142,6 +144,10 @@ function fileRowProgress(filePath: string): number | undefined {
     props.metaProgressMap,
     filePath,
   );
+}
+
+function fileRowChapterCount(filePath: string): number | undefined {
+  return props.chapterCountMap.get(fileHistoryKey(filePath));
 }
 
 function borderColorForFileRow(f: SidebarFileItem): string {
@@ -1518,6 +1524,12 @@ onBeforeUnmount(() => {
                       />
                       <span v-else class="itemName">{{ row.file.name }}</span>
                       <span
+                        v-if="fileRowChapterCount(row.file.path) !== undefined"
+                        class="itemMeta itemMeta--chapters"
+                      >
+                        {{ fileRowChapterCount(row.file.path) }}章
+                      </span>
+                      <span
                         v-if="
                           typeof fileRowProgress(row.file.path) === 'number'
                         "
@@ -1598,6 +1610,15 @@ onBeforeUnmount(() => {
                     @blur="commitRenamingFile"
                   />
                   <span v-else class="itemName">{{ filesFiltered[index].name }}</span>
+                  <span
+                    v-if="
+                      fileRowChapterCount(filesFiltered[index].path) !==
+                      undefined
+                    "
+                    class="itemMeta itemMeta--chapters"
+                  >
+                    {{ fileRowChapterCount(filesFiltered[index].path) }}章
+                  </span>
                   <span
                     v-if="
                       typeof fileRowProgress(filesFiltered[index].path) ===
@@ -2149,6 +2170,10 @@ onBeforeUnmount(() => {
 
 .itemMeta--progress-complete {
   color: var(--success);
+}
+
+.itemMeta--chapters {
+  flex-shrink: 0;
 }
 .sidebarItem:hover {
   color: var(--list-item-fg);

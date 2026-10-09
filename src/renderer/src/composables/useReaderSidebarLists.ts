@@ -16,6 +16,7 @@ import {
 } from "../stores/fileMetaStore";
 
 const EMPTY_META_PROGRESS = new Map<string, number>();
+const EMPTY_CHAPTER_COUNT_MAP = new Map<string, number>();
 
 /** 行高 + 1px 行间距（用于虚拟列表内的 padding-bottom） */
 export const READER_SIDEBAR_ROW_STRIDE = 41;
@@ -319,6 +320,19 @@ export function useReaderSidebarLists(
       if ((map?.size ?? 0) > 0) refreshProgressSortSnapshot();
     },
   );
+
+  /** 路径 key → 总章节数（file.meta.chapterCount）；供文件列表行展示 */
+  const chapterCountByPathKey = computed(() => {
+    const records = props.fileMetaRecords;
+    if (!records?.length) return EMPTY_CHAPTER_COUNT_MAP;
+    const m = new Map<string, number>();
+    for (const r of records) {
+      if (typeof r.chapterCount === "number" && r.chapterCount > 0) {
+        m.set(fileHistoryKey(r.path), r.chapterCount);
+      }
+    }
+    return m;
+  });
 
   /**
    * 分类来自列表项 `TxtFileItem.category`；（按需）合并打开时间快照。
@@ -806,6 +820,7 @@ export function useReaderSidebarLists(
     fileFilterQuery,
     /** 含 meta 分类/进度等，供分类菜单计数与「共 n 个文件」等（与原始 `files` 条数一致） */
     fileRowsEnriched,
+    chapterCountByPathKey,
     filesFiltered,
     chaptersVisible,
     bookmarksVisible,

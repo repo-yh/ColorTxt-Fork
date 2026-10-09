@@ -2305,6 +2305,21 @@ const footerPathCaption = computed(() => {
   return physicalReaderPath.value ?? currentFile.value ?? "";
 });
 
+/** 章节检测完成：把总章节数写入 file.meta（同值跳过；0/无效清除），供文件列表展示 */
+function persistChapterCountForFile(path: string, count: number) {
+  if (!path?.trim()) return;
+  const next =
+    Number.isFinite(count) && count > 0 ? Math.floor(count) : undefined;
+  const prev = findFileMetaRecord(fileMetaRecords.value, path);
+  if (prev?.chapterCount === next) return;
+  fileMetaRecords.value = upsertFileMetaRecord(
+    fileMetaRecords.value,
+    path,
+    () => ({ chapterCount: next }),
+  );
+  persistFileMeta();
+}
+
 const chapterNav = useAppChapterNavigation({
   readerRef,
   chapters,
@@ -2336,6 +2351,7 @@ const chapterNav = useAppChapterNavigation({
   },
   readingRulerEnabled,
   isVoiceReadActive: () => isVoiceReadActive.value,
+  onChaptersApplied: persistChapterCountForFile,
 });
 
 /** 视口已按物理行恢复且 probe 已更新后：重算章节并居中侧栏（加载结束等） */

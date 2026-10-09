@@ -358,6 +358,7 @@ const {
   fileListRef,
   fileFilterQuery,
   fileRowsEnriched,
+  chapterCountByPathKey,
   filesFiltered,
   chaptersVisible,
   bookmarkListRef,
@@ -1223,6 +1224,7 @@ defineExpose({
         :file-filter-query="fileFilterQuery"
         :current-file-path="currentFilePath"
         :meta-progress-map="metaProgressByPathKey"
+        :chapter-count-map="chapterCountByPathKey"
         :live-reading-progress-percent="liveReadingProgressPercent"
         :file-category="fileCategory"
         :file-sort="fileSort"

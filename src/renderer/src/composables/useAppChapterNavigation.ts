@@ -62,6 +62,8 @@ export function useAppChapterNavigation(deps: {
     fn: () => Promise<T> | T,
   ) => Promise<T>;
   onAfterChapterListRefresh?: () => void | Promise<void>;
+  /** 章节检测完成后回调（如写入 file.meta 总章节数）；path 为当前文件 */
+  onChaptersApplied?: (path: string, count: number) => void;
   readingRulerEnabled: Ref<boolean>;
   /** 晚绑定：朗读中（含暂停）不走阅读尺居中切章 */
   isVoiceReadActive?: () => boolean;
@@ -155,6 +157,8 @@ export function useAppChapterNavigation(deps: {
 
   function applyChapterListResult(filtered: Chapter[]) {
     deps.chapters.value = filtered;
+    const path = deps.currentFile.value;
+    if (path) deps.onChaptersApplied?.(path, filtered.length);
     deps.readerRef.value?.setChapters(
       filtered.map((ch) => ({
         title: ch.title,

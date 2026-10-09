@@ -109,6 +109,8 @@ export type FileMetaRecord = {
   characterRoster?: CharacterRosterEntry[];
   /** 本书最后一次打开时使用的侧栏标签页 */
   sidebarTab?: ReaderSidebarTab;
+  /** 本书最后一次章节检测的总章节数（文件列表展示用；0/无效不存） */
+  chapterCount?: number;
 };
 
 type FileMetaPayload = {
@@ -496,6 +498,12 @@ function normalizeRecord(item: Partial<FileMetaRecord>): FileMetaRecord | null {
   const sidebarTab = isValidSidebarTab(item.sidebarTab)
     ? item.sidebarTab
     : undefined;
+  const chapterCount =
+    typeof item.chapterCount === "number" &&
+    Number.isFinite(item.chapterCount) &&
+    item.chapterCount >= 1
+      ? Math.floor(item.chapterCount)
+      : undefined;
   return {
     path,
     fileName,
@@ -512,6 +520,7 @@ function normalizeRecord(item: Partial<FileMetaRecord>): FileMetaRecord | null {
     ...(characterBookStyle ? { characterBookStyle } : {}),
     ...(characterRoster?.length ? { characterRoster } : {}),
     ...(sidebarTab ? { sidebarTab } : {}),
+    ...(chapterCount ? { chapterCount } : {}),
   };
 }
 
@@ -676,6 +685,7 @@ export function upsertFileMetaRecord(
     characterBookStyle: prev?.characterBookStyle,
     characterRoster: prev?.characterRoster,
     sidebarTab: prev?.sidebarTab,
+    chapterCount: prev?.chapterCount,
     ...nextPartial,
     path,
     fileName: nextPartial.fileName ?? prev?.fileName ?? fileNameKey(path),
