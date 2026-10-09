@@ -1291,6 +1291,20 @@ const api = {
     ipcRenderer.invoke(BOOK_SOURCE_IPC.get, url) as ReturnType<
       BookSourceIpcApi["bookSourceGet"]
     >,
+  bookSourceBrowserOpen: (
+    payload: Parameters<BookSourceIpcApi["bookSourceBrowserOpen"]>[0],
+  ) =>
+    ipcRenderer.invoke(
+      BOOK_SOURCE_IPC.browserOpen,
+      payload,
+    ) as ReturnType<BookSourceIpcApi["bookSourceBrowserOpen"]>,
+  bookSourceBrowserDownload: (
+    payload: Parameters<BookSourceIpcApi["bookSourceBrowserDownload"]>[0],
+  ) =>
+    ipcRenderer.invoke(
+      BOOK_SOURCE_IPC.browserDownload,
+      payload,
+    ) as ReturnType<BookSourceIpcApi["bookSourceBrowserDownload"]>,
   bookSourceSave: (source: Parameters<BookSourceIpcApi["bookSourceSave"]>[0]) =>
     ipcRenderer.invoke(BOOK_SOURCE_IPC.save, source) as ReturnType<
       BookSourceIpcApi["bookSourceSave"]
@@ -1529,6 +1543,18 @@ const api = {
     ) => cb(payload);
     ipcRenderer.on(BOOK_SOURCE_IPC.toast, fn);
     return () => ipcRenderer.off(BOOK_SOURCE_IPC.toast, fn);
+  },
+  onBookSourceBrowserDownloadEvent: (
+    cb: (
+      ev: import("@shared/bookSource/ipc").BookSourceBrowserDownloadEvent,
+    ) => void,
+  ) => {
+    const fn = (
+      _: unknown,
+      payload: import("@shared/bookSource/ipc").BookSourceBrowserDownloadEvent,
+    ) => cb(payload);
+    ipcRenderer.on(BOOK_SOURCE_IPC.browserDownloadEvent, fn);
+    return () => ipcRenderer.off(BOOK_SOURCE_IPC.browserDownloadEvent, fn);
   },
   bookSourceCaptchaReply: (
     payload: import("@shared/bookSource/ipc").BookSourceCaptchaReply,

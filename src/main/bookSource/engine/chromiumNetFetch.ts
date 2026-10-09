@@ -22,14 +22,15 @@ export type ChromiumNetFetchResult = {
   headers: Record<string, string>;
 };
 
-type SessionEntry = {
+export type SessionEntry = {
   ses: Session;
   proxyReady: Promise<void>;
+  partition: string;
 };
 
 const sessionByProxyKey = new Map<string, SessionEntry>();
 
-function proxyCacheKey(proxy?: string | null): string {
+export function proxyCacheKey(proxy?: string | null): string {
   const text = String(proxy ?? "").trim() || getDefaultBookSourceProxy() || "";
   return text || "__direct__";
 }
@@ -39,7 +40,7 @@ function proxyCacheKey(proxy?: string | null): string {
  * 不用 defaultSession，避免 setCertificateVerifyProc 影响应用其它窗口。
  * 关闭 HTTP 磁盘缓存。
  */
-function getBookSourceNetSession(proxy?: string | null): SessionEntry {
+export function getBookSourceNetSession(proxy?: string | null): SessionEntry {
   const key = proxyCacheKey(proxy);
   const existing = sessionByProxyKey.get(key);
   if (existing) return existing;
@@ -61,7 +62,7 @@ function getBookSourceNetSession(proxy?: string | null): SessionEntry {
     ? ses.setProxy({ proxyRules: parsed.uri }).then(() => undefined)
     : ses.setProxy({ mode: "direct" }).then(() => undefined);
 
-  const entry: SessionEntry = { ses, proxyReady };
+  const entry: SessionEntry = { ses, proxyReady, partition };
   sessionByProxyKey.set(key, entry);
   return entry;
 }

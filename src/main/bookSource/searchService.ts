@@ -175,11 +175,15 @@ function emitSortedResults(session: SearchSession, force = false): void {
 
   session.lastResultEmit = now;
 
-  const items = [...session.results].sort(
-    (a, b) =>
-      searchResultRelevance(b.name, b.author, session.key) -
-      searchResultRelevance(a.name, b.author, session.key),
-  );
+  // 单源保持书源原始顺序（检查更新依赖书源返回的发帖时间排序）；多源按相关度排序
+  const items =
+    session.sources.length > 1
+      ? [...session.results].sort(
+          (a, b) =>
+            searchResultRelevance(b.name, b.author, session.key) -
+            searchResultRelevance(a.name, b.author, session.key),
+        )
+      : [...session.results];
 
   session.emit({
     searchId: session.id,

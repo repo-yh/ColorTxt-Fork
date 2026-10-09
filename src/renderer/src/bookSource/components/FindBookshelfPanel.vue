@@ -13,14 +13,16 @@ import { useBookshelfUpdate } from "../composables/useBookshelfUpdate";
 import { useSortableReorder } from "../../composables/useSortableReorder";
 import { useAnchoredAppShellMenu } from "../../composables/useAnchoredAppShellMenu";
 import { useListSelectionHotkeys } from "../../composables/useListSelectionHotkeys";
-import { appConfirm } from "../../services/appDialog";
+import { appConfirm, appPrompt } from "../../services/appDialog";
 import { appToast } from "../../services/appToast";
 import { icons } from "../../icons";
 import type { SearchBookItem } from "@shared/bookSource/types";
 import {
   bookshelfBookKey,
+  isManualBookshelfBook,
   type BookshelfBook,
 } from "../findBookBookshelf";
+import { findFirstSearchUpdateSource } from "../searchUpdateService";
 import {
   isBookshelfManualSort,
   reorderBookshelfManual,
@@ -64,6 +66,8 @@ const {
   setCategory,
   setCategories,
   applyBooks,
+  addManual,
+  rename,
 } = useFindBookBookshelf();
 const { getCoverUrl, isCoverPending, retryCover } = useBookshelfCoverUrls(books);
 const { getLastReadText } = useBookshelfLastReadTitles(
@@ -418,6 +422,10 @@ async function onCoverError(item: BookshelfBook) {
 /** 与侧栏文件列表 / 资源管理器一致：单击单选、Ctrl 多选、Shift 连选 */
 function onItemClick(item: BookshelfBook, listIndex: number, ev: MouseEvent) {
   if (!managing.value) {
+    if (isManualBookshelfBook(item)) {
+      appToast("尚未匹配到书源帖子，请先「更新目录」", { kind: "warning" });
+      return;
+    }
     emit("readBook", item);
     return;
   }
@@ -482,6 +490,49 @@ async function onRowMenuUpdate() {
   }
   const ok = await updateBook(item);
   appToast(ok ? "更新完成" : "更新失败", { kind: ok ? "success" : "warning" });
+}
+
+async function onRowMenuRename() {
+  const item = rowMenuItem.value;
+  closeRowMenu();
+  if (!item) return;
+  const name = await appPrompt("书名", {
+    title: "编辑书名",
+    defaultValue: item.name,
+    placeholder: "检查更新时按书名搜索书源",
+  });
+  const trimmed = name?.trim();
+  if (!trimmed || trimmed === item.name) return;
+  if (rename(item.bookUrl, item.origin, trimmed)) {
+    appToast("书名已更新", { kind: "success", duration: 1200 });
+  }
+}
+
+/** 书架「手动添加书籍」：输入书名 → 取 searchUpdate 书源建条目 → 自动首检建基线 */
+async function manualAdd() {
+  const name = (
+    await appPrompt("书名", {
+      title: "手动添加书籍",
+      placeholder: "输入书名，检查更新时按书名搜索书源",
+    })
+  )?.trim();
+  if (!name) return;
+  const source = await findFirstSearchUpdateSource();
+  if (!source) {
+    appToast("没有启用「搜索更新」的书源", { kind: "warning" });
+    return;
+  }
+  const book = addManual(name, source.url, source.name);
+  if (!book) {
+    appToast("书架已存在同名书籍", { kind: "warning" });
+    return;
+  }
+  appToast(`已添加，正在通过「${source.name}」检查更新…`);
+  const ok = await updateBook(book);
+  appToast(
+    ok ? "检查更新完成" : "未匹配到书源帖子，可稍后重试「更新目录」",
+    { kind: ok ? "success" : "warning" },
+  );
 }
 
 function onOpenBookInfoFromItem(item: BookshelfBook) {
@@ -614,7 +665,7 @@ async function updateAll() {
   appToast("书架更新完成", { kind: "success" });
 }
 
-defineExpose({ refresh, updateAll, enterManage, exitManage });
+defineExpose({ refresh, updateAll, enterManage, exitManage, manualAdd });
 </script>
 
 <template>
@@ -818,6 +869,14 @@ defineExpose({ refresh, updateAll, enterManage, exitManage });
         @click="onRowMenuSearchBookName"
       >
         搜索书名
+      </button>
+      <button
+        type="button"
+        class="appShellMenuItem"
+        role="menuitem"
+        @click="onRowMenuRename"
+      >
+        编辑书名
       </button>
       <button
         type="button"

@@ -25,6 +25,7 @@ import ReaderMain from "./components/ReaderMain.vue";
 import AppDialogHost from "./components/AppDialogHost.vue";
 import AppCaptchaHost from "./components/AppCaptchaHost.vue";
 import AppToastHost from "./components/AppToastHost.vue";
+import AppBookSourceBrowserDownloadHost from "./components/AppBookSourceBrowserDownloadHost.vue";
 import AppLoadingHost from "./components/AppLoadingHost.vue";
 import AppOverlays from "./components/AppOverlays.vue";
 import ReplaceFileModal from "./components/ReplaceFileModal.vue";
@@ -1753,7 +1754,15 @@ async function onReplaceFilePath(oldPathRaw: string) {
 async function onReplaceFileConfirmed(newPath: string, newSize: number) {
   const oldPath = pendingReplaceOldPath.value.trim();
   if (!oldPath) return;
+  await replaceFileInList(oldPath, newPath, newSize);
+}
 
+/** 用新路径替换列表条目：迁移阅读数据（书签/高亮/进度等），正开着则切到新文件 */
+async function replaceFileInList(
+  oldPath: string,
+  newPath: string,
+  newSize: number,
+) {
   const oldKey = fileHistoryKey(oldPath);
   const nextKey = fileHistoryKey(newPath);
   if (oldKey === nextKey) return;
@@ -2296,6 +2305,36 @@ useAppSyncCurrentFileWatch({
 async function onImportDroppedPathsFromList(paths: string[]) {
   readerDropOverlayVisible.value = false;
   await importPathsIntoFileList(paths);
+}
+
+/** 书源浏览器下载：按书籍名找列表已有条目（显示名精确 → 文件名键兜底） */
+function findFileListPathByBookName(bookName: string): string {
+  const name = bookName.trim();
+  if (!name) return "";
+  const key = fileNameKey(name);
+  const hit =
+    txtFiles.value.find((f) => f.name.trim() === name) ??
+    txtFiles.value.find((f) => fileNameKey(f.name) === key);
+  return hit?.path ?? "";
+}
+
+async function onBrowserDownloadImported(payload: {
+  filePath: string;
+  size?: number;
+  bookName?: string;
+}) {
+  // 同一本书的新版本：复用「替换文件」——阅读数据（进度/书签/高亮）迁移，正开着自动切新文件
+  const oldPath = findFileListPathByBookName(payload.bookName ?? "");
+  if (oldPath) {
+    await replaceFileInList(oldPath, payload.filePath, payload.size ?? 0);
+    return;
+  }
+  // 首次下载：导入并把条目名设为书籍名（此后每次下载按书名替换，不堆条目）
+  await importPathsIntoFileList([payload.filePath]);
+  const bookName = payload.bookName?.trim();
+  if (bookName) {
+    onRenameFileName({ oldPath: payload.filePath, newName: bookName });
+  }
 }
 
 const footerPathCaption = computed(() => {
@@ -4547,6 +4586,7 @@ useAppShellThemeWatch({
     <AppCaptchaHost />
     <AppLoadingHost />
     <AppToastHost />
+    <AppBookSourceBrowserDownloadHost @download-imported="onBrowserDownloadImported" />
     <AiSmartFormatProgressModal
       v-model="aiSmartFormatProgressOpen"
       :current="aiSmartFormatProgressCurrent"

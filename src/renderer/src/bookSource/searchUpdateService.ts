@@ -1,21 +1,14 @@
-import type { BookSourceRecord, SearchBookItem } from "@shared/bookSource/types";
+import type { BookChapter, BookSourceRecord } from "@shared/bookSource/types";
 import {
-  isBetterCandidate,
-  isNewerThanBaseline,
-  parseSearchUpdateTitle,
-  titleMatchesBookName,
-  type SearchUpdateTitleInfo,
-} from "@shared/bookSource/searchUpdateParse";
-import {
+  bookshelfAsBook,
   bookshelfBookKey,
+  isManualBookshelfBook,
   loadFindBookBookshelf,
   saveFindBookBookshelf,
   updateFindBookBookshelfBookInfo,
   type BookshelfBook,
+  type BookshelfBookInfoPatch,
 } from "./findBookBookshelf";
-
-/** 单源搜索收集超时兜底（正常单源搜索数秒内完成） */
-const SEARCH_ONCE_TIMEOUT_MS = 60_000;
 
 function sourceHasSearchUpdate(source: BookSourceRecord | null): boolean {
   return Boolean(source && (source as { searchUpdate?: unknown }).searchUpdate);
@@ -34,39 +27,28 @@ export async function isSearchUpdateSource(
   }
 }
 
-/**
- * 单源搜索一次并收集全部结果。
- * 走书源 searchUrl 规则（用户可自定义，如附加板块参数），key 替换 {{key}}。
- * result 事件 items 为全量快照，done 时 resolve；超时兜底防悬挂。
- */
-export async function searchOnceForUpdate(
-  key: string,
-  origin: string,
-): Promise<SearchBookItem[]> {
-  const k = key.trim();
-  if (!k) return [];
-  const res = await window.colorTxt.bookSourceSearch(k, {
-    sourceUrls: [origin.trim()],
-  });
-  const searchId = res.searchId;
-  if (!searchId) return [];
-  return await new Promise((resolve) => {
-    let items: SearchBookItem[] = [];
-    let settled = false;
-    const finish = (v: SearchBookItem[]) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      unsub();
-      resolve(v);
-    };
-    const unsub = window.colorTxt.onBookSourceSearchEvent((ev) => {
-      if (ev.searchId !== searchId) return;
-      if (ev.type === "result") items = ev.items;
-      else if (ev.type === "done") finish(items);
-    });
-    const timer = setTimeout(() => finish(items), SEARCH_ONCE_TIMEOUT_MS);
-  });
+/** 取第一个启用「搜索更新」的书源（书架手动添加书籍用） */
+export async function findFirstSearchUpdateSource(): Promise<{
+  url: string;
+  name: string;
+} | null> {
+  try {
+    const list = await window.colorTxt.bookSourceList();
+    for (const it of list) {
+      if (!it.enabled) continue;
+      try {
+        const rec = await window.colorTxt.bookSourceGet(it.bookSourceUrl);
+        if (sourceHasSearchUpdate(rec)) {
+          return { url: it.bookSourceUrl, name: it.bookSourceName };
+        }
+      } catch {
+        /* 单个书源读取失败跳过 */
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  return null;
 }
 
 /** 设置书架项「有更新」标记（无变化返回 null；返回最新书架数组供 applyBooks） */
@@ -91,35 +73,112 @@ export function setFindBookBookshelfHasUpdate(
   return next;
 }
 
+/** searchUpdate 书源章节（版本帖）用应用内书源浏览器打开；成功后清除书架「有更新」角标 */
+export async function openChapterPostInBrowser(
+  origin: string | undefined,
+  chapterUrl: string | undefined,
+  bookUrl: string | undefined,
+  bookName?: string,
+): Promise<boolean> {
+  // 剥 ,{"webView": ...} option，浏览器只要纯帖子 URL
+  const url = (chapterUrl ?? "").split(/,\s*\{/)[0]?.trim() ?? "";
+  if (!origin?.trim() || !url) return false;
+  let opened = false;
+  try {
+    const res = await window.colorTxt.bookSourceBrowserOpen({
+      url,
+      bookName: bookName?.trim() || undefined,
+    });
+    opened = Boolean(res?.ok);
+  } catch {
+    opened = false;
+  }
+  if (!opened) return false;
+  const key = bookUrl?.trim();
+  if (key) setFindBookBookshelfHasUpdate(key, origin.trim(), false);
+  return true;
+}
+
 function formatSearchUpdateLogHead(book: BookshelfBook): string {
   return `「${book.name}」${book.originName ? ` · ${book.originName}` : ""}`;
 }
 
-/** 结果里选出最优帖：标题须包含书名；完结优先、章节数次之 */
-function pickBestResult(
-  items: readonly SearchBookItem[],
+/** 章节 tag 里的发帖时间（如「2026-9-25 13:33」）→ 时间戳；解析失败返回 0 */
+export function parsePostTimeFromTag(tag: string | undefined): number {
+  const m = (tag ?? "")
+    .trim()
+    .match(/(\d{4})-(\d{1,2})-(\d{1,2})[ T](\d{1,2}):(\d{2})/);
+  if (!m) return 0;
+  const t = new Date(
+    Number(m[1]),
+    Number(m[2]) - 1,
+    Number(m[3]),
+    Number(m[4]),
+    Number(m[5]),
+  ).getTime();
+  return Number.isFinite(t) ? t : 0;
+}
+
+/** 书源 searchUrl 模板 → 该书的目录页 URL（{{key}} = 书名 URL 编码） */
+export function searchUrlAsTocUrl(
+  searchUrl: string,
   bookName: string,
-): { info: SearchUpdateTitleInfo; bookUrl: string; title: string } | null {
-  let best: { info: SearchUpdateTitleInfo; bookUrl: string; title: string } | null =
-    null;
-  for (const it of items) {
-    // lastChapter = 帖子完整标题（书源 ruleSearch.lastChapter 传出）；缺省时用 name 兜底
-    const fullTitle = (it.lastChapter ?? "").trim();
-    const candidateTitle = fullTitle || (it.name ?? "").trim();
-    if (!candidateTitle) continue;
-    if (
-      !titleMatchesBookName(candidateTitle, bookName) &&
-      !titleMatchesBookName(fullTitle, bookName)
-    ) {
-      continue;
+): string {
+  return searchUrl
+    .trim()
+    .replace(/\{\{key\}\}/g, encodeURIComponent(bookName.trim()));
+}
+
+/** searchUpdate 书源「阅读」入口：内置浏览器打开该书搜索结果页（章节=单帖无翻章语义，手动看结果） */
+export async function openSearchResultInBrowser(
+  origin: string | undefined,
+  bookName: string,
+  bookUrl?: string | undefined,
+): Promise<boolean> {
+  const sourceUrl = origin?.trim();
+  const name = bookName.trim();
+  if (!sourceUrl || !name) return false;
+  try {
+    const source = await window.colorTxt.bookSourceGet(sourceUrl);
+    const searchUrl = source?.searchUrl?.trim();
+    if (!searchUrl) return false;
+    // searchUrl 常为相对路径（如 search.php?...），相对书源/帖子 URL 补全 host
+    const raw = searchUrlAsTocUrl(searchUrl, name);
+    let full = raw;
+    try {
+      full = new URL(raw, bookUrl?.trim() || sourceUrl).toString();
+    } catch {
+      /* base 无效则原样使用 */
     }
-    const info = parseSearchUpdateTitle(candidateTitle);
-    if (info.chapterNum <= 0) continue;
-    if (!best || isBetterCandidate(info, best.info)) {
-      best = { info, bookUrl: it.bookUrl, title: candidateTitle };
-    }
+    const res = await window.colorTxt.bookSourceBrowserOpen({
+      url: full,
+      bookName: name,
+    });
+    return Boolean(res?.ok);
+  } catch {
+    return false;
   }
-  return best;
+}
+
+/**
+ * 拉取书的「版本帖目录」：书源 searchUrl（发布时间倒序 + 板块限定）当 tocUrl，
+ * 搜索结果每帖 = 一章，第 1 章 = 最新帖（tag = 发帖时间）。
+ */
+async function fetchSearchUpdateChapters(
+  book: BookshelfBook,
+  searchUrl: string,
+): Promise<{ chapters: BookChapter[]; message: string }> {
+  const res = await window.colorTxt.bookSourceGetChapterList({
+    bookSourceUrl: book.origin,
+    book: {
+      ...bookshelfAsBook(book),
+      tocUrl: searchUrlAsTocUrl(searchUrl, book.name),
+    },
+  });
+  return {
+    chapters: (res.chapters ?? []).filter((ch) => !ch.isVolume),
+    message: res.message?.trim() ?? "",
+  };
 }
 
 export type SearchUpdateHooks = {
@@ -128,7 +187,11 @@ export type SearchUpdateHooks = {
   onBooksChanged?: (books: BookshelfBook[]) => void;
 };
 
-/** 单书「搜索更新」：搜书名 → 标题解析（完结优先/章节数）→ 与基线比较 → 写回 */
+/**
+ * 单书「搜索更新」：搜索结果当目录（发布时间倒序，每帖一章），
+ * 第 1 章（最新帖）发帖时间晚于基线 latestPostTime 即有更新；
+ * 无基线（首检）只建基线不报更新。
+ */
 export async function runSearchUpdateForBook(
   book: BookshelfBook,
   hooks: SearchUpdateHooks,
@@ -137,56 +200,88 @@ export async function runSearchUpdateForBook(
   if (book.canUpdate === false) return false;
   hooks.setUpdating(key, true);
   try {
-    const items = await searchOnceForUpdate(book.name, book.origin);
-    if (!items.length) {
+    const source = await window.colorTxt.bookSourceGet(book.origin);
+    const searchUrl = source?.searchUrl?.trim() ?? "";
+    if (!searchUrl) {
       hooks.appendLog(
-        `${formatSearchUpdateLogHead(book)}\n搜索 0 条结果（可能登录态失效，请到书源重新登录）`,
+        `${formatSearchUpdateLogHead(book)}\n书源未配置 searchUrl，无法检查更新`,
       );
       return false;
     }
 
-    const best = pickBestResult(items, book.name.trim());
-    if (!best) {
+    const { chapters, message } = await fetchSearchUpdateChapters(
+      book,
+      searchUrl,
+    );
+    if (!chapters.length) {
       hooks.appendLog(
-        `${formatSearchUpdateLogHead(book)}\n搜索 ${items.length} 条结果，但无标题包含「${book.name}」的帖子`,
+        `${formatSearchUpdateLogHead(book)}\n搜索 0 条结果（可能登录态失效，请到书源重新登录）${
+          message ? `\n${message}` : ""
+        }`,
       );
       return false;
     }
 
-    // 基线：优先已存 chapterNum；老数据从当前帖标题（lastChapter）解析
-    let base: SearchUpdateTitleInfo | null = null;
-    if (book.chapterNum && book.chapterNum > 0) {
-      base = { chapterNum: book.chapterNum, finished: book.finished === true };
-    } else {
-      const baseTitle = (book.lastChapter ?? "").trim();
-      if (baseTitle) {
-        const info = parseSearchUpdateTitle(baseTitle);
-        if (info.chapterNum > 0) base = info;
-      }
+    const latest = chapters[0];
+    const latestTime = parsePostTimeFromTag(latest.tag);
+    const baseTime = book.latestPostTime ?? 0;
+    // 每次都刷新目录缓存；手动添加的书用首条结果回填真实帖子 URL
+    const patch: BookshelfBookInfoPatch = {
+      chapters,
+      ...(isManualBookshelfBook(book) && latest.url?.trim()
+        ? { bookUrl: latest.url.trim() }
+        : {}),
+    };
+    const latestDesc = `${latest.title?.trim() || "（无标题）"}（${latest.tag ?? "无时间"}）`;
+
+    if (latestTime <= 0) {
+      // 发帖时间解析失败：只刷新目录缓存，不动基线、不报更新
+      const next = updateFindBookBookshelfBookInfo(
+        book.bookUrl,
+        book.origin,
+        patch,
+      );
+      if (next) hooks.onBooksChanged?.(next);
+      hooks.appendLog(
+        `${formatSearchUpdateLogHead(book)}\n无法解析最新帖发帖时间，已刷新目录`,
+      );
+      return false;
     }
 
-    if (!base || isNewerThanBaseline(best.info, base)) {
-      // 首检（无基线）只写基线不报更新；有基线且候选更优则报更新
+    if (baseTime <= 0) {
+      // 首检（含老数据无 latestPostTime）：建立基线，不报更新
       const next = updateFindBookBookshelfBookInfo(book.bookUrl, book.origin, {
-        lastChapter: best.title,
-        bookUrl: best.bookUrl,
-        chapterNum: best.info.chapterNum,
-        finished: best.info.finished,
-        ...(base ? { hasUpdate: true } : {}),
+        ...patch,
+        latestPostTime: latestTime,
       });
       if (next) hooks.onBooksChanged?.(next);
+      hooks.appendLog(
+        `${formatSearchUpdateLogHead(book)}\n已建立基线：${latestDesc}`,
+      );
       return true;
     }
 
-    // 无更新：基线字段缺失时补写（hasUpdate 不动）
-    if (!book.chapterNum) {
+    if (latestTime > baseTime) {
       const next = updateFindBookBookshelfBookInfo(book.bookUrl, book.origin, {
-        chapterNum: best.info.chapterNum,
-        finished: best.info.finished,
+        ...patch,
+        latestPostTime: latestTime,
+        hasUpdate: true,
       });
       if (next) hooks.onBooksChanged?.(next);
+      hooks.appendLog(
+        `${formatSearchUpdateLogHead(book)}\n发现新帖：${latestDesc}`,
+      );
+      return true;
     }
-    return false;
+
+    // 无更新：基线不动；检查完成无新帖不算失败（避免误报「更新失败」）
+    const next = updateFindBookBookshelfBookInfo(
+      book.bookUrl,
+      book.origin,
+      patch,
+    );
+    if (next) hooks.onBooksChanged?.(next);
+    return true;
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     hooks.appendLog(`${formatSearchUpdateLogHead(book)}\n搜索更新异常：${msg}`);

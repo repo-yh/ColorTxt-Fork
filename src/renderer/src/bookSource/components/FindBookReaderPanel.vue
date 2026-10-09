@@ -54,6 +54,10 @@ import { useFindBookBookshelf } from "../composables/useFindBookBookshelf";
 import {
   updateFindBookBookshelfBookInfo,
 } from "../findBookBookshelf";
+import {
+  isSearchUpdateSource,
+  openChapterPostInBrowser,
+} from "../searchUpdateService";
 import { useFindBookReaderSettings } from "../composables/useFindBookReaderSettings";
 import { useFindBookSettings } from "../composables/useFindBookSettings";
 import { useFindBookReaderShortcuts } from "../composables/useFindBookReaderShortcuts";
@@ -991,8 +995,20 @@ function onFindBookViewportEndLineChange(line: number) {
   syncFooterLineCountFromReader();
 }
 
-function onChapterClick(index: number) {
+async function onChapterClick(index: number) {
   if (voiceRead.isVoiceReadNavigationBlocked.value) return;
+  // searchUpdate 书源：章节=版本帖，阅读窗口纯文本丢附件 → 浏览器打开帖子，不加载正文
+  const ch = displayChapters.value[index];
+  if (ch && (await isSearchUpdateSource(props.item.origin?.trim()))) {
+    const ok = await openChapterPostInBrowser(
+      props.item.origin?.trim(),
+      ch.url,
+      props.detail.bookUrl?.trim() || props.item.bookUrl?.trim(),
+      props.detail.name?.trim() || props.item.name?.trim(),
+    );
+    if (!ok) appToast("打开浏览器失败", { kind: "warning" });
+    return;
+  }
   if (index === currentDisplayIndex.value && !loading.value && !chapterLoading.value)
     return;
   void loadChapterAtDisplayIndex(index);

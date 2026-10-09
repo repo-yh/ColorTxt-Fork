@@ -40,6 +40,10 @@ import {
 } from "./checkSourceService";
 import { openBrowserLogin } from "./engine/jsExtensions";
 import {
+  downloadBookSourceBrowserFile,
+  openBookSourceBrowserWindow,
+} from "./engine/bookSourceBrowser";
+import {
   getLoginUiRows,
   runLoginUiButton,
   runSourceLogin,
@@ -93,6 +97,37 @@ export function registerBookSourceIpcHandlers(): void {
   ipcMain.handle(BOOK_SOURCE_IPC.get, (_e, url: unknown) => {
     if (typeof url !== "string") return null;
     return getBookSource(url);
+  });
+
+  ipcMain.handle(BOOK_SOURCE_IPC.browserOpen, (_e, payload: unknown) => {
+    const p = (payload ?? {}) as {
+      url?: unknown;
+      title?: unknown;
+      bookName?: unknown;
+    };
+    const url = typeof p.url === "string" ? p.url.trim() : "";
+    const title =
+      typeof p.title === "string" && p.title.trim() ? p.title.trim() : undefined;
+    const bookName =
+      typeof p.bookName === "string" && p.bookName.trim()
+        ? p.bookName.trim()
+        : undefined;
+    return openBookSourceBrowserWindow(url, title, bookName);
+  });
+
+  ipcMain.handle(BOOK_SOURCE_IPC.browserDownload, (_e, payload: unknown) => {
+    const p = (payload ?? {}) as {
+      url?: unknown;
+      filename?: unknown;
+      referer?: unknown;
+      outputDir?: unknown;
+    };
+    return downloadBookSourceBrowserFile({
+      url: typeof p.url === "string" ? p.url.trim() : "",
+      filename: typeof p.filename === "string" ? p.filename : undefined,
+      referer: typeof p.referer === "string" ? p.referer : undefined,
+      outputDir: typeof p.outputDir === "string" ? p.outputDir.trim() : "",
+    });
   });
 
   ipcMain.handle(BOOK_SOURCE_IPC.save, (_e, source: unknown) => {

@@ -4,6 +4,7 @@ import {
   headersToLoadUrlExtraHeaders,
   resolveSourceRequestHeaders,
 } from "./sourceRequestHeaders";
+import { getBookSourceNetSession } from "./chromiumNetFetch";
 import { getWebViewUserAgent } from "./bookSourceUserAgent";
 import {
   cookieHeaderForUrl,
@@ -94,7 +95,7 @@ export function stripWebJsRule(rule: string): string {
   return rule.replace(/^@webjs:\s*/i, "").trim();
 }
 
-async function persistWebViewCookies(
+export async function persistWebViewCookies(
   webContents: Electron.WebContents,
   pageUrl: string,
 ): Promise<void> {
@@ -111,7 +112,7 @@ async function persistWebViewCookies(
 }
 
 /** 清掉 session 里该可注册域的全部 Cookie（种入 jar 前保证状态确定） */
-async function clearSessionDomainCookies(
+export async function clearSessionDomainCookies(
   webContents: Electron.WebContents,
   pageUrl: string,
 ): Promise<void> {
@@ -126,7 +127,7 @@ async function clearSessionDomainCookies(
 }
 
 /** 将 Cookie 头写入 Electron session，供页面脚本/AJAX 使用 */
-async function seedSessionCookies(
+export async function seedSessionCookies(
   webContents: Electron.WebContents,
   pageUrl: string,
   header: string,
@@ -253,6 +254,10 @@ export async function runBackstageWebView(
     headers["user-agent"] ??
     getWebViewUserAgent();
 
+  // 后台 WebView 与引擎 undici 对齐：走找书设置的全局代理
+  //（defaultSession 只跟系统代理，直连被墙站点会 ERR_CONNECTION_REFUSED）
+  const sesEntry = getBookSourceNetSession();
+
   const win = new BrowserWindow({
     show: false,
     width: 1280,
@@ -264,12 +269,14 @@ export async function runBackstageWebView(
       // 对齐 Legado blockNetworkImage：挡图片，减轻多余 HTTPS 握手失败噪音
       javascript: true,
       images: false,
+      partition: sesEntry.partition,
     },
   });
   registerBackstageWindow(win);
 
   const run = async (): Promise<string> => {
     const wc = win.webContents;
+    await sesEntry.proxyReady;
     wc.setUserAgent(userAgent);
     attachTrustAnyCertificate(wc);
     if (pageUrl.startsWith("http")) {

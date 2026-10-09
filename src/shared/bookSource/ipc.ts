@@ -85,6 +85,12 @@ export const BOOK_SOURCE_IPC = {
   getHttpProxy: "bookSource:getHttpProxy",
   /** 用指定代理（或直连）探测 URL 连通性 */
   testHttpProxy: "bookSource:testHttpProxy",
+  /** 打开书源浏览器窗口（带书源 Cookie 登录态 + 找书代理，接管附件下载） */
+  browserOpen: "bookSource:browserOpen",
+  /** 主进程 → 渲染进程：书源浏览器附件下载已拦截，转交找书下载模块 */
+  browserDownloadEvent: "bookSource:browserDownloadEvent",
+  /** 渲染进程 → 主进程：书源浏览器拦截的下载 URL 走引擎网络栈下载到找书目录 */
+  browserDownload: "bookSource:browserDownload",
 } as const;
 
 export type BookSourceCheckConfig = {
@@ -159,6 +165,18 @@ export type BookSourceLoginResult = {
   ok: boolean;
   message?: string;
   logs?: string[];
+};
+
+/** 书源浏览器 will-download 拦截事件：下载 URL 转交找书下载模块 */
+export type BookSourceBrowserDownloadEvent = {
+  /** 触发下载的 URL（Discuz 附件直链） */
+  url: string;
+  /** 建议文件名（Electron 已解析 Content-Disposition） */
+  filename?: string;
+  /** 发起下载的页面 URL（作 Referer，防站点防盗链） */
+  referer?: string;
+  /** 打开浏览器时携带的书架书籍名（落地按书名匹配替换列表条目） */
+  bookName?: string;
 };
 
 export type BookSourcePayActionPayload = {
@@ -301,6 +319,23 @@ export type BookSourceIpcApi = {
     logs?: string[];
     message?: string;
   }>;
+  /** 书源浏览器窗口：打开 URL（登录态/代理/下载接管由主进程处理） */
+  bookSourceBrowserOpen: (payload: {
+    url: string;
+    title?: string;
+    /** 书架书籍名：窗口名展示 + 下载事件随行（落地按书名匹配） */
+    bookName?: string;
+  }) => Promise<{ ok: boolean; message?: string }>;
+  /** 书源浏览器下载：主进程用引擎网络栈（CookieJar+代理+Referer）下载到 outputDir */
+  bookSourceBrowserDownload: (payload: {
+    url: string;
+    filename?: string;
+    referer?: string;
+    outputDir: string;
+  }) => Promise<{ ok: boolean; filePath?: string; size?: number; message?: string }>;
+  onBookSourceBrowserDownloadEvent: (
+    cb: (ev: BookSourceBrowserDownloadEvent) => void,
+  ) => () => void;
   bookSourceChapterCacheStatus: (payload: {
     name: string;
     bookUrl: string;

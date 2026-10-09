@@ -33,8 +33,10 @@ import { useChapterCacheMarks } from "../composables/useChapterCacheMarks";
 import { confirmClearBookChapterCache } from "../services/clearBookChapterCache";
 import { sortContentChaptersDisplay } from "../sortContentChaptersDisplay";
 import {
+  bookshelfAsBook,
   bookshelfBookKey,
   updateFindBookBookshelfBookInfo,
+  type BookshelfBook,
 } from "../findBookBookshelf";
 import { useAnchoredAppShellMenu } from "../../composables/useAnchoredAppShellMenu";
 import {
@@ -51,7 +53,12 @@ import {
   parseDetailAttachments,
   type DetailAttachment,
 } from "../bookDetailAttachments";
-import { setFindBookBookshelfHasUpdate } from "../searchUpdateService";
+import {
+  isSearchUpdateSource,
+  openChapterPostInBrowser,
+  openSearchResultInBrowser,
+  setFindBookBookshelfHasUpdate,
+} from "../searchUpdateService";
 
 /** 与 .bookDetailChapterItem 固定行高一致（外层滚动虚拟列表） */
 const CHAPTER_ROW_STRIDE = 40;
@@ -695,6 +702,27 @@ const showDefaultCover = computed(
   () => !displayCover.value || coverFailed.value,
 );
 
+/** searchUpdate 书源：详情+目录直接用书架缓存（加入书架时保存，「检查更新」刷新），打开不发请求 */
+async function loadDetail(item: SearchBookItem) {
+  if (await isSearchUpdateSource(item.origin?.trim())) {
+    const shelf = item as BookshelfBook;
+    if (shelf.chapters?.length) {
+      chapters.value = shelf.chapters;
+      const book = bookshelfAsBook(shelf);
+      // 对齐网络加载：以目录最新章标题覆盖 lastChapter
+      const latestTitle = chapters.value
+        .find((ch) => !ch.isVolume)
+        ?.title?.trim();
+      detail.value = latestTitle
+        ? { ...book, lastChapter: latestTitle }
+        : book;
+      return;
+    }
+    // 无缓存（手动添加未首检等）→ 走网络加载兜底
+  }
+  await load(item);
+}
+
 watch(
   () => [modelValue.value, props.item?.id] as const,
   ([open, id]) => {
@@ -707,7 +735,7 @@ watch(
     }
     coverFailed.value = false;
     chapterSortDesc.value = false;
-    void load(props.item);
+    void loadDetail(props.item);
   },
 );
 
@@ -802,10 +830,39 @@ watch(downloading, (v, was) => {
   }
 });
 
-function onReadChapter(displayIndex: number) {
+async function onReadChapter(displayIndex: number) {
   if (loading.value || !detail.value || !chapters.value.length) return;
   const ch = displayChapters.value[displayIndex];
   if (!ch) return;
+  // searchUpdate 书源：章节=版本帖，阅读窗口纯文本丢附件 → 浏览器打开帖子，不进阅读器
+  if (await isSearchUpdateSource(props.item?.origin?.trim())) {
+    const ok = await openChapterPostInBrowser(
+      props.item?.origin?.trim(),
+      ch.url,
+      props.item?.bookUrl?.trim() || detail.value.bookUrl?.trim(),
+      detail.value.name?.trim() || props.item?.name?.trim(),
+    );
+    if (!ok) {
+      appToast("打开浏览器失败", { kind: "warning" });
+      return;
+    }
+    // 对齐阅读器打开章节：同步书架「最后阅读」到点击的帖子
+    const item = props.item;
+    if (item && inBookshelf.value) {
+      const contentIndex = contentChapterList.value.findIndex(
+        (c) => c.url === ch.url,
+      );
+      if (contentIndex >= 0) {
+        updateReadProgress(
+          item.bookUrl,
+          item.origin,
+          contentIndex,
+          ch.title?.trim(),
+        );
+      }
+    }
+    return;
+  }
   const contentIndex = contentChapterList.value.findIndex((c) => c.url === ch.url);
   emit("readChapter", {
     index: contentIndex >= 0 ? contentIndex : displayIndex,
@@ -823,10 +880,20 @@ function resolveStartContentIndex(): number {
   return resolveFirstChapterContentIndex(list);
 }
 
-function onStartOrContinueReading() {
+async function onStartOrContinueReading() {
   if (loading.value || !detail.value || !contentChapterList.value.length) return;
-  const idx = resolveStartContentIndex();
   const item = props.item;
+  // searchUpdate 书源：章节=单个帖子、无翻章语义 → 「阅读」改开该书搜索结果页，手动看结果
+  if (await isSearchUpdateSource(item?.origin?.trim())) {
+    const ok = await openSearchResultInBrowser(
+      item?.origin?.trim(),
+      detail.value?.name ?? item?.name ?? "",
+      item?.bookUrl?.trim() || detail.value?.bookUrl?.trim(),
+    );
+    if (!ok) appToast("打开浏览器失败", { kind: "warning" });
+    return;
+  }
+  const idx = resolveStartContentIndex();
   const ch = contentChapterList.value[idx];
   if (item && inBookshelf.value && ch?.title?.trim()) {
     updateReadProgress(item.bookUrl, item.origin, idx, ch.title.trim());

@@ -3,10 +3,12 @@ import type { SearchBookItem } from "@shared/bookSource/types";
 import type { CategoryEditorRow } from "../../constants/fileCategories";
 import {
   addToFindBookBookshelf,
+  addManualToFindBookBookshelf,
   applyBookshelfCategoryCatalogEdit,
   bookshelfBookKey,
   loadFindBookBookshelf,
   removeFromFindBookBookshelf,
+  renameFindBookBookshelfBook,
   saveFindBookBookshelf,
   setFindBookBookshelfCanUpdate,
   setFindBookBookshelfCategories,
@@ -53,6 +55,25 @@ export function useFindBookBookshelf() {
 
   function add(item: SearchBookItem, options?: BookshelfAddOptions) {
     booksRef.value = addToFindBookBookshelf(item, options);
+  }
+
+  /** 手动添加书籍（仅书名 + 书源）；返回 null 表示同书源同名已存在 */
+  function addManual(
+    name: string,
+    origin: string,
+    originName: string,
+  ): BookshelfBook | null {
+    const result = addManualToFindBookBookshelf(name, origin, originName);
+    booksRef.value = result.books;
+    return result.added ? result.book : null;
+  }
+
+  /** 书架改名：只改 name，不动 lastChapter / 章节基线 */
+  function rename(bookUrl: string, origin: string, name: string): boolean {
+    const next = renameFindBookBookshelfBook(bookUrl, origin, name);
+    if (!next) return false;
+    booksRef.value = next;
+    return true;
   }
 
   function remove(bookUrl: string, origin: string) {
@@ -131,6 +152,8 @@ export function useFindBookBookshelf() {
     findBookshelfBook,
     isInBookshelf,
     add,
+    addManual,
+    rename,
     remove,
     toggle,
     updateReadProgress,

@@ -23,10 +23,8 @@ export type BookshelfBook = Book & {
   lastReadAt?: number;
   /** 是否允许书架更新；缺省或为 true 表示允许 */
   canUpdate?: boolean;
-  /** 当前章节数基线（从帖子标题解析；searchUpdate 书源用） */
-  chapterNum?: number;
-  /** 当前帖子是否完结版（完结优先级高于章节数） */
-  finished?: boolean;
+  /** 检查更新基线：最新帖发帖时间戳（searchUpdate 书源用；缺省 = 未建基线） */
+  latestPostTime?: number;
   /** 搜索更新检测发现新附件更新 */
   hasUpdate?: boolean;
   /** 章节目录缓存（打开阅读器时复用） */
@@ -68,8 +66,7 @@ export type BookshelfBookInfoPatch = {
   bookUrl?: string;
   tocUrl?: string;
   chapters?: BookChapter[];
-  chapterNum?: number;
-  finished?: boolean;
+  latestPostTime?: number;
   hasUpdate?: boolean;
   /** 详情 @put / headers 等（对齐 Legado Book.variable，正文规则 java.get 依赖） */
   variable?: Record<string, string>;
@@ -175,6 +172,68 @@ export function addToFindBookBookshelf(
   return next;
 }
 
+/** 手动添加书籍的合成 bookUrl 前缀（检查更新命中后自动替换为真实帖子 URL） */
+export const MANUAL_BOOK_URL_PREFIX = "manual://";
+
+export function isManualBookshelfBook(book: BookshelfBook): boolean {
+  return book.bookUrl.startsWith(MANUAL_BOOK_URL_PREFIX);
+}
+
+/**
+ * 手动添加书籍：仅书名 + 书源，无 bookUrl / 章节基线。
+ * bookUrl 用合成值避免同书源空 key 互相覆盖（key = origin\0bookUrl）；
+ * 同书源同名已存在时不重复添加，返回已存在的那本。
+ */
+export function addManualToFindBookBookshelf(
+  name: string,
+  origin: string,
+  originName: string,
+): { books: BookshelfBook[]; book: BookshelfBook; added: boolean } {
+  const trimmed = name.trim();
+  const prev = loadFindBookBookshelf();
+  const existing = prev.find(
+    (b) => b.origin.trim() === origin.trim() && b.name === trimmed,
+  );
+  if (existing) return { books: prev, book: existing, added: false };
+  const book: BookshelfBook = {
+    name: trimmed,
+    author: "",
+    intro: "",
+    coverUrl: "",
+    kind: "",
+    tocUrl: "",
+    bookUrl: `${MANUAL_BOOK_URL_PREFIX}${encodeURIComponent(trimmed)}`,
+    id: `manual-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    origin: origin.trim(),
+    originName: originName.trim(),
+    savedAt: Date.now(),
+  };
+  const next = [book, ...prev];
+  saveFindBookBookshelf(next);
+  return { books: next, book, added: true };
+}
+
+/** 书架改名：仅改显示名与搜索 key，不动 lastChapter / 章节基线（key 为 bookUrl+origin） */
+export function renameFindBookBookshelfBook(
+  bookUrl: string,
+  origin: string,
+  name: string,
+): BookshelfBook[] | null {
+  const key = bookshelfBookKey(bookUrl, origin);
+  const trimmed = name.trim();
+  if (!trimmed) return null;
+  let changed = false;
+  const next = loadFindBookBookshelf().map((b) => {
+    if (bookshelfBookKey(b.bookUrl, b.origin) !== key) return b;
+    if (b.name === trimmed) return b;
+    changed = true;
+    return { ...b, name: trimmed };
+  });
+  if (!changed) return null;
+  saveFindBookBookshelf(next);
+  return next;
+}
+
 /** 解析封面成功后回写书架（更新代理 URL 与原始 URL） */
 export function updateFindBookBookshelfCover(
   bookUrl: string,
@@ -225,8 +284,9 @@ export function updateFindBookBookshelfBookInfo(
       // 指向新帖后旧目录缓存作废（新帖会重新拉取）
       delete merged.chapters;
     }
-    if (patch.chapterNum !== undefined) merged.chapterNum = patch.chapterNum;
-    if (patch.finished !== undefined) merged.finished = patch.finished;
+    if (patch.latestPostTime !== undefined) {
+      merged.latestPostTime = patch.latestPostTime;
+    }
     if (patch.hasUpdate !== undefined) {
       merged.hasUpdate = patch.hasUpdate;
       // 置有更新时附件已变，目录缓存一并作废

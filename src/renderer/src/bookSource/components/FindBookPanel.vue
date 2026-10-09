@@ -51,6 +51,10 @@ import { appLog } from "../../services/appDialog";
 import { appToast } from "../../services/appToast";
 import type { BookshelfBook } from "../findBookBookshelf";
 import { bookshelfAsBook } from "../findBookBookshelf";
+import {
+  isSearchUpdateSource,
+  openChapterPostInBrowser,
+} from "../searchUpdateService";
 import type { ReplaceRule } from "@shared/bookSource/replaceRule";
 import {
   hasCachedBookshelfToc,
@@ -305,6 +309,11 @@ const bookshelfManaging = ref(false);
 function onBookshelfUpdateAll() {
   closeBookshelfToolbarMoreMenu();
   void bookshelfPanelRef.value?.updateAll();
+}
+
+function onBookshelfManualAdd() {
+  closeBookshelfToolbarMoreMenu();
+  void bookshelfPanelRef.value?.manualAdd();
 }
 
 function onBookshelfManage() {
@@ -858,6 +867,17 @@ function onOpenBook(item: SearchBookItem) {
 }
 
 async function onReadBookshelfBook(item: SearchBookItem) {
+  // searchUpdate 书源：帖子即章节，正文/附件在网页 → 内置浏览器打开，不进阅读器
+  if (await isSearchUpdateSource(item.origin?.trim())) {
+    const ok = await openChapterPostInBrowser(
+      item.origin?.trim(),
+      item.bookUrl,
+      item.bookUrl,
+      item.name?.trim(),
+    );
+    if (!ok) appToast("打开浏览器失败", { kind: "warning" });
+    return;
+  }
   const prev = selectedBook.value;
   if (prev && bookshelfBookIdentity(prev) !== bookshelfBookIdentity(item)) {
     resetReaderLayer();
@@ -1622,6 +1642,14 @@ function onBack() {
           @click="onBookshelfUpdateAll"
         >
           <span class="appShellMenuLabel">更新书籍目录</span>
+        </button>
+        <button
+          type="button"
+          class="appShellMenuItem"
+          role="menuitem"
+          @click="onBookshelfManualAdd"
+        >
+          <span class="appShellMenuLabel">手动添加书籍</span>
         </button>
         <button
           type="button"
