@@ -193,6 +193,11 @@ function onSelectCategoryClick(e: MouseEvent) {
       aria-label="已读至最新章节"
       v-html="icons.ok"
     />
+    <span
+      v-if="props.item.hasUpdate"
+      class="findBookshelfUpdateBadge"
+      title="检查到新附件更新，点书名进详情购买下载"
+    >更新</span>
     <AppCheckbox
       v-if="managing"
       class="findBookshelfSelectCheckbox"
@@ -500,6 +505,24 @@ function onSelectCategoryClick(e: MouseEvent) {
 }
 .findBookshelfCaughtUpBadge :deep(svg path) {
   fill: currentColor;
+}
+.findBookshelfUpdateBadge {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 2;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: #e5484d;
+  color: #fff;
+  font-size: 11px;
+  line-height: 16px;
+  pointer-events: none;
+  user-select: none;
+}
+/* hover 时右上角让位给「更多」按钮，避免遮挡 */
+.findBookListItem:not(.findBookListItem--managing):hover .findBookshelfUpdateBadge {
+  visibility: hidden;
 }
 img.findBookListItemCover {
   object-fit: cover;
