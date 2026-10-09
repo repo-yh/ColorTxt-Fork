@@ -23,6 +23,12 @@ export type BookshelfBook = Book & {
   lastReadAt?: number;
   /** 是否允许书架更新；缺省或为 true 表示允许 */
   canUpdate?: boolean;
+  /** 当前章节数基线（从帖子标题解析；searchUpdate 书源用） */
+  chapterNum?: number;
+  /** 当前帖子是否完结版（完结优先级高于章节数） */
+  finished?: boolean;
+  /** 搜索更新检测发现新附件更新 */
+  hasUpdate?: boolean;
   /** 章节目录缓存（打开阅读器时复用） */
   chapters?: BookChapter[];
   /** 书架分类名（独立于主界面文件分类；缺省或空为未分类） */
@@ -62,6 +68,9 @@ export type BookshelfBookInfoPatch = {
   bookUrl?: string;
   tocUrl?: string;
   chapters?: BookChapter[];
+  chapterNum?: number;
+  finished?: boolean;
+  hasUpdate?: boolean;
   /** 详情 @put / headers 等（对齐 Legado Book.variable，正文规则 java.get 依赖） */
   variable?: Record<string, string>;
 };
@@ -213,6 +222,15 @@ export function updateFindBookBookshelfBookInfo(
     if (patch.updateTime?.trim()) merged.updateTime = patch.updateTime.trim();
     if (patch.bookUrl?.trim() && patch.bookUrl.trim() !== b.bookUrl) {
       merged.bookUrl = patch.bookUrl.trim();
+      // 指向新帖后旧目录缓存作废（新帖会重新拉取）
+      delete merged.chapters;
+    }
+    if (patch.chapterNum !== undefined) merged.chapterNum = patch.chapterNum;
+    if (patch.finished !== undefined) merged.finished = patch.finished;
+    if (patch.hasUpdate !== undefined) {
+      merged.hasUpdate = patch.hasUpdate;
+      // 置有更新时附件已变，目录缓存一并作废
+      if (patch.hasUpdate) delete merged.chapters;
     }
     if (patch.tocUrl?.trim()) merged.tocUrl = patch.tocUrl.trim();
     if (patch.variable && typeof patch.variable === "object") {
