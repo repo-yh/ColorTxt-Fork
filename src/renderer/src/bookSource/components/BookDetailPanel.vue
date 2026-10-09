@@ -47,6 +47,11 @@ import { resolveLatestChapterTitleFromToc } from "../findBookshelfDisplay";
 import type { BookSourceEditTab } from "../editBookSourceFields";
 import type { FileCategoryDefinition } from "../../constants/fileCategories";
 import { loadBookshelfCategoryCatalog } from "../findBookshelfCategory";
+import {
+  parseDetailAttachments,
+  type DetailAttachment,
+} from "../bookDetailAttachments";
+import { setFindBookBookshelfHasUpdate } from "../searchUpdateService";
 
 /** 与 .bookDetailChapterItem 固定行高一致（外层滚动虚拟列表） */
 const CHAPTER_ROW_STRIDE = 40;
@@ -254,6 +259,27 @@ const displayAuthor = computed(
 const displayIntro = computed(() =>
   formatBookIntroForDisplay(detail.value?.intro ?? props.item?.intro),
 );
+const detailAttachments = computed<DetailAttachment[]>(() =>
+  parseDetailAttachments(
+    detail.value?.variable,
+    displayItem.value?.origin ?? detail.value?.origin ?? "",
+  ),
+);
+
+async function onOpenAttachment(a: DetailAttachment) {
+  if (!a.url) return;
+  try {
+    await window.colorTxt.openExternal(a.url);
+  } catch {
+    appToast("打开浏览器失败", { kind: "warning" });
+    return;
+  }
+  const item = props.item;
+  if (item?.bookUrl?.trim() && item?.origin?.trim()) {
+    const next = setFindBookBookshelfHasUpdate(item.bookUrl, item.origin, false);
+    if (next) applyBooks(next);
+  }
+}
 const displayCover = computed(() => {
   if (detail.value?.coverUrl) return detail.value.coverUrl;
   return props.item?.coverUrl ?? "";
@@ -1037,6 +1063,20 @@ async function onDownloadOrStop() {
               </p>
               <p v-if="displayIntro" class="bookDetailIntro">{{ displayIntro }}</p>
               <p v-else class="bookDetailIntro bookDetailIntro--empty">暂无简介</p>
+              <div v-if="detailAttachments.length" class="bookDetailAttachList">
+                <span class="bookDetailAttachTitle">附件（点击打开购买页）</span>
+                <button
+                  v-for="(a, i) in detailAttachments"
+                  :key="`${a.url}-${i}`"
+                  type="button"
+                  class="link bookDetailAttachItem"
+                  :title="`${a.name} ${a.meta} — 在浏览器打开`"
+                  @click="onOpenAttachment(a)"
+                >
+                  <span class="bookDetailAttachName">{{ a.name }}</span>
+                  <span v-if="a.meta" class="bookDetailAttachMeta">{{ a.meta }}</span>
+                </button>
+              </div>
             </div>
           </div>
 
@@ -1456,6 +1496,37 @@ img.bookDetailCover--zoomable {
   font-size: 12px;
   color: var(--fg);
   white-space: pre-wrap;
+}
+.bookDetailAttachList {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+}
+.bookDetailAttachTitle {
+  font-size: 12px;
+  color: var(--muted);
+}
+.bookDetailAttachItem {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--fg) 12%, transparent);
+  text-align: left;
+}
+.bookDetailAttachItem:hover {
+  background: color-mix(in srgb, var(--fg) 22%, transparent);
+}
+.bookDetailAttachName {
+  font-size: 13px;
+  word-break: break-all;
+}
+.bookDetailAttachMeta {
+  font-size: 12px;
+  color: var(--muted);
 }
 .bookDetailChapterHint {
   margin: 0;
