@@ -7,6 +7,7 @@ import {
   type BookshelfBookInfoPatch,
 } from "../findBookBookshelf";
 import { resolveLatestChapterTitleFromToc } from "../findBookshelfDisplay";
+import { isSearchUpdateSource, runSearchUpdateForBook } from "../searchUpdateService";
 import { ipcPlain } from "../ipcPlain";
 
 const updatingKeys = ref(new Set<string>());
@@ -144,6 +145,15 @@ export function useBookshelfUpdate(onBooksChanged?: (books: BookshelfBook[]) => 
   async function updateBookOnce(book: BookshelfBook): Promise<boolean> {
     const key = bookshelfBookKey(book.bookUrl, book.origin);
     if (updatingKeys.value.has(key)) return false;
+
+    // searchUpdate 书源：检查更新走「书名模糊搜索 + 标题完结/章节数比对」（假目录站检测不到更新）
+    if (await isSearchUpdateSource(book.origin)) {
+      return runSearchUpdateForBook(book, {
+        setUpdating,
+        appendLog: appendBookshelfUpdateLog,
+        onBooksChanged,
+      });
+    }
 
     setUpdating(key, true);
     try {
