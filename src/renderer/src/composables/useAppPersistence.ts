@@ -112,7 +112,6 @@ import {
   maxFontSize,
   maxChapterMinCharCount,
   maxRecentFilesHistoryLimit,
-  defaultDragDropAction,
   minFullscreenReaderWidthPercent,
   minFontSize,
   minChapterMinCharCount,
@@ -271,7 +270,6 @@ export function useAppPersistence(deps: {
   recentFiles: Ref<RecentFileItem[]>;
   restoreSessionOnStartup: Ref<boolean>;
   recentFilesHistoryLimit: Ref<number>;
-  dragDropAction: Ref<string>;
   webDisplayEnabled: Ref<boolean>;
   chapterMinCharCount: Ref<number>;
   monacoAdvancedWrapping: Ref<boolean>;
@@ -425,7 +423,6 @@ export function useAppPersistence(deps: {
       restoreSessionOnStartup: deps.restoreSessionOnStartup.value,
       syncCurrentFile: deps.syncCurrentFile.value,
       recentFilesHistoryLimit: recentLimit(),
-      dragDropAction: deps.dragDropAction.value,
       webDisplayEnabled: deps.webDisplayEnabled.value,
       chapterMinCharCount: deps.chapterMinCharCount.value,
       monacoAdvancedWrapping: deps.monacoAdvancedWrapping.value,
@@ -1320,11 +1317,6 @@ export function useAppPersistence(deps: {
       );
     } else {
       deps.recentFilesHistoryLimit.value = defaultRecentFilesHistoryLimit;
-    }
-    if (typeof data.dragDropAction === "string") {
-      deps.dragDropAction.value = data.dragDropAction;
-    } else {
-      deps.dragDropAction.value = defaultDragDropAction;
     }
     if (typeof data.webDisplayEnabled === "boolean") {
       deps.webDisplayEnabled.value = data.webDisplayEnabled;

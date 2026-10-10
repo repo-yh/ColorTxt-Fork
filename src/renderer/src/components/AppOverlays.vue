@@ -34,9 +34,7 @@ import type { DictionarySettings } from "@shared/dictionaryTypes";
 import type { WebSearchSettings } from "@shared/webSearchTypes";
 import type { TranslationSettings } from "@shared/translationTypes";
 import ShortcutPanel from "./ShortcutPanel.vue";
-import DragDropChoiceModal from "./DragDropChoiceModal.vue";
 import type { ShortcutBindingMap } from "../services/shortcutRegistry";
-import type { DragDropAction } from "../constants/appUi";
 import type { ReaderSurfaceColorEnabled } from "../constants/readerPalette";
 import type { ReaderPalettePreset } from "../constants/readerPalettePresets";
 import { readerEbookConvertingHintText, readerBookPackUnpackingHintText } from "../constants/appUi";
@@ -48,9 +46,6 @@ const props = defineProps<{
   restoreSessionOnStartup: boolean;
   syncCurrentFile: boolean;
   recentFilesHistoryLimit: number;
-  dragDropAction: DragDropAction;
-  showDragDropChoice: boolean;
-  dragDropChoiceDetail: string;
   chapterMinCharCount: number;
   fullscreenReaderWidthPercent: number;
   fullscreenShowSystemTime: boolean;
@@ -149,7 +144,6 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   applySettings: [payload: SettingsApplyPayload];
-  dragDropChoice: [index: number];
   togglePinOtherFont: [fontName: string];
   applyChapterRules: [payload: { rules: ChapterMatchRule[] }];
   confirmAddBookmark: [];
@@ -282,17 +276,11 @@ const busyOverlayText = computed(() => {
     :default-shortcut-bindings="defaultShortcutBindings"
     @apply="emit('applyShortcutBindings', $event)"
   />
-  <DragDropChoiceModal
-    :visible="showDragDropChoice"
-    :detail="dragDropChoiceDetail"
-    @choose="(v) => emit('dragDropChoice', v)"
-  />
   <SettingsPanel
     v-model="showSettingsPanel"
     :restore-session-on-startup="restoreSessionOnStartup"
     :sync-current-file="syncCurrentFile"
     :recent-files-history-limit="recentFilesHistoryLimit"
-    :drag-drop-action="dragDropAction"
     :chapter-min-char-count="chapterMinCharCount"
     :fullscreen-reader-width-percent="fullscreenReaderWidthPercent"
     :fullscreen-show-system-time="fullscreenShowSystemTime"

@@ -12,9 +12,6 @@ import type {
 } from "@shared/characterTypes";
 import { normalizeVolcengineSpeechModePair } from "@shared/voiceReadVolcengineAudio";
 
-import type { ReaderSidebarTab } from "../constants/readerSidebarTab";
-import { VALID_SIDEBAR_TABS } from "../constants/readerSidebarTab";
-
 export type {
   CharacterBookStylePersisted,
   CharacterGender,
@@ -107,8 +104,6 @@ export type FileMetaRecord = {
   characterBookStyle?: CharacterBookStylePersisted;
   /** 本书侧栏「角色」卡片列表 */
   characterRoster?: CharacterRosterEntry[];
-  /** 本书最后一次打开时使用的侧栏标签页 */
-  sidebarTab?: ReaderSidebarTab;
   /** 本书最后一次章节检测的总章节数（文件列表展示用；0/无效不存） */
   chapterCount?: number;
 };
@@ -489,15 +484,6 @@ function normalizeRecord(item: Partial<FileMetaRecord>): FileMetaRecord | null {
       : Date.now();
   const characterBookStyle = normalizeCharacterBookStyle(item.characterBookStyle);
   const characterRoster = normalizeCharacterRoster(item.characterRoster);
-  const isValidSidebarTab = (
-    val: unknown,
-  ): val is ReaderSidebarTab => {
-    if (typeof val !== "string") return false;
-    return VALID_SIDEBAR_TABS.includes(val as ReaderSidebarTab);
-  };
-  const sidebarTab = isValidSidebarTab(item.sidebarTab)
-    ? item.sidebarTab
-    : undefined;
   const chapterCount =
     typeof item.chapterCount === "number" &&
     Number.isFinite(item.chapterCount) &&
@@ -519,7 +505,6 @@ function normalizeRecord(item: Partial<FileMetaRecord>): FileMetaRecord | null {
     updatedAt,
     ...(characterBookStyle ? { characterBookStyle } : {}),
     ...(characterRoster?.length ? { characterRoster } : {}),
-    ...(sidebarTab ? { sidebarTab } : {}),
     ...(chapterCount ? { chapterCount } : {}),
   };
 }
@@ -684,7 +669,6 @@ export function upsertFileMetaRecord(
     lastOpenedAt: prev?.lastOpenedAt,
     characterBookStyle: prev?.characterBookStyle,
     characterRoster: prev?.characterRoster,
-    sidebarTab: prev?.sidebarTab,
     chapterCount: prev?.chapterCount,
     ...nextPartial,
     path,

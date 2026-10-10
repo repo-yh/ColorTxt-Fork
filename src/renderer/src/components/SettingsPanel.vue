@@ -79,8 +79,6 @@ import {
   defaultReaderHorizontalInsetPx,
   clampReaderHorizontalInsetPx,
   defaultRecentFilesHistoryLimit,
-  defaultDragDropAction,
-  type DragDropAction,
   defaultRestoreSessionOnStartup,
   defaultSyncCurrentFile,
   defaultTxtrDelimitedMatchCrossLine,
@@ -155,7 +153,6 @@ export type SettingsApplyPayload = {
   restoreSessionOnStartup: boolean;
   syncCurrentFile: boolean;
   recentFilesHistoryLimit: number;
-  dragDropAction: DragDropAction;
   chapterMinCharCount: number;
   fullscreenReaderWidthPercent: number;
   fullscreenShowSystemTime: boolean;
@@ -211,7 +208,6 @@ const props = defineProps<{
   restoreSessionOnStartup: boolean;
   syncCurrentFile: boolean;
   recentFilesHistoryLimit: number;
-  dragDropAction: DragDropAction;
   chapterMinCharCount: number;
   fullscreenReaderWidthPercent: number;
   fullscreenShowSystemTime: boolean;
@@ -295,7 +291,6 @@ function onAddSkillClick() {
 const draftRestore = ref(true);
 const draftSyncCurrentFile = ref(false);
 const draftRecentLimit = ref(20);
-const draftDragDropAction = ref(defaultDragDropAction);
 const draftChapterMinCharCount = ref(defaultChapterMinCharCount);
 const draftFullscreenReaderWidthPercent = ref(50);
 const draftFullscreenShowSystemTime = ref(defaultFullscreenShowSystemTime);
@@ -389,7 +384,6 @@ function syncDraftFromProps() {
   draftRestore.value = props.restoreSessionOnStartup;
   draftSyncCurrentFile.value = props.syncCurrentFile;
   draftRecentLimit.value = props.recentFilesHistoryLimit;
-  draftDragDropAction.value = props.dragDropAction;
   draftChapterMinCharCount.value = props.chapterMinCharCount;
   draftFullscreenReaderWidthPercent.value = props.fullscreenReaderWidthPercent;
   draftFullscreenShowSystemTime.value = props.fullscreenShowSystemTime;
@@ -609,7 +603,6 @@ function resetGeneralDraft() {
   draftRestore.value = defaultRestoreSessionOnStartup;
   draftSyncCurrentFile.value = defaultSyncCurrentFile;
   draftRecentLimit.value = defaultRecentFilesHistoryLimit;
-  draftDragDropAction.value = defaultDragDropAction;
   draftChapterMinCharCount.value = defaultChapterMinCharCount;
   draftChapterCharCountExact.value = defaultChapterCharCountExact;
   draftEbookConvertOutputDir.value = resolveDefaultEbookConvertOutputDirSync();
@@ -857,7 +850,6 @@ async function onConfirm() {
     restoreSessionOnStartup: draftRestore.value,
     syncCurrentFile: draftSyncCurrentFile.value,
     recentFilesHistoryLimit: draftRecentLimit.value,
-    dragDropAction: draftDragDropAction.value,
     chapterMinCharCount: draftChapterMinCharCount.value,
     fullscreenReaderWidthPercent: draftFullscreenReaderWidthPercent.value,
     fullscreenShowSystemTime: draftFullscreenShowSystemTime.value,
@@ -1124,7 +1116,6 @@ async function onImportConfig(): Promise<void> {
               v-model:draft-restore="draftRestore"
               v-model:draft-sync-current-file="draftSyncCurrentFile"
               v-model:draft-recent-limit="draftRecentLimit"
-              v-model:draft-drag-drop-action="draftDragDropAction"
               v-model:draft-chapter-min-char-count="draftChapterMinCharCount"
               v-model:draft-chapter-char-count-exact="
                 draftChapterCharCountExact

@@ -181,8 +181,6 @@ import {
   cloneReaderBackgroundState,
   defaultReaderTheme,
   defaultRecentFilesHistoryLimit,
-  defaultDragDropAction,
-  type DragDropAction,
   defaultWebDisplayEnabled,
   mergeReaderPaletteColorEnabled,
   resolveEffectiveReaderPalette,
@@ -382,9 +380,6 @@ const showChapterRulePanel = ref(false);
 const showReplaceRulePanel = ref(false);
 const showReplaceFileModal = ref(false);
 const pendingReplaceOldPath = ref("");
-const showDragDropChoice = ref(false);
-const dragDropChoiceDetail = ref("");
-const dragDropChoiceResolve = ref<((v: number) => void) | null>(null);
 const showVoiceReadSpeakSettingsPanel = ref(false);
 const chapterRuleErrorText = ref("");
 const chapterRuleState = ref(getChapterMatchRules());
@@ -897,7 +892,6 @@ const restoreSessionOnStartup = ref(defaultRestoreSessionOnStartup);
 const syncCurrentFile = ref(defaultSyncCurrentFile);
 /** 最近打开文件条数上限，0 表示不记录 */
 const recentFilesHistoryLimit = ref(defaultRecentFilesHistoryLimit);
-const dragDropAction = ref<DragDropAction>(defaultDragDropAction);
 const webDisplayEnabled = ref(defaultWebDisplayEnabled);
 
 watch(webDisplayEnabled, async (enabled) => {
@@ -1444,7 +1438,6 @@ const persistence = useAppPersistence({
   recentFiles,
   restoreSessionOnStartup,
   recentFilesHistoryLimit,
-  dragDropAction,
   webDisplayEnabled,
   chapterMinCharCount,
   monacoAdvancedWrapping,
@@ -3657,29 +3650,6 @@ watch(readerEditMode, (edit) => {
   }
 });
 
-watch(currentFile, (next, prev) => {
-  if (next === prev) return;
-  /** 打开文件时从 meta 恢复侧栏标签页 */
-  if (next) {
-    const meta = findFileMetaRecord(fileMetaRecords.value, next);
-    if (meta?.sidebarTab) {
-      sidebarTab.value = meta.sidebarTab;
-    }
-  }
-});
-
-/** 侧栏标签页切换时保存到当前文件的 meta */
-watch(sidebarTab, () => {
-  const path = currentFile.value;
-  if (!path) return;
-  fileMetaRecords.value = upsertFileMetaRecord(
-    fileMetaRecords.value,
-    path,
-    (record) => ({ ...record, sidebarTab: sidebarTab.value }),
-  );
-  persistFileMeta();
-});
-
 onBeforeUnmount(() => {
   clearChapterRefreshDebounce();
 });
@@ -3733,7 +3703,6 @@ async function applySettings(payload: SettingsApplyPayload) {
       Math.floor(payload.recentFilesHistoryLimit),
     ),
   );
-  dragDropAction.value = (payload.dragDropAction ?? defaultDragDropAction) as DragDropAction;
   chapterMinCharCount.value = Math.max(
     minChapterMinCharCount,
     Math.min(maxChapterMinCharCount, Math.floor(payload.chapterMinCharCount)),
@@ -3991,19 +3960,6 @@ useAppWindowBindings({
   readingProgressSynced,
   readerDropOverlayVisible,
   suppressReaderDropOverlay: showReplaceFileModal,
-  requestReplaceFilePath: (p) => onReplaceFilePath(p),
-  replaceCurrentWithDragged: (newPath, newSize) => {
-    pendingReplaceOldPath.value = currentFile.value ?? "";
-    void onReplaceFileConfirmed(newPath, newSize);
-  },
-  dragDropAction,
-  showDragDropChoice(detail) {
-    return new Promise((resolve) => {
-      dragDropChoiceDetail.value = detail;
-      dragDropChoiceResolve.value = resolve;
-      showDragDropChoice.value = true;
-    });
-  },
   handleWindowCloseRequest,
   readerEditMode,
   voiceReadScrollLocked: isVoiceReadScrollLocked,
@@ -4636,10 +4592,6 @@ useAppShellThemeWatch({
       :restore-session-on-startup="restoreSessionOnStartup"
       :sync-current-file="syncCurrentFile"
       :recent-files-history-limit="recentFilesHistoryLimit"
-      :drag-drop-action="dragDropAction"
-      :show-drag-drop-choice="showDragDropChoice"
-      :drag-drop-choice-detail="dragDropChoiceDetail"
-      @drag-drop-choice="(v) => { dragDropChoiceResolve?.(v); dragDropChoiceResolve = null; showDragDropChoice = false }"
       :chapter-min-char-count="chapterMinCharCount"
       :fullscreen-reader-width-percent="fullscreenReaderWidthPercent"
       :fullscreen-show-system-time="fullscreenShowSystemTime"
