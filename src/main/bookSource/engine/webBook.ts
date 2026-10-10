@@ -677,9 +677,13 @@ async function analyzeBookList(
     if (item) items.push(item);
   }
   if (reverse) items.reverse();
+  // searchUpdate 书源（帖子即章节）：同名不同帖须保留，去重键加 bookUrl；其他书源保持原行为
+  const includeBookUrl = Boolean((source as { searchUpdate?: unknown }).searchUpdate);
   const seen = new Set<string>();
   const deduped = items.filter((item) => {
-    const k = `${item.name}::${item.author}`;
+    const k = includeBookUrl
+      ? `${item.name}::${item.author}::${item.bookUrl}`
+      : `${item.name}::${item.author}`;
     if (seen.has(k)) return false;
     seen.add(k);
     return true;
