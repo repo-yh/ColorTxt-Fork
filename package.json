@@ -82,7 +82,7 @@
     "tldts": "^7.4.4",
     "tough-cookie": "^6.0.1",
     "typescript": "^5.8.2",
-    "vite": "^6.2.3",
+    "vite": "^8.3.3",
     "vite-plugin-monaco-editor": "^1.1.0",
     "vue": "^3.5.43",
     "vue-tsc": "^2.2.8",
