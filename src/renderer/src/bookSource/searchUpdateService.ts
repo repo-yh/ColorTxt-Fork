@@ -1,4 +1,5 @@
 import type { BookChapter, BookSourceRecord } from "@shared/bookSource/types";
+import { ipcPlain } from "./ipcPlain";
 import {
   bookshelfAsBook,
   bookshelfBookKey,
@@ -168,13 +169,16 @@ async function fetchSearchUpdateChapters(
   book: BookshelfBook,
   searchUrl: string,
 ): Promise<{ chapters: BookChapter[]; message: string }> {
-  const res = await window.colorTxt.bookSourceGetChapterList({
-    bookSourceUrl: book.origin,
-    book: {
-      ...bookshelfAsBook(book),
-      tocUrl: searchUrlAsTocUrl(searchUrl, book.name),
-    },
-  });
+  const res = await window.colorTxt.bookSourceGetChapterList(
+    // 书架条目可能来自 Vue 响应式代理，variable 等对象字段需剥成纯对象才能过 IPC 克隆
+    ipcPlain({
+      bookSourceUrl: book.origin,
+      book: {
+        ...bookshelfAsBook(book),
+        tocUrl: searchUrlAsTocUrl(searchUrl, book.name),
+      },
+    }),
+  );
   return {
     chapters: (res.chapters ?? []).filter((ch) => !ch.isVolume),
     message: res.message?.trim() ?? "",

@@ -27,6 +27,8 @@ import type {
 } from "@shared/bookSource/types";
 import { appLog, appPrompt } from "../../services/appDialog";
 import { appToast } from "../../services/appToast";
+import { searchBookToBook } from "@shared/bookSource/bookModel";
+import { ipcPlain } from "../ipcPlain";
 import { useFindBookBookshelf } from "../composables/useFindBookBookshelf";
 import { useFindBookSettings } from "../composables/useFindBookSettings";
 import { useChapterCacheMarks } from "../composables/useChapterCacheMarks";
@@ -718,9 +720,58 @@ async function loadDetail(item: SearchBookItem) {
         : book;
       return;
     }
-    // 无缓存（手动添加未首检等）→ 走网络加载兜底
+    // 搜索结果点开（无书架缓存）：只请求一次帖子页拿详情+附件，
+    // 目录本地组装单章（当前帖子）；全量搜索结果目录仅书架检查更新使用
+    await loadSearchUpdatePostDetail(item);
+    return;
   }
   await load(item);
+}
+
+/** searchUpdate 书源单帖详情：1 次帖子页请求，目录=当前帖子单章，不发搜索请求 */
+async function loadSearchUpdatePostDetail(item: SearchBookItem) {
+  loading.value = true;
+  error.value = "";
+  logs.value = [];
+  detail.value = null;
+  chapters.value = [];
+  try {
+    const seed = searchBookToBook(item);
+    const infoRes = await window.colorTxt.bookSourceGetBookInfo(
+      ipcPlain({
+        bookSourceUrl: item.origin,
+        bookUrl: seed.bookUrl,
+        name: seed.name,
+        author: seed.author,
+        kind: seed.kind,
+        wordCount: seed.wordCount,
+        intro: seed.intro,
+        lastChapter: seed.lastChapter,
+        coverUrl: seed.coverUrl,
+        variable: seed.variable,
+        infoHtml: seed.infoHtml ?? item.infoHtml,
+        infoUrl: item.infoUrl,
+        tocUrl: seed.bookUrl,
+      }),
+    );
+    if (infoRes.logs?.length) logs.value = infoRes.logs;
+    if (infoRes.message || !infoRes.detail) {
+      error.value = infoRes.message ?? "加载书籍信息失败";
+      return;
+    }
+    detail.value = {
+      ...infoRes.detail,
+      origin: item.origin,
+      originName: item.originName,
+    };
+    const title =
+      item.lastChapter?.trim() ||
+      detail.value.name?.trim() ||
+      "更新详情";
+    chapters.value = [{ title, url: item.bookUrl, isVolume: false, isVip: false }];
+  } finally {
+    loading.value = false;
+  }
 }
 
 watch(

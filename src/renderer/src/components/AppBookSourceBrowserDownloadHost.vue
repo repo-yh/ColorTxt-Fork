@@ -29,6 +29,7 @@ async function handleBrowserDownload(ev: {
   url: string;
   filename?: string;
   referer?: string;
+  bookName?: string;
 }) {
   const url = ev.url?.trim();
   if (!url) return;
