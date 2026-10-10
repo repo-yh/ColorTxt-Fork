@@ -33,13 +33,18 @@
     "ws": "^8.18.0"
   },
   "overrides": {
-    "sharp": "file:scripts/sharp-pack-stub",
+    "sharp": "$sharp",
     "@huggingface/transformers": {
-      "sharp": "file:scripts/sharp-pack-stub"
+      "sharp": "$sharp"
     },
     "fs-web": {
       "path": "0.12.7"
-    }
+    },
+    "mdict-js": {
+      "@xmldom/xmldom": "^0.8.15"
+    },
+    "katex": "$katex",
+    "dompurify": "^3.4.16"
   },
   "devDependencies": {
     "@electron/rebuild": "^4.0.4",
