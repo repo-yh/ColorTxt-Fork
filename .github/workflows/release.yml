@@ -132,7 +132,7 @@ jobs:
         run: rm -f release/builder-debug.yml
 
       - name: Upload release artifacts
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: release-${{ matrix.name }}
           path: |
