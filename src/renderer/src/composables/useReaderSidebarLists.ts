@@ -3,7 +3,10 @@ import type { Chapter } from "../chapter";
 import { defaultChapterMinCharCount } from "../constants/appUi";
 import type VirtualList from "../components/VirtualList.vue";
 import type { BookmarkListPanelExpose } from "../components/BookmarkListPanel.vue";
-import type { FileSortMode } from "../constants/fileCategories";
+import type {
+  FileCategoryDefinition,
+  FileSortMode,
+} from "../constants/fileCategories";
 import {
   FILE_CATEGORY_FILTER_ALL,
   FILE_CATEGORY_FILTER_UNCATEGORIZED,
@@ -79,6 +82,8 @@ export type ReaderSidebarListProps = Readonly<{
   fileCategory?: string;
   /** 文件列表排序 */
   fileSort?: FileSortMode;
+  /** 文件列表分类目录（「分类管理」后的自定义目录）；按类别排序时决定类别间顺序 */
+  fileCategoryCatalog?: FileCategoryDefinition[];
   /** 文件列表：列表 / 树状（树模式下当前文件居中由 FileListPanel 处理） */
   fileListViewMode?: import("../constants/fileCategories").FileListViewMode;
   /** 当前打开文件的实时进度（%）；切入「阅读进度」排序时写入快照，之后不参与重排 */
@@ -138,6 +143,7 @@ function readingTimeSortOrderDesc(f: SidebarFileItem): 0 | 1 | 2 {
 function sortFileList(
   list: SidebarFileItem[],
   mode: FileSortMode,
+  catalog: readonly FileCategoryDefinition[] = [],
 ): SidebarFileItem[] {
   const out = list.slice();
   const byName = (a: SidebarFileItem, b: SidebarFileItem) =>
@@ -211,6 +217,24 @@ function sortFileList(
       return out.sort(
         (a, b) => (b.addedAt ?? 0) - (a.addedAt ?? 0) || byName(a, b),
       );
+    case "categoryAsc":
+    case "categoryDesc": {
+      const desc = mode === "categoryDesc";
+      const orderIndex = new Map<string, number>();
+      catalog.forEach((c, i) => orderIndex.set(c.name, i));
+      // 已知类别按目录顺序（Desc 仅翻转已知类别的相对序）；目录外类别、未分类固定排最后
+      const rank = (f: SidebarFileItem): number => {
+        const name = effectiveCategoryName(f);
+        if (!name) return catalog.length + 1;
+        const hit = orderIndex.get(name);
+        return hit ?? catalog.length;
+      };
+      return out.sort((a, b) => {
+        const cmp = rank(a) - rank(b);
+        if (cmp !== 0) return desc ? -cmp : cmp;
+        return byName(a, b);
+      });
+    }
     default:
       return out.sort(byName);
   }
@@ -390,7 +414,7 @@ export function useReaderSidebarLists(
         ...f,
         progress: map.get(fileHistoryKey(f.path)),
       }));
-      return sortFileList(merged, mode);
+      return sortFileList(merged, mode, props.fileCategoryCatalog);
     }
     if (mode === "progressAsc" || mode === "progressDesc") {
       const snap = progressSortSnapshot.value;
@@ -398,9 +422,9 @@ export function useReaderSidebarLists(
         ...f,
         progress: snap.get(fileHistoryKey(f.path)),
       }));
-      return sortFileList(merged, mode);
+      return sortFileList(merged, mode, props.fileCategoryCatalog);
     }
-    return sortFileList(base, mode);
+    return sortFileList(base, mode, props.fileCategoryCatalog);
   });
 
   const filesFiltered = computed<SidebarFileItem[]>(() => {

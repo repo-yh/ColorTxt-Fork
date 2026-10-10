@@ -35,7 +35,9 @@ export type FileSortMode =
   | "lastReadAtAsc"
   | "lastReadAtDesc"
   | "addedAtAsc"
-  | "addedAtDesc";
+  | "addedAtDesc"
+  | "categoryAsc"
+  | "categoryDesc";
 
 export const DEFAULT_FILE_SORT: FileSortMode = "nameAsc";
 
@@ -70,6 +72,8 @@ export const FILE_SORT_MODES: readonly FileSortMode[] = [
   "lastReadAtDesc",
   "addedAtAsc",
   "addedAtDesc",
+  "categoryAsc",
+  "categoryDesc",
 ] as const;
 
 export function isFileSortMode(x: string | undefined): x is FileSortMode {

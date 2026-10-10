@@ -144,6 +144,8 @@ export function useFileListCategorySort(
     lastReadAtDesc: "打开时间",
     addedAtAsc: "添加时间",
     addedAtDesc: "添加时间",
+    categoryAsc: "分类",
+    categoryDesc: "分类",
   };
 
   const sortScrollItems = computed((): CustomSelectItem[] => {
@@ -160,6 +162,8 @@ export function useFileListCategorySort(
       "lastReadAtDesc",
       "addedAtAsc",
       "addedAtDesc",
+      "categoryAsc",
+      "categoryDesc",
     ];
     return modes.map((m) => ({
       kind: "item" as const,
