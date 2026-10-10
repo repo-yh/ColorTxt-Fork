@@ -157,7 +157,12 @@ export function useAppFileSession(deps: {
       const cur = list[idx]!;
       if (cur.size === listSizeBytes) return;
       const next = list.slice();
-      next[idx] = normalizeTxtFileItem({ ...cur, size: listSizeBytes });
+      const normalized = normalizeTxtFileItem({ ...cur, size: listSizeBytes });
+      // 保留自定义 name（name/path 分离），normalize 默认重置为磁盘文件名
+      next[idx] = {
+        ...normalized,
+        name: String(cur.name ?? "").trim() || normalized.name,
+      };
       deps.txtFiles.value = next;
       persistFileListCache();
     };

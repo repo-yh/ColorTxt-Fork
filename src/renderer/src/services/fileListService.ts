@@ -76,6 +76,8 @@ export function mergeTxtFileLists(
     const n = normalizeTxtFileItem(item);
     byPath.set(n.path, {
       ...n,
+      // normalize 会把 name 重置为磁盘文件名；既有条目须保留自定义 name（name/path 分离）
+      name: String(item.name ?? "").trim() || n.name,
       addedAt:
         typeof item.addedAt === "number" && Number.isFinite(item.addedAt)
           ? item.addedAt
