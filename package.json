@@ -59,7 +59,7 @@
     "@vitejs/plugin-vue": "^5.2.3",
     "@xmldom/xmldom": "^0.9.10",
     "cheerio": "^1.2.0",
-    "d3-cloud": "^1.2.7",
+    "d3-cloud": "^1.2.9",
     "d3-scale": "^4.0.2",
     "electron": "^41.10.7",
     "electron-builder": "^26.15.3",
