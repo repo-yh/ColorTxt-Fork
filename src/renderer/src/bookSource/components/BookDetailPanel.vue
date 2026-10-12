@@ -279,14 +279,16 @@ const detailAttachments = computed<DetailAttachment[]>(() =>
 );
 
 async function onOpenAttachment(a: DetailAttachment) {
-  if (!a.url) return;
+  const item = props.item;
+  // 点击打开帖子页（购买/下载在帖子里操作），不直接开 attachpay 购买弹窗页
+  const url = stripChapterUrlOption(item?.bookUrl) || a.url;
+  if (!url) return;
   try {
-    await window.colorTxt.openExternal(a.url);
+    await window.colorTxt.openExternal(url);
   } catch {
     appToast("打开浏览器失败", { kind: "warning" });
     return;
   }
-  const item = props.item;
   if (item?.bookUrl?.trim() && item?.origin?.trim()) {
     const next = setFindBookBookshelfHasUpdate(item.bookUrl, item.origin, false);
     if (next) applyBooks(next);
@@ -1212,13 +1214,13 @@ async function onDownloadOrStop() {
               <p v-if="displayIntro" class="bookDetailIntro">{{ displayIntro }}</p>
               <p v-else class="bookDetailIntro bookDetailIntro--empty">暂无简介</p>
               <div v-if="detailAttachments.length" class="bookDetailAttachList">
-                <span class="bookDetailAttachTitle">附件（点击打开购买页）</span>
+                <span class="bookDetailAttachTitle">附件（点击打开帖子）</span>
                 <button
                   v-for="(a, i) in detailAttachments"
                   :key="`${a.url}-${i}`"
                   type="button"
                   class="link bookDetailAttachItem"
-                  :title="`${a.name} ${a.meta} — 在浏览器打开`"
+                  :title="`${a.name} ${a.meta} — 在浏览器打开帖子`"
                   @click="onOpenAttachment(a)"
                 >
                   <span class="bookDetailAttachName">{{ a.name }}</span>
