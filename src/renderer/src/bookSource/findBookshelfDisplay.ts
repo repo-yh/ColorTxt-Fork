@@ -112,16 +112,32 @@ export function formatBookshelfAuthor(author: string | undefined): string {
   return formatLegadoBookAuthor(author) || "未知";
 }
 
+/** 剥章节 URL 的 ,{"webView":...} option 后缀（存储/比较用纯 URL） */
+export function stripChapterUrlOption(url: string | undefined): string {
+  return (url ?? "").split(/,\s*\{/)[0]?.trim() ?? "";
+}
+
 /**
  * 书架打开阅读：有进度 → 继续阅读下标；无进度 → 第一章（同详情页「开始阅读」）。
  * `contentChapters` 为已过滤分卷的内容章列表。
+ * 进度锚定章节 URL 优先（新帖总插在数据层首位，存档下标会漂移），下标兜底。
  */
 export function resolveBookshelfReadChapterIndex(
-  book: { lastReadChapterIndex?: number },
+  book: {
+    lastReadChapterIndex?: number;
+    lastReadChapterUrl?: string;
+  },
   contentChapters: BookChapter[],
 ): number {
   const n = contentChapters.length;
   if (n <= 0) return 0;
+  const url = stripChapterUrlOption(book.lastReadChapterUrl);
+  if (url) {
+    const byUrl = contentChapters.findIndex(
+      (ch) => stripChapterUrlOption(ch.url) === url,
+    );
+    if (byUrl >= 0) return byUrl;
+  }
   const idx = book.lastReadChapterIndex;
   if (
     typeof idx === "number" &&

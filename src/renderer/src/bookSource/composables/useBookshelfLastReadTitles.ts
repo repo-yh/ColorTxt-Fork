@@ -5,7 +5,10 @@ import {
   updateFindBookBookshelfBookInfo,
   updateFindBookBookshelfReadProgress,
 } from "../findBookBookshelf";
-import { formatBookshelfLastRead } from "../findBookshelfDisplay";
+import {
+  formatBookshelfLastRead,
+  stripChapterUrlOption,
+} from "../findBookshelfDisplay";
 import { ipcPlain } from "../ipcPlain";
 
 const MAX_CONCURRENT = 2;
@@ -26,13 +29,11 @@ export function useBookshelfLastReadTitles(
 
   function needsResolve(book: BookshelfBook): boolean {
     if (book.lastReadChapterTitle?.trim()) return false;
-    if (
-      typeof book.lastReadChapterIndex !== "number" ||
-      !Number.isFinite(book.lastReadChapterIndex) ||
-      book.lastReadChapterIndex < 0
-    ) {
-      return false;
-    }
+    const hasIndex =
+      typeof book.lastReadChapterIndex === "number" &&
+      Number.isFinite(book.lastReadChapterIndex) &&
+      book.lastReadChapterIndex >= 0;
+    if (!hasIndex && !book.lastReadChapterUrl?.trim()) return false;
     return !resolvedTitles.value[keyOf(book)];
   }
 
@@ -48,7 +49,6 @@ export function useBookshelfLastReadTitles(
     const key = keyOf(book);
     if (resolvingKeys.has(key) || !needsResolve(book)) return;
 
-    const idx = book.lastReadChapterIndex!;
     resolvingKeys.add(key);
     inFlight += 1;
     try {
@@ -74,7 +74,13 @@ export function useBookshelfLastReadTitles(
         book: detail,
       });
       const contentChapters = (tocRes.chapters ?? []).filter((ch) => !ch.isVolume);
-      const title = contentChapters[idx]?.title?.trim();
+      // 锚定 URL 反查优先：存档下标会随新帖插入漂移（新帖总在数据层首位）
+      const url = stripChapterUrlOption(book.lastReadChapterUrl);
+      let idx = url
+        ? contentChapters.findIndex((ch) => stripChapterUrlOption(ch.url) === url)
+        : -1;
+      if (idx < 0) idx = book.lastReadChapterIndex ?? -1;
+      const title = idx >= 0 ? (contentChapters[idx]?.title?.trim() ?? "") : "";
       if (!title) return;
 
       resolvedTitles.value = { ...resolvedTitles.value, [key]: title };
@@ -83,6 +89,7 @@ export function useBookshelfLastReadTitles(
         book.origin,
         idx,
         title,
+        url || undefined,
       );
       if (detail.tocUrl && contentChapters.length) {
         const withToc = updateFindBookBookshelfBookInfo(book.bookUrl, book.origin, {

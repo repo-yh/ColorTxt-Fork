@@ -10,6 +10,7 @@ import {
   type BookshelfBook,
   type BookshelfBookInfoPatch,
 } from "./findBookBookshelf";
+import { stripChapterUrlOption } from "./findBookshelfDisplay";
 
 function sourceHasSearchUpdate(source: BookSourceRecord | null): boolean {
   return Boolean(source && (source as { searchUpdate?: unknown }).searchUpdate);
@@ -82,7 +83,7 @@ export async function openChapterPostInBrowser(
   bookName?: string,
 ): Promise<boolean> {
   // 剥 ,{"webView": ...} option，浏览器只要纯帖子 URL
-  const url = (chapterUrl ?? "").split(/,\s*\{/)[0]?.trim() ?? "";
+  const url = stripChapterUrlOption(chapterUrl);
   if (!origin?.trim() || !url) return false;
   let opened = false;
   try {
@@ -104,19 +105,34 @@ function formatSearchUpdateLogHead(book: BookshelfBook): string {
   return `「${book.name}」${book.originName ? ` · ${book.originName}` : ""}`;
 }
 
-/** 章节 tag 里的发帖时间（如「2026-9-25 13:33」）→ 时间戳；解析失败返回 0 */
+/** 章节 tag 里的发帖时间（如「2026-9-25 13:33」「10-11 20:15」）→ 时间戳；解析失败返回 0 */
 export function parsePostTimeFromTag(tag: string | undefined): number {
-  const m = (tag ?? "")
-    .trim()
-    .match(/(\d{4})-(\d{1,2})-(\d{1,2})[ T](\d{1,2}):(\d{2})/);
-  if (!m) return 0;
-  const t = new Date(
-    Number(m[1]),
-    Number(m[2]) - 1,
-    Number(m[3]),
-    Number(m[4]),
-    Number(m[5]),
-  ).getTime();
+  const raw = (tag ?? "").trim();
+  const m = raw.match(/(\d{4})-(\d{1,2})-(\d{1,2})[ T](\d{1,2}):(\d{2})/);
+  if (m) {
+    const t = new Date(
+      Number(m[1]),
+      Number(m[2]) - 1,
+      Number(m[3]),
+      Number(m[4]),
+      Number(m[5]),
+    ).getTime();
+    return Number.isFinite(t) ? t : 0;
+  }
+  // 无年份（Discuz 当年帖显示「10-11 20:15」）：补当前年份；补出未来超 1 天按跨年老帖年份减 1
+  const m2 = raw.match(/(\d{1,2})-(\d{1,2})[ T](\d{1,2}):(\d{2})/);
+  if (!m2) return 0;
+  const now = new Date();
+  const build = (year: number) =>
+    new Date(
+      year,
+      Number(m2[1]) - 1,
+      Number(m2[2]),
+      Number(m2[3]),
+      Number(m2[4]),
+    ).getTime();
+  let t = build(now.getFullYear());
+  if (t - now.getTime() > 86400000) t = build(now.getFullYear() - 1);
   return Number.isFinite(t) ? t : 0;
 }
 
@@ -226,8 +242,16 @@ export async function runSearchUpdateForBook(
       return false;
     }
 
-    const latest = chapters[0];
-    const latestTime = parsePostTimeFromTag(latest.tag);
+    // 最新帖 = 全部章节中发帖时间最大的一章（免疫搜索排序变化；不再假设第 1 条是最新帖）
+    let latest = chapters[0];
+    let latestTime = parsePostTimeFromTag(latest.tag);
+    for (const ch of chapters) {
+      const t = parsePostTimeFromTag(ch.tag);
+      if (t > latestTime) {
+        latestTime = t;
+        latest = ch;
+      }
+    }
     const baseTime = book.latestPostTime ?? 0;
     // 每次都刷新目录缓存；手动添加的书用首条结果回填真实帖子 URL
     const patch: BookshelfBookInfoPatch = {

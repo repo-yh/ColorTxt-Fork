@@ -1826,6 +1826,7 @@ function onToggleBookshelf() {
         props.item.origin,
         contentIndex,
         ch.title,
+        ch.url,
       );
     }
     if (props.detail.tocUrl && props.chapters.length) {

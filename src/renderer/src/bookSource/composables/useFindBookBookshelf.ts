@@ -94,12 +94,14 @@ export function useFindBookBookshelf() {
     origin: string,
     chapterIndex: number,
     chapterTitle?: string,
+    chapterUrl?: string,
   ): boolean {
     const next = updateFindBookBookshelfReadProgress(
       bookUrl,
       origin,
       chapterIndex,
       chapterTitle,
+      chapterUrl,
     );
     if (!next) return false;
     booksRef.value = next;

@@ -5,6 +5,7 @@ import {
   bookshelfContentChapters,
   extractUpdateTimeFromKind,
   resolveLatestChapterTitleFromToc,
+  stripChapterUrlOption,
 } from "./findBookshelfDisplay";
 
 const STORAGE_KEY = "colortxt:findBookBookshelf";
@@ -19,6 +20,8 @@ export type BookshelfBook = Book & {
   lastReadChapterIndex?: number;
   /** 最后阅读章节标题 */
   lastReadChapterTitle?: string;
+  /** 最后阅读章节 URL（锚定帖子身份，免疫新帖插队导致的下标漂移） */
+  lastReadChapterUrl?: string;
   /** 最后阅读时间戳（对齐 Legado durChapterTime） */
   lastReadAt?: number;
   /** 是否允许书架更新；缺省或为 true 表示允许 */
@@ -468,24 +471,32 @@ export function updateFindBookBookshelfReadProgress(
   origin: string,
   chapterIndex: number,
   chapterTitle?: string,
+  chapterUrl?: string,
 ): BookshelfBook[] | null {
   if (!Number.isFinite(chapterIndex) || chapterIndex < 0) return null;
   const key = bookshelfBookKey(bookUrl, origin);
   const idx = Math.floor(chapterIndex);
+  // 剥 ,{"webView":...} option，只存纯帖子 URL（锚定身份，免疫新帖插队下标漂移）
+  const url = stripChapterUrlOption(chapterUrl);
   let changed = false;
   const next = loadFindBookBookshelf().map((b) => {
     if (bookshelfBookKey(b.bookUrl, b.origin) !== key) return b;
     changed = true;
-    // 对齐 Legado durChapterTitle：未传标题时从目录缓存按下标取
+    // 对齐 Legado durChapterTitle：未传标题时优先按 URL 反查（下标会漂移），反查不中退下标
     let title = chapterTitle?.trim() ?? "";
     if (!title) {
-      const fromToc = bookshelfContentChapters(b)[idx]?.title?.trim() ?? "";
-      title = fromToc;
+      const list = bookshelfContentChapters(b);
+      const byUrl = url
+        ? list.findIndex((ch) => stripChapterUrlOption(ch.url) === url)
+        : -1;
+      const at = byUrl >= 0 ? byUrl : idx;
+      title = list[at]?.title?.trim() ?? "";
     }
     return {
       ...b,
       lastReadChapterIndex: idx,
       lastReadAt: Date.now(),
+      ...(url ? { lastReadChapterUrl: url } : {}),
       ...(title ? { lastReadChapterTitle: title } : {}),
     };
   });

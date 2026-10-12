@@ -47,7 +47,10 @@ import {
   getBookKindList,
 } from "../bookSourceDisplay";
 import { resolveFirstChapterContentIndex } from "../chapterReadingOrder";
-import { resolveLatestChapterTitleFromToc } from "../findBookshelfDisplay";
+import {
+  resolveLatestChapterTitleFromToc,
+  stripChapterUrlOption,
+} from "../findBookshelfDisplay";
 import type { BookSourceEditTab } from "../editBookSourceFields";
 import type { FileCategoryDefinition } from "../../constants/fileCategories";
 import { loadBookshelfCategoryCatalog } from "../findBookshelfCategory";
@@ -424,23 +427,34 @@ function onCategoryPicked(name: string) {
 }
 
 
-const hasBookshelfReadProgress = computed(() => {
-  if (!inBookshelf.value) return false;
-  const idx = bookshelfEntry.value?.lastReadChapterIndex;
-  const n = contentChapterList.value.length;
-  return (
+/** 最后阅读章节（锚定章节 URL 反查优先，下标兜底；新帖插队会导致存档下标漂移） */
+const lastReadChapter = computed(() => {
+  if (!inBookshelf.value) return null;
+  const entry = bookshelfEntry.value;
+  const list = contentChapterList.value;
+  if (!entry || !list.length) return null;
+  const url = stripChapterUrlOption(entry.lastReadChapterUrl);
+  if (url) {
+    const byUrl = list.findIndex(
+      (ch) => stripChapterUrlOption(ch.url) === url,
+    );
+    if (byUrl >= 0) return list[byUrl] ?? null;
+  }
+  const idx = entry.lastReadChapterIndex;
+  if (
     typeof idx === "number" &&
     Number.isFinite(idx) &&
     idx >= 0 &&
-    idx < n
-  );
+    idx < list.length
+  ) {
+    return list[idx] ?? null;
+  }
+  return null;
 });
 
-/** 最后阅读章节（content 数组下标对应的章） */
-const lastReadChapter = computed(() => {
-  if (!hasBookshelfReadProgress.value) return null;
-  const idx = bookshelfEntry.value!.lastReadChapterIndex!;
-  return contentChapterList.value[idx] ?? null;
+const hasBookshelfReadProgress = computed(() => {
+  if (!inBookshelf.value) return false;
+  return lastReadChapter.value !== null;
 });
 
 const lastReadChapterTitleLabel = computed(() => {
@@ -843,13 +857,26 @@ function syncBookshelfLastReadTitleFromChapters() {
   if (!item || !entry || !list.length || entry.lastReadChapterTitle?.trim()) {
     return;
   }
-  const idx = entry.lastReadChapterIndex;
-  if (typeof idx !== "number" || !Number.isFinite(idx) || idx < 0 || idx >= list.length) {
-    return;
+  // 锚定 URL 反查优先：存档下标会随新帖插入漂移
+  const url = stripChapterUrlOption(entry.lastReadChapterUrl);
+  let idx = url
+    ? list.findIndex((ch) => stripChapterUrlOption(ch.url) === url)
+    : -1;
+  if (idx < 0) {
+    const stored = entry.lastReadChapterIndex;
+    if (
+      typeof stored === "number" &&
+      Number.isFinite(stored) &&
+      stored >= 0 &&
+      stored < list.length
+    ) {
+      idx = stored;
+    }
   }
+  if (idx < 0) return;
   const title = list[idx]?.title?.trim();
   if (!title) return;
-  updateReadProgress(item.bookUrl, item.origin, idx, title);
+  updateReadProgress(item.bookUrl, item.origin, idx, title, list[idx].url);
 }
 
 watch(contentChapterList, () => {
@@ -909,6 +936,7 @@ async function onReadChapter(displayIndex: number) {
           item.origin,
           contentIndex,
           ch.title?.trim(),
+          ch.url,
         );
       }
     }
@@ -925,8 +953,10 @@ async function onReadChapter(displayIndex: number) {
 function resolveStartContentIndex(): number {
   const list = contentChapterList.value;
   if (!list.length) return 0;
-  if (hasBookshelfReadProgress.value) {
-    return bookshelfEntry.value!.lastReadChapterIndex!;
+  const last = lastReadChapter.value;
+  if (last) {
+    const i = list.indexOf(last);
+    if (i >= 0) return i;
   }
   return resolveFirstChapterContentIndex(list);
 }
@@ -947,7 +977,7 @@ async function onStartOrContinueReading() {
   const idx = resolveStartContentIndex();
   const ch = contentChapterList.value[idx];
   if (item && inBookshelf.value && ch?.title?.trim()) {
-    updateReadProgress(item.bookUrl, item.origin, idx, ch.title.trim());
+    updateReadProgress(item.bookUrl, item.origin, idx, ch.title.trim(), ch.url);
   }
   emit("readChapter", {
     index: idx,
