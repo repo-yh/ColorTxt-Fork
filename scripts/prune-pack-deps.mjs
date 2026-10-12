@@ -532,7 +532,7 @@ function isSharpPackStub(pkgRoot) {
   if (!fs.existsSync(pkgPath)) return false;
   try {
     const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
-    return pkg.version === "0.0.0-colortxt-stub";
+    return pkg.version === "0.35.5";
   } catch {
     return false;
   }

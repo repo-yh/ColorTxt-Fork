@@ -1,6 +1,6 @@
 {
   "name": "sharp",
-  "version": "0.0.0-colortxt-stub",
+  "version": "0.35.5",
   "private": true,
   "description": "Pack-time stub so @huggingface/transformers can load without the real sharp native binary.",
   "type": "module",

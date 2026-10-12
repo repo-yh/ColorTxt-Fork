@@ -30,7 +30,7 @@ try {
   process.exit(0);
 }
 
-if (version === "0.0.0-colortxt-stub") {
+if (version === "0.35.5") {
   process.exit(0);
 }
 
