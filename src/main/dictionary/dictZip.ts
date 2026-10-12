@@ -5,7 +5,7 @@
 import { open as fsOpen, readFile } from "node:fs/promises";
 import type { FileHandle } from "node:fs/promises";
 import { gunzipSync } from "node:zlib";
-import pako from "pako";
+import { Inflate, ungzip } from "pako";
 
 const GZIP_MAGIC0 = 0x1f;
 const GZIP_MAGIC1 = 0x8b;
@@ -84,7 +84,7 @@ export function inflateChunkStreaming(
   chunkBytes: Uint8Array,
 ): Uint8Array | null {
   try {
-    const inf = new pako.Inflate({ windowBits: -15 });
+    const inf = new Inflate({ windowBits: -15 });
     inf.push(chunkBytes, false);
     if (inf.err) return null;
     const result = inf.result;
@@ -204,7 +204,7 @@ function gunzipTolerant(bytes: Buffer): Buffer {
     return gunzipSync(bytes);
   } catch {
     // ???? gzip CRC ???pako ???
-    return Buffer.from(pako.ungzip(bytes));
+    return Buffer.from(ungzip(bytes));
   }
 }
 

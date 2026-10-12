@@ -53,7 +53,7 @@ function loadSettingsHtml(win: BrowserWindow): void {
   if (process.env.ELECTRON_RENDERER_URL) {
     void win.loadURL(`${process.env.ELECTRON_RENDERER_URL}/stealth-settings.html`);
   } else {
-    void win.loadFile(path.join(__dirname, "../renderer/stealth-settings.html"));
+    void win.loadFile(path.join(import.meta.dirname, "../renderer/stealth-settings.html"));
   }
 }
 
@@ -107,7 +107,7 @@ export function openStealthSettingsWindow(): void {
     icon: resolveStealthSettingsIconPath(),
     // 故意不设 parent：透明覆盖层作 parent 会在 Windows 上变成白/灰实心底
     webPreferences: {
-      preload: path.join(__dirname, "../preload/index.js"),
+      preload: path.join(import.meta.dirname, "../preload/index.js"),
       contextIsolation: true,
       nodeIntegration: false,
     },

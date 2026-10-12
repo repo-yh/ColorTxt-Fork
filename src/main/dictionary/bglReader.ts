@@ -2,7 +2,7 @@
  * Babylon BGL：从 gzip 偏移解压后解析块流，按 lowercased headword/alt Map 查找。
  */
 import { readFile } from "node:fs/promises";
-import pako from "pako";
+import { ungzip } from "pako";
 
 export type BglMetadata = {
   title?: string;
@@ -132,7 +132,7 @@ export class BglReader {
       throw new Error(`Not a Babylon glossary (bad gzip offset ${gzipOffset})`);
     }
     // pako tolerates bad gzip CRC better than zlib
-    this.data = pako.ungzip(bytes.subarray(gzipOffset));
+    this.data = ungzip(bytes.subarray(gzipOffset));
 
     const rawInfo = new Map<number, Uint8Array>();
     const entryBlocks: RawEntryBlock[] = [];

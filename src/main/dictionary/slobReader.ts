@@ -4,7 +4,7 @@
 import { open as fsOpen } from "node:fs/promises";
 import type { FileHandle } from "node:fs/promises";
 import { inflateSync } from "node:zlib";
-import pako from "pako";
+import { inflate } from "pako";
 
 const utf8 = new TextDecoder("utf-8");
 const MAGIC = Buffer.from([0x21, 0x2d, 0x31, 0x53, 0x4c, 0x4f, 0x42, 0x1f]);
@@ -115,7 +115,7 @@ function unzlib(bytes: Uint8Array): Buffer {
   try {
     return inflateSync(Buffer.from(bytes));
   } catch {
-    return Buffer.from(pako.inflate(bytes));
+    return Buffer.from(inflate(bytes));
   }
 }
 
