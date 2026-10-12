@@ -17,7 +17,7 @@ import {
 
 const DEFAULT_NEW_CATEGORY_COLOR = "#64748B";
 
-function ensureCategoryInCatalog(
+export function ensureCategoryInCatalog(
   catalog: FileCategoryDefinition[],
   categoryName: string,
 ): FileCategoryDefinition[] {

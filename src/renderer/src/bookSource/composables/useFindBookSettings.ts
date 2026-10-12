@@ -253,8 +253,18 @@ function createFindBookSettingsStore() {
     })();
   }
 
+  /** 外部（其他窗口）改动找书设置后，刷新下载相关内存值（目录/加入主界面/动作/默认分类） */
+  function applyDownloadSettingsFromDisk() {
+    const s = createInitialFindBookSettingsState();
+    downloadDir.value = s.downloadDir;
+    downloadAddToMainFileList.value = s.downloadAddToMainFileList;
+    downloadAfterAction.value = s.downloadAfterAction;
+    downloadDefaultCategory.value = s.downloadDefaultCategory;
+  }
+
   function onProxyExternalChange() {
     applyProxyFromDisk();
+    applyDownloadSettingsFromDisk();
     syncHttpProxyToMain();
   }
 

@@ -5,7 +5,12 @@ import { useFindBookSettings } from "../bookSource/composables/useFindBookSettin
 const emit = defineEmits<{
   (
     e: "downloadImported",
-    payload: { filePath: string; size?: number; bookName?: string },
+    payload: {
+      filePath: string;
+      size?: number;
+      bookName?: string;
+      defaultCategory?: string;
+    },
   ): void;
 }>();
 
@@ -47,6 +52,7 @@ async function handleBrowserDownload(ev: {
         filePath: r.filePath,
         size: r.size,
         bookName: ev.bookName?.trim() || undefined,
+        defaultCategory: findBookSettings.downloadDefaultCategory.value,
       });
     }
     switch (findBookSettings.downloadAfterAction.value) {

@@ -36,6 +36,7 @@ import PomodoroBreakOverlay from "./components/PomodoroBreakOverlay.vue";
 import type { SettingsApplyPayload } from "./components/SettingsPanel.vue";
 import type { ColorSchemeApplyPayload } from "./components/ColorSchemePanel.vue";
 import { syncPersistedFindBookProxyToMain } from "./bookSource/services/findBookSettingsStore";
+import { ensureCategoryInCatalog } from "./bookSource/services/findBookDownloadToFileList";
 import { usePomodoroTimer } from "./composables/usePomodoroTimer";
 import {
   mergePomodoroSettings,
@@ -2325,6 +2326,7 @@ async function onBrowserDownloadImported(payload: {
   filePath: string;
   size?: number;
   bookName?: string;
+  defaultCategory?: string;
 }) {
   // 同一本书的新版本：复用「替换文件」——阅读数据（进度/书签/高亮）迁移，正开着自动切新文件
   const oldPath = findFileListPathByBookName(payload.bookName ?? "");
@@ -2338,6 +2340,15 @@ async function onBrowserDownloadImported(payload: {
   if (bookName) {
     onRenameFileName({ oldPath: payload.filePath, newName: bookName });
   }
+  // 首次下载按找书设置「默认分类」归类（与找书下载同源：未配置空值则不设分类）；目录无则新建（append 末尾），有则直接归入
+  const dlName = (payload.defaultCategory ?? "").trim();
+  if (!dlName) return;
+  const nextCatalog = ensureCategoryInCatalog(fileCategoryCatalog.value, dlName);
+  if (nextCatalog !== fileCategoryCatalog.value) {
+    fileCategoryCatalog.value = nextCatalog;
+    persistSettings();
+  }
+  onSetFilesCategory([payload.filePath], dlName);
 }
 
 /** 底栏路径菜单：把当前阅读文件加入侧栏文件列表（复用导入入口，内存+持久化+切侧栏） */
