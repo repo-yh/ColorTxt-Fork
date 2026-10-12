@@ -89,7 +89,7 @@ export function createMainWindowFactory(maps: MainWindowMaps): CreateMainWindow 
       minHeight: WINDOW_MIN_HEIGHT,
       icon: iconPath,
       webPreferences: {
-        preload: path.join(__dirname, "../preload/index.js"),
+        preload: path.join(import.meta.dirname, "../preload/index.js"),
         contextIsolation: true,
         nodeIntegration: false,
       },
@@ -142,7 +142,7 @@ export function createMainWindowFactory(maps: MainWindowMaps): CreateMainWindow 
     } else {
       win.loadFile(
         path.join(
-          __dirname,
+          import.meta.dirname,
           "../renderer",
           openFindBook ? "find-book.html" : "index.html",
         ),

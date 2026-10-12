@@ -417,7 +417,7 @@ function loadStealthHtml(win: BrowserWindow): void {
     return;
   }
   void win.loadFile(
-    path.join(__dirname, "../renderer/stealth-reader.html"),
+    path.join(import.meta.dirname, "../renderer/stealth-reader.html"),
   );
 }
 
@@ -460,7 +460,7 @@ function createOverlayWindow(bounds: StealthBounds): BrowserWindow {
     // 点击不激活；翻页键走全局快捷键。
     focusable: false,
     webPreferences: {
-      preload: path.join(__dirname, "../preload/index.js"),
+      preload: path.join(import.meta.dirname, "../preload/index.js"),
       contextIsolation: true,
       nodeIntegration: false,
     },

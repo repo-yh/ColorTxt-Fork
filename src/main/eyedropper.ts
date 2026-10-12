@@ -212,7 +212,7 @@ function createOverlay(shot: Shot): BrowserWindow {
     focusable: true,
     roundedCorners: false,
     webPreferences: {
-      preload: path.join(__dirname, "../preload/index.js"),
+      preload: path.join(import.meta.dirname, "../preload/index.js"),
       contextIsolation: true,
       nodeIntegration: false,
     },
@@ -254,7 +254,7 @@ function createOverlay(shot: Shot): BrowserWindow {
     void win.loadURL(`${base}/eyedropper.html`);
   } else {
     void win.loadFile(
-      path.join(__dirname, "../renderer/eyedropper.html"),
+      path.join(import.meta.dirname, "../renderer/eyedropper.html"),
     );
   }
 
