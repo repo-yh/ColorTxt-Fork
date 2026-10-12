@@ -1264,6 +1264,16 @@ const footerPathMenuReloadEnabled = computed(
   () =>
     Boolean(currentFile.value && !loading.value && !ebookParsing.value),
 );
+
+/** 底栏路径菜单：「加入当前文件列表」可用性（当前文件未在列表且有可加路径） */
+const footerPathMenuAddToFileListEnabled = computed(() => {
+  if (!currentFile.value || loading.value || ebookParsing.value) return false;
+  // 电子书场景加来源路径（与拖放行为一致：列表存原文件）；普通文件加当前路径
+  const target = ebookConversionSourcePath.value || currentFile.value;
+  return !txtFiles.value.some(
+    (f) => f.path === target || f.path === currentFile.value,
+  );
+});
 /** 原始会话路径为电子书（非 txt/md）时展示「重新转换」 */
 const footerPathMenuReconvertEnabled = computed(
   () =>
@@ -2328,6 +2338,18 @@ async function onBrowserDownloadImported(payload: {
   if (bookName) {
     onRenameFileName({ oldPath: payload.filePath, newName: bookName });
   }
+}
+
+/** 底栏路径菜单：把当前阅读文件加入侧栏文件列表（复用导入入口，内存+持久化+切侧栏） */
+async function onFooterAddCurrentFileToFileList() {
+  const path = currentFile.value;
+  if (!path) return;
+  const target = ebookConversionSourcePath.value || path;
+  if (txtFiles.value.some((f) => f.path === target || f.path === path)) {
+    appToast("已在文件列表中", { kind: "info" });
+    return;
+  }
+  await importPathsIntoFileList([target]);
 }
 
 const footerPathCaption = computed(() => {
@@ -4505,6 +4527,7 @@ useAppShellThemeWatch({
         :path-menu-reload-enabled="footerPathMenuReloadEnabled"
         :path-menu-reconvert-enabled="footerPathMenuReconvertEnabled"
         :path-menu-close-enabled="footerPathMenuCloseEnabled"
+        :path-menu-add-to-file-list-enabled="footerPathMenuAddToFileListEnabled"
         :web-dav-menu-enabled="webDavEnabled"
         :web-dav-book-pack-progress="webDavBookPackProgress"
         :edit-cursor-label="readerEditCursorFooterLabel"
@@ -4524,6 +4547,7 @@ useAppShellThemeWatch({
         @path-export-book-pack-with-progress="exportCurrentReaderBookPack(true)"
         @path-clear-reading-data="clearCurrentFileReadingData"
         @path-close="closeCurrentFile"
+        @path-add-to-file-list="onFooterAddCurrentFileToFileList"
         @save-file-as-encoding="onFooterSaveFileAsEncoding"
         @pomodoro-start="startPomodoro"
         @pomodoro-toggle-display-mode="togglePomodoroDisplayMode"

@@ -35,6 +35,8 @@ const props = withDefaults(
     pathMenuReloadEnabled: boolean;
     pathMenuReconvertEnabled: boolean;
     pathMenuCloseEnabled: boolean;
+    /** 底栏路径菜单：「加入当前文件列表」是否可用（当前文件不在列表且有可加路径） */
+    pathMenuAddToFileListEnabled: boolean;
     /** 是否在路径菜单前置 WebDAV 书包上传/更新 */
     webDavMenuEnabled?: boolean;
     /** 底栏路径右侧：WebDAV 书包上传/同步进度 */
@@ -64,6 +66,7 @@ const props = withDefaults(
     pathMenuReloadEnabled: false,
     pathMenuReconvertEnabled: false,
     pathMenuCloseEnabled: false,
+    pathMenuAddToFileListEnabled: false,
     webDavMenuEnabled: false,
     webDavBookPackProgress: null,
     editCursorLabel: "",
@@ -88,6 +91,7 @@ const emit = defineEmits<{
   pathReload: [];
   pathReconvert: [];
   pathClose: [];
+  pathAddToFileList: [];
   pathExportBookPack: [];
   pathExportBookPackWithProgress: [];
   pathUploadBookPackWebDav: [];
@@ -166,6 +170,12 @@ const pathMenuItems = computed(() => {
       disabled: exportDisabled,
     },
     { id: "clearReadingDataSep", separator: true },
+    {
+      id: "addToFileList",
+      label: "加入当前文件列表",
+      iconHtml: icons.add,
+      disabled: !props.pathMenuAddToFileListEnabled,
+    },
     {
       id: "reveal",
       label: "在文件管理器中显示",
@@ -250,7 +260,8 @@ function onEncodingMenuSelect(id: string) {
 
 function onPathMenuSelect(id: string) {
   closePathMenu();
-  if (id === "reveal") emit("pathRevealInFolder");
+  if (id === "addToFileList") emit("pathAddToFileList");
+  else if (id === "reveal") emit("pathRevealInFolder");
   else if (id === "reload") emit("pathReload");
   else if (id === "reconvert") emit("pathReconvert");
   else if (id === "uploadBookPackWebDav") emit("pathUploadBookPackWebDav");
