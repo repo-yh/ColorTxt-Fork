@@ -240,7 +240,8 @@
       ]
     },
     "portable": {
-      "artifactName": "${name}-${version}-Portable.${ext}"
+      "artifactName": "${name}-${version}-Portable.${ext}",
+      "unpackDirName": "ColorTxtPortable"
     },
     "nsis": {
       "artifactName": "${name}-${version}-Setup.${ext}",
