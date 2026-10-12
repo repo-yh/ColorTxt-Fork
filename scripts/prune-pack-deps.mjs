@@ -456,10 +456,11 @@ function pruneOnnxWebOrphans(nodeModulesRoot) {
 
 /** 仅 install / node-gyp 阶段需要，打包后运行时不加载 */
 function pruneInstallOnlyPackages(nodeModulesRoot) {
+  // node-abi 不在此列：@electron/rebuild 4.x（electron-builder 26 内部 rebuild 阶段）
+  // 运行时 import { getAbi } from 'node-abi'，删了会 ERR_MODULE_NOT_FOUND
   for (const name of [
     "prebuild-install",
     "napi-build-utils",
-    "node-abi",
     "expand-template",
     "mkdirp-classic",
     "deep-extend",
