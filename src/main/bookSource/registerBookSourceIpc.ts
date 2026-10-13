@@ -476,7 +476,12 @@ export function registerBookSourceIpcHandlers(): void {
       _e,
       payload: unknown,
     ) => {
-      const p = payload as { sourceUrl?: string; exploreUrl?: string; page?: number };
+      const p = payload as {
+        sourceUrl?: string;
+        exploreUrl?: string;
+        page?: number;
+        parseKinds?: boolean;
+      };
       if (typeof p?.sourceUrl !== "string" || typeof p?.exploreUrl !== "string") {
         return { items: [], message: "参数无效" };
       }
@@ -484,13 +489,14 @@ export function registerBookSourceIpcHandlers(): void {
       if (!source) return { items: [], message: "书源不存在" };
       const logs: string[] = [];
       try {
-        const items = await exploreBook(
+        const result = await exploreBook(
           source,
           p.exploreUrl,
           typeof p.page === "number" ? p.page : 1,
           logs,
+          { parseKinds: p.parseKinds === true },
         );
-        return { items, logs };
+        return { items: result.items, kinds: result.kinds, logs };
       } catch (e) {
         if (!logs.length) {
           appendBookSourceErrorLog(logs, e, {
@@ -503,6 +509,7 @@ export function registerBookSourceIpcHandlers(): void {
         }
         return {
           items: [],
+          kinds: [],
           message: summarizeBookSourceError(e),
           logs,
         };

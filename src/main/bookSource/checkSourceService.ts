@@ -373,7 +373,7 @@ async function doCheckSource(
       throwIfCancelled();
       report("┌获取发现列表");
       const logs: string[] = [];
-      const exploreBooks = await exploreBook(source, url, 1, logs);
+      const { items: exploreBooks } = await exploreBook(source, url, 1, logs);
       if (!exploreBooks.length) {
         next = addBookSourceGroups(next, "发现失效");
       } else {

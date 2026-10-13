@@ -68,6 +68,8 @@ export type BookSourceRuleExplore = {
   intro?: string;
   coverUrl?: string;
   bookUrl?: string;
+  /** 发现页正文分类条选择器（如 Discuz #thread_types），parseKinds 时随列表响应返回 */
+  kindList?: string;
 };
 
 /** Legado 发现分类 flex 样式 */

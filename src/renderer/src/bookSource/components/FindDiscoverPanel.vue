@@ -309,6 +309,49 @@ async function onKindClick(source: BookSourceListItem, kind: ExploreKind) {
   await loadExplorePage(false, seq);
 }
 
+/** 发现页正文解析出的分类条并入分类导航（按 title 去重，不覆盖既有） */
+function mergeExploreKinds(sourceUrl: string, extra: ExploreKind[]) {
+  const base = kindsByUrl.value.get(sourceUrl);
+  const seen = new Set((base ?? []).map((k) => k.title));
+  const merged = [...(base ?? [])];
+  let changed = false;
+  for (const kind of extra) {
+    const title = kind.title.trim();
+    const url = kind.url?.trim();
+    if (!title || !url || seen.has(title)) continue;
+    seen.add(title);
+    merged.push({ title, url });
+    changed = true;
+  }
+  if (!changed) return;
+  const nextKinds = new Map(kindsByUrl.value);
+  nextKinds.set(sourceUrl, merged);
+  kindsByUrl.value = nextKinds;
+}
+
+/** 当前分类浏览下可点击的标签集合（=分类导航已有的分类 title） */
+const exploreClickableTags = computed<string[]>(() => {
+  const show = exploreShow.value;
+  if (!show) return [];
+  const kinds = kindsByUrl.value.get(show.sourceUrl);
+  if (!kinds?.length) return [];
+  return kinds.filter((k) => k.url?.trim()).map((k) => k.title);
+});
+
+/** 点击书籍标签：匹配分类导航同名分类，复用 onKindClick 切换分类重新发现 */
+function onTagClick(tag: string) {
+  const show = exploreShow.value;
+  if (!show) return;
+  const kind = (kindsByUrl.value.get(show.sourceUrl) ?? []).find(
+    (k) => k.title === tag && k.url?.trim(),
+  );
+  if (!kind) return;
+  void onKindClick(
+    { bookSourceUrl: show.sourceUrl, bookSourceName: show.sourceName } as BookSourceListItem,
+    kind,
+  );
+}
+
 async function onShowExploreLogs() {
   const text = exploreLogs.value.length
     ? exploreLogs.value.join("\n\n")
@@ -346,8 +389,12 @@ async function loadExplorePage(append: boolean, requestSeq?: number) {
       sourceUrl: captured.sourceUrl,
       exploreUrl: captured.exploreUrl,
       page: capturedPage,
+      parseKinds: !append,
     });
     if (isStale()) return;
+    if (!append && r.kinds?.length) {
+      mergeExploreKinds(captured.sourceUrl, r.kinds);
+    }
     if (r.logs?.length) exploreLogs.value = r.logs;
     const items = r.items ?? [];
     // 仅有 message 时视为失败；空列表但有日志可能是登录提示等软空结果（对齐 Legado toast）
@@ -691,6 +738,8 @@ defineExpose({ refreshSources });
                   :show-origin="false"
                   :cover-url="getCoverUrl(exploreBooks[index]!) ?? ''"
                   :cover-pending="isCoverPending(exploreBooks[index]!)"
+                  :clickable-tags="exploreClickableTags"
+                  @tag-click="onTagClick"
                   @click="onOpenBook"
                 />
               </template>

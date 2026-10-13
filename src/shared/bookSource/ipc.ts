@@ -297,7 +297,15 @@ export type BookSourceIpcApi = {
     sourceUrl: string;
     exploreUrl: string;
     page?: number;
-  }) => Promise<{ items: SearchBookItem[]; logs?: string[]; message?: string }>;
+    /** 首次加载传 true：引擎从响应正文解析 ruleExplore.kindList 分类条 */
+    parseKinds?: boolean;
+  }) => Promise<{
+    items: SearchBookItem[];
+    /** 首次加载响应附带的正文分类条 */
+    kinds?: ExploreKind[];
+    logs?: string[];
+    message?: string;
+  }>;
   bookSourceExploreClearKindsCache: (
     sourceUrl: string,
   ) => Promise<{ ok: boolean }>;

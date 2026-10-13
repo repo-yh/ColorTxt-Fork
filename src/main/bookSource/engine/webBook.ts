@@ -4,6 +4,7 @@ import type {
   Book,
   BookChapter,
   BookInfoSeed,
+  ExploreKind,
 } from "@shared/bookSource/types";
 import { splitBookMetaTags } from "@shared/bookSource/bookMetaTags";
 import {
@@ -510,12 +511,64 @@ export async function searchBook(
   });
 }
 
+/** exploreBook 返回：列表条目 + 首次加载解析的正文分类条 */
+export type ExploreBookResult = {
+  items: SearchBookItem[];
+  kinds: ExploreKind[];
+};
+
+/** 解析发现页正文分类条（ruleExplore.kindList）：title 优先取 em 文本否则取直接文本（剔除帖子数等子元素）；
+ * URL 不用正文链接，只从 href 提取 typeid，由主分组 URL 模板自构（page 占位符 + typeid + 继承 option），按 typeid 去重 */
+function parseExploreKindList(
+  source: BookSourceRecord,
+  body: string,
+  groupUrlPart: string,
+  logs: string[],
+  inheritUrlOptions?: string,
+): ExploreKind[] {
+  const rule = source.ruleExplore?.kindList?.trim();
+  if (!rule) return [];
+  const base = groupUrlPart.trim();
+  if (!base) return [];
+  try {
+    const $ = loadCheerioHtml(body);
+    const out: ExploreKind[] = [];
+    const seen = new Set<string>();
+    for (const part of rule.split("||")) {
+      const sel = part.trim();
+      if (!sel) continue;
+      $(sel).each((_, el) => {
+        const href = $(el).attr("href")?.trim();
+        if (!href) return;
+        const tid = /(?:\?|&)typeid=([^&#\s]+)/.exec(href)?.[1];
+        if (!tid || seen.has(tid)) return;
+        // Discuz 分类条 a 内含 <em>名</em><span>帖子数</span>，text() 会拼成「都市2000」——
+        // 优先取 em 文本，否则取元素直接文本（剔除子元素）；再按 typeid 去重（顶条与帖子行同分类）
+        const emText = $(el).find("em").first().text().trim();
+        const title = emText || $(el).clone().children().remove().end().text().trim();
+        if (!title) return;
+        const kindBase = /[?&]page=/.test(base)
+          ? base
+          : `${base}${base.includes("?") ? "&" : "?"}page={{page}}`;
+        const kindUrl = `${kindBase}&typeid=${tid}${inheritUrlOptions ?? ""}`;
+        seen.add(tid);
+        out.push({ title, url: kindUrl });
+      });
+    }
+    return out;
+  } catch (e) {
+    logs.push(`发现分类条解析失败: ${e instanceof Error ? e.message : String(e)}`);
+    return [];
+  }
+}
+
 export async function exploreBook(
   source: BookSourceRecord,
   exploreCategoryUrl: string,
   page = 1,
   logs: string[] = [],
-): Promise<SearchBookItem[]> {
+  options?: { parseKinds?: boolean },
+): Promise<ExploreBookResult> {
   const host = createJsExtensionHost(source, logs);
   runJsLib(source, host);
   const ruleVariables: Record<string, string> = {};
@@ -540,7 +593,7 @@ export async function exploreBook(
   } catch (e) {
     if (isVerificationCancelled(e)) {
       logs.push("用户取消登录，跳过该书源");
-      return [];
+      return { items: [], kinds: [] };
     }
     throw e;
   }
@@ -549,7 +602,25 @@ export async function exploreBook(
       analyzeUrl.url?.trim() &&
       normalizeHttpUrlPath(res.url) !== normalizeHttpUrlPath(analyzeUrl.url),
   );
-  return analyzeBookList(
+  let kindUrlOptions: string | undefined;
+  let groupUrlPart = "";
+  if (options?.parseKinds) {
+    const split = splitUrlFetchOptions(exploreCategoryUrl);
+    groupUrlPart = split.urlPart;
+    if (split.options && Object.keys(split.options).length > 0) {
+      kindUrlOptions = `,${JSON.stringify(split.options)}`;
+    }
+  }
+  const kinds = options?.parseKinds
+    ? parseExploreKindList(
+        source,
+        res.body,
+        groupUrlPart,
+        logs,
+        kindUrlOptions,
+      )
+    : [];
+  const items = await analyzeBookList(
     source,
     res.body,
     res.url,
@@ -575,6 +646,7 @@ export async function exploreBook(
     });
     throw e;
   });
+  return { items, kinds };
 }
 
 type BookListRuleBlock = NonNullable<BookSourceRecord["ruleSearch"]>;

@@ -22,6 +22,8 @@ const props = withDefaults(
     coverPending?: boolean;
     /** 外部强制显示默认封面（书架重试失败后） */
     forceDefaultCover?: boolean;
+    /** 可点击跳转的标签集合（发现页分类导航已有的 title）；未传=全部不可点击 */
+    clickableTags?: string[];
   }>(),
   { showOrigin: true, coverPending: false },
 );
@@ -29,6 +31,7 @@ const props = withDefaults(
 const emit = defineEmits<{
   click: [item: SearchBookItem];
   coverError: [item: SearchBookItem];
+  tagClick: [tag: string];
 }>();
 
 const { findBookshelfBook } = useFindBookBookshelf();
@@ -91,6 +94,18 @@ watch(
 
 function onClick() {
   emit("click", props.item);
+}
+
+/** 标签是否可点击（在分类导航中存在同名分类） */
+function isTagClickable(tag: string): boolean {
+  return props.clickableTags?.includes(tag) ?? false;
+}
+
+/** 可点击标签点击：阻止冒泡（不触发条目打开），交父级切换分类 */
+function onTagClick(tag: string, e: MouseEvent) {
+  if (!isTagClickable(tag)) return;
+  e.stopPropagation();
+  emit("tagClick", tag);
 }
 
 function onCoverError() {
@@ -159,6 +174,8 @@ function onCoverLoad(e: Event) {
           v-for="(tag, tagIdx) in kindTags"
           :key="`${item.id}-tag-${tagIdx}`"
           class="findBookListItemTag"
+          :class="{ 'findBookListItemTag--clickable': isTagClickable(tag) }"
+          @click="onTagClick(tag, $event)"
         >{{ tag }}</span>
       </div>
       <div v-if="lastChapterText" class="findBookListItemLatest">
@@ -315,6 +332,14 @@ img.findBookListItemCover {
   line-height: 1.4;
   background: var(--book-source-tag, #8b63c9);
   color: #fff;
+}
+.findBookListItemTag--clickable {
+  cursor: pointer;
+  transition: filter 0.12s ease;
+}
+.findBookListItemTag--clickable:hover {
+  filter: brightness(1.15);
+  text-decoration: underline;
 }
 .findBookListItemIntro {
   font-size: 12px;
