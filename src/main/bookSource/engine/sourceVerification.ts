@@ -80,6 +80,8 @@ type ActiveVerification =
 const pending = new Map<string, Pending>();
 const captchaPending = new Map<string, Pending>();
 const activeWindows = new Map<string, ActiveVerification>();
+/** getVerificationResult 打开中标记：覆盖「调用到 activeWindows.set」的间隙，防并发重复开窗 */
+const openingVerifications = new Set<string>();
 const captchaFinishHandlers = new Map<
   string,
   (payload: { ok: boolean; code: string }) => void
@@ -421,6 +423,7 @@ function openVerificationWindow(
     source,
     host,
   ).catch((err) => {
+    openingVerifications.delete(sourceKey);
     host?.log(
       `[验证] 打开失败: ${err instanceof Error ? err.message : String(err)}`,
     );
@@ -560,6 +563,7 @@ async function openVerificationWindowAsync(
     win,
     toolbarIds: [footer.webContents.id],
   });
+  openingVerifications.delete(sourceKey);
 
   // 对齐 Legado SourceVerification / BackstageWebView：证书异常仍 proceed，
   // 否则主机名与证书 SAN 不一致时登录页整页空白（ERR_TLS_CERT_ALTNAME_INVALID）
@@ -632,9 +636,15 @@ export function getVerificationResult(
     host?: JsExtensionHost;
   } = {},
 ): Promise<string> {
+  // 同源已有验证窗（含打开中）：不 clear 重开——重开会刷掉用户正在输入的登录窗；
+  // 后续请求直接按用户取消返回，由各调用方取消链路处理（发现返回空/搜索跳过/检查更新失败标记）
+  if (activeWindows.has(sourceKey) || openingVerifications.has(sourceKey)) {
+    return Promise.reject(new VerificationCancelledError());
+  }
   clearVerificationResult(sourceKey);
   const refetch = options.refetchAfterSuccess !== false;
 
+  openingVerifications.add(sourceKey);
   return new Promise((resolve, reject) => {
     pending.set(sourceKey, { resolve, reject });
     openVerificationWindow(
