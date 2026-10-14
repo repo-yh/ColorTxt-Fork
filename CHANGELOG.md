@@ -1,3 +1,9 @@
+## 3.8.13
+
+修复：
+
+- searchUpdate 书源详情面板「开始阅读/继续阅读」打开内置浏览器报「非法字符」：书源 searchUrl 已带 webView option 后缀（走后台 WebView 过站点挑战用），浏览器直开未剥、Discuz 拒绝请求——`openSearchResultInBrowser` 现先 `stripChapterUrlOption` 再拼 URL；引擎目录拉取/检查更新仍带 option 走 WebView 不受影响
+
 ## 3.8.12
 
 新功能：
