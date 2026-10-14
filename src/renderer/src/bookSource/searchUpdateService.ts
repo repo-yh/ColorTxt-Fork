@@ -159,8 +159,9 @@ export async function openSearchResultInBrowser(
     const source = await window.colorTxt.bookSourceGet(sourceUrl);
     const searchUrl = source?.searchUrl?.trim();
     if (!searchUrl) return false;
-    // searchUrl 常为相对路径（如 search.php?...），相对书源/帖子 URL 补全 host
-    const raw = searchUrlAsTocUrl(searchUrl, name);
+    // searchUrl 现带 ,{"webView":...} option（引擎目录/检查更新要过 _dsign 挑战）；
+    // 浏览器直开必须剥掉，否则 Discuz 判「非法字符」拒绝请求
+    const raw = searchUrlAsTocUrl(stripChapterUrlOption(searchUrl), name);
     let full = raw;
     try {
       full = new URL(raw, bookUrl?.trim() || sourceUrl).toString();
