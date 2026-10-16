@@ -35,7 +35,10 @@ import FullscreenSystemClock from "./components/FullscreenSystemClock.vue";
 import PomodoroBreakOverlay from "./components/PomodoroBreakOverlay.vue";
 import type { SettingsApplyPayload } from "./components/SettingsPanel.vue";
 import type { ColorSchemeApplyPayload } from "./components/ColorSchemePanel.vue";
-import { syncPersistedFindBookProxyToMain } from "./bookSource/services/findBookSettingsStore";
+import {
+  syncPersistedFindBookProxyToMain,
+  syncPersistedFindBookWebViewDelayToMain,
+} from "./bookSource/services/findBookSettingsStore";
 import { ensureCategoryInCatalog } from "./bookSource/services/findBookDownloadToFileList";
 import { usePomodoroTimer } from "./composables/usePomodoroTimer";
 import {
@@ -777,6 +780,7 @@ onMounted(() => {
   };
   // 主窗口推送找书/设置共用的 HTTP 代理（词典等网络请求依赖主进程默认代理）
   syncPersistedFindBookProxyToMain();
+  syncPersistedFindBookWebViewDelayToMain();
   offStealthOwnerProgress = window.colorTxt.onStealthOwnerProgress((payload) => {
     // 摸鱼期间不同步；仅退出时 focus=true 跳回主阅读器行号
     if (payload.focus) {

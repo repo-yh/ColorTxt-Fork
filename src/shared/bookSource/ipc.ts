@@ -83,6 +83,9 @@ export const BOOK_SOURCE_IPC = {
   /** 找书全局 HTTP 代理（Legado 格式字符串；空/null 表示关闭） */
   setHttpProxy: "bookSource:setHttpProxy",
   getHttpProxy: "bookSource:getHttpProxy",
+  /** 找书设置：全局 WebView 额外延时（ms；null 表示跟随书源 webViewDelayTime） */
+  setWebViewDelay: "bookSource:setWebViewDelay",
+  getWebViewDelay: "bookSource:getWebViewDelay",
   /** 用指定代理（或直连）探测 URL 连通性 */
   testHttpProxy: "bookSource:testHttpProxy",
   /** 打开书源浏览器窗口（带书源 Cookie 登录态 + 找书代理，接管附件下载） */
@@ -399,6 +402,8 @@ export type BookSourceIpcApi = {
     proxy: string | null,
   ) => Promise<{ ok: boolean }>;
   bookSourceGetHttpProxy: () => Promise<string | null>;
+  bookSourceSetWebViewDelay: (ms: number | null) => Promise<{ ok: boolean }>;
+  bookSourceGetWebViewDelay: () => Promise<number | null>;
   bookSourceTestHttpProxy: (payload: {
     /** Legado 代理字符串；空/null 表示直连 */
     proxy?: string | null;

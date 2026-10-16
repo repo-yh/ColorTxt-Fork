@@ -73,6 +73,20 @@ function buildWebViewEvalScript(userScript: string): string {
 /** 标记隐藏后台窗，避免被当成「末窗」挡 quit */
 export const BACKSTAGE_WEBVIEW_FLAG = "__colortxtBackstageWebView";
 
+/** 找书设置「WebView 加载延时」全局覆盖（ms）；null = 跟随书源 webViewDelayTime */
+let webViewDelayOverrideMs: number | null = null;
+
+export function setWebViewDelayOverrideMs(ms: unknown): void {
+  webViewDelayOverrideMs =
+    typeof ms === "number" && Number.isFinite(ms) && ms >= 0
+      ? Math.floor(ms)
+      : null;
+}
+
+export function getWebViewDelayOverrideMs(): number | null {
+  return webViewDelayOverrideMs;
+}
+
 const activeBackstageWindows = new Set<BrowserWindow>();
 
 export function isBackstageWebViewWindow(win: BrowserWindow): boolean {

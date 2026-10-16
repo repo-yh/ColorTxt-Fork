@@ -9,6 +9,7 @@ import {
   snapshotFindBookOnlySettingsFromStore,
   snapshotSharedReaderSettingsForMain,
   syncPersistedFindBookProxyToMain,
+  syncPersistedFindBookWebViewDelayToMain,
 } from "../services/findBookSettingsStore";
 import {
   findBookProxyChangedEvent,
@@ -101,6 +102,7 @@ function createFindBookSettingsStore() {
 
   function syncHttpProxyToMain() {
     syncPersistedFindBookProxyToMain();
+    syncPersistedFindBookWebViewDelayToMain();
   }
 
   function sharedReaderSnapshot() {

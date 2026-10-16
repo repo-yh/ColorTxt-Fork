@@ -1593,6 +1593,14 @@ const api = {
     ipcRenderer.invoke(BOOK_SOURCE_IPC.getHttpProxy) as ReturnType<
       BookSourceIpcApi["bookSourceGetHttpProxy"]
     >,
+  bookSourceSetWebViewDelay: (ms: number | null) =>
+    ipcRenderer.invoke(BOOK_SOURCE_IPC.setWebViewDelay, ms) as ReturnType<
+      BookSourceIpcApi["bookSourceSetWebViewDelay"]
+    >,
+  bookSourceGetWebViewDelay: () =>
+    ipcRenderer.invoke(BOOK_SOURCE_IPC.getWebViewDelay) as ReturnType<
+      BookSourceIpcApi["bookSourceGetWebViewDelay"]
+    >,
   bookSourceTestHttpProxy: (
     payload: Parameters<BookSourceIpcApi["bookSourceTestHttpProxy"]>[0],
   ) =>

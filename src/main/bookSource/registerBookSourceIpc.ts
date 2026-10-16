@@ -72,6 +72,10 @@ import {
   setDefaultBookSourceProxy,
 } from "./engine/httpProxy";
 import {
+  getWebViewDelayOverrideMs,
+  setWebViewDelayOverrideMs,
+} from "./engine/backstageWebView";
+import {
   getDomainFromUrl,
   removeDomainCookies,
 } from "./engine/cookieManager";
@@ -919,6 +923,15 @@ export function registerBookSourceIpcHandlers(): void {
 
   ipcMain.handle(BOOK_SOURCE_IPC.getHttpProxy, () => {
     return getDefaultBookSourceProxy() ?? null;
+  });
+
+  ipcMain.handle(BOOK_SOURCE_IPC.setWebViewDelay, (_e, ms: unknown) => {
+    setWebViewDelayOverrideMs(ms);
+    return { ok: true };
+  });
+
+  ipcMain.handle(BOOK_SOURCE_IPC.getWebViewDelay, () => {
+    return getWebViewDelayOverrideMs();
   });
 
   ipcMain.handle(BOOK_SOURCE_IPC.testHttpProxy, async (_e, payload: unknown) => {

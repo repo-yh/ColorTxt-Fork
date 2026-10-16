@@ -129,6 +129,8 @@ export type PersistedFindBookSettings = {
   downloadDefaultCategory?: string;
   /** 全局网络代理（主界面设置与找书窗口共用；书源 header `proxy` 优先） */
   proxy?: FindBookProxySettings;
+  /** 全局 WebView 额外延时（ms）；undefined/null = 跟随书源 webViewDelayTime */
+  webViewDelayMs?: number | null;
   /** 阅读器侧栏是否展开（非全屏） */
   showSidebar?: boolean;
   /** 极简视图 */

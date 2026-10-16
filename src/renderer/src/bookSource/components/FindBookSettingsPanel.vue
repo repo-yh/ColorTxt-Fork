@@ -26,8 +26,10 @@ import {
   clampFindBookReaderLineHeight,
   defaultTimedScrollIntervalMs,
   defaultTimedScrollRange,
+  loadFindBookWebViewDelayMs,
   loadMainSettingsData,
   patchPersistedMainSettings,
+  saveFindBookWebViewDelayMsAndSync,
 } from "../services/findBookSettingsStore";
 import {
   defaultCompressBlankKeepOneBlank,
@@ -161,6 +163,7 @@ const draftProxyHost = ref(DEFAULT_FIND_BOOK_PROXY_SETTINGS.host);
 const draftProxyPort = ref(DEFAULT_FIND_BOOK_PROXY_SETTINGS.port);
 const draftProxyUsername = ref(DEFAULT_FIND_BOOK_PROXY_SETTINGS.username);
 const draftProxyPassword = ref(DEFAULT_FIND_BOOK_PROXY_SETTINGS.password);
+const draftWebViewDelayMs = ref<number | null>(null);
 const draftWebDavEnabled = ref(false);
 const draftWebDavUrl = ref("");
 const draftWebDavUsername = ref("");
@@ -241,6 +244,11 @@ const draftActiveVoiceReadProfileId = ref("");
 const draftAiEnabled = ref(false);
 const emptyCharacterRoster: CharacterRosterEntry[] = [];
 
+function parseDelayMsInput(raw: string): number | null {
+  const digits = raw.replace(/\D/g, "").slice(0, 6);
+  return digits ? Number(digits) : null;
+}
+
 function syncFindBookOnlyDraftFromStore() {
   draftCacheDir.value = fb.cacheDir.value;
   draftDownloadDir.value = fb.downloadDir.value;
@@ -253,6 +261,7 @@ function syncFindBookOnlyDraftFromStore() {
   draftProxyPort.value = fb.proxy.value.port;
   draftProxyUsername.value = fb.proxy.value.username;
   draftProxyPassword.value = fb.proxy.value.password;
+  draftWebViewDelayMs.value = loadFindBookWebViewDelayMs();
 }
 
 function syncWebDavDraftFromMainSettings() {
@@ -452,6 +461,7 @@ function onResetCurrentTab() {
   else if (activeTab.value === "proxy") resetProxyDraft();
   else if (activeTab.value === "webDav") resetWebDavDraft();
   else if (activeTab.value === "voiceRead") resetVoiceReadDraft();
+  else if (activeTab.value === "misc") draftWebViewDelayMs.value = null;
   else resetReadingDraft();
 }
 
@@ -571,6 +581,7 @@ async function onConfirm() {
     username: draftProxyUsername.value.trim(),
     password: draftProxyPassword.value,
   };
+  saveFindBookWebViewDelayMsAndSync(draftWebViewDelayMs.value);
   fb.readerFontSize.value = draftFontSize.value;
   fb.monacoFontFamily.value =
     draftFontFamily.value.trim() || fb.monacoFontFamily.value;
@@ -829,6 +840,34 @@ watch(draftFontSize, (size) => {
               v-model:draft-web-dav-password="draftWebDavPassword"
               v-model:draft-web-dav-remote-dir="draftWebDavRemoteDir"
             />
+
+            <div v-show="activeTab === 'misc'">
+              <div class="settingsRow">
+                <div class="settingsRowMain settingsRowMain--baseline">
+                  <span class="settingsLabel short">WebView 加载延时（ms）</span>
+                  <input
+                    class="miscDelayInput"
+                    type="text"
+                    inputmode="numeric"
+                    :value="draftWebViewDelayMs ?? ''"
+                    aria-label="WebView 加载延时"
+                    placeholder="留空=无额外延时"
+                    autocomplete="off"
+                    @input="
+                      draftWebViewDelayMs = parseDelayMsInput(
+                        ($event.target as HTMLInputElement).value,
+                      )
+                    "
+                  />
+                </div>
+                <p class="settingsHint">
+                  隐藏浏览器（webView）页面加载完成后的额外等待，总等待 =
+                  1000ms 基础 + 此值；填值全局覆盖书源
+                  webViewDelayTime，留空 = 无额外延时（书源未配延时，总等待
+                  1000ms，建议填值）。调小可加快搜索，过小可能导致结果不全。
+                </p>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -945,5 +984,15 @@ watch(draftFontSize, (size) => {
   gap: 10px;
   flex-shrink: 0;
   margin-left: auto;
+}
+
+.miscDelayInput {
+  box-sizing: border-box;
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: 100%;
+  width: 100%;
+  height: 32px;
+  font-size: 13px;
 }
 </style>

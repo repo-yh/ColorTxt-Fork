@@ -163,6 +163,33 @@ export function syncPersistedFindBookProxyToMain(): void {
   void window.colorTxt?.bookSourceSetHttpProxy(url || null);
 }
 
+/** 读持久化的全局 WebView 延时（null = 跟随书源 webViewDelayTime） */
+export function loadFindBookWebViewDelayMs(): number | null {
+  const v = loadPersistedFindBookSettings().webViewDelayMs;
+  return typeof v === "number" && Number.isFinite(v) && v >= 0
+    ? Math.floor(v)
+    : null;
+}
+
+/** 保存「WebView 加载延时」并同步主进程 */
+export function saveFindBookWebViewDelayMsAndSync(
+  ms: number | null,
+): number | null {
+  const normalized =
+    ms != null && Number.isFinite(ms) && ms >= 0 ? Math.floor(ms) : null;
+  persistFindBookSettings({
+    ...loadPersistedFindBookSettings(),
+    webViewDelayMs: normalized ?? undefined,
+  });
+  void window.colorTxt?.bookSourceSetWebViewDelay(normalized);
+  return normalized;
+}
+
+/** 主界面 / 找书启动：把已持久化的 WebView 延时推到主进程 */
+export function syncPersistedFindBookWebViewDelayToMain(): void {
+  void window.colorTxt?.bookSourceSetWebViewDelay(loadFindBookWebViewDelayMs());
+}
+
 export function loadMainSettingsData(): PersistedSettingsData {
   return loadPersistedSettingsData(localStorage, persistKey)?.data ?? {};
 }

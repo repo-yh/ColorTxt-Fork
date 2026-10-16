@@ -17,7 +17,10 @@ import { cookieHeaderForUrl } from "./cookieManager";
 import { DEFAULT_BOOK_SOURCE_USER_AGENT } from "./bookSourceUserAgent";
 import { evalJs, evalJsAsync } from "./rhinoRuntime";
 import { legadoJsonValueToString } from "./legadoJavaApi";
-import { runBackstageWebView } from "./backstageWebView";
+import {
+  getWebViewDelayOverrideMs,
+  runBackstageWebView,
+} from "./backstageWebView";
 import { fetchViaChromiumNet } from "./chromiumNetFetch";
 import { splitAtJsRule } from "./legadoRuleSplit";
 import {
@@ -731,7 +734,10 @@ export class AnalyzeUrl {
         js: webJs,
         source: this.source,
         host: this.host,
-        delayMs: this.urlFetchOptions.webViewDelayTime ?? undefined,
+        delayMs:
+          getWebViewDelayOverrideMs() ??
+          this.urlFetchOptions.webViewDelayTime ??
+          undefined,
         method: webPayload.method,
         postData: webPayload.postData,
         headers: webPayload.headers,
@@ -776,7 +782,10 @@ export class AnalyzeUrl {
         js: webJs,
         source: this.source,
         host: this.host,
-        delayMs: this.urlFetchOptions.webViewDelayTime ?? undefined,
+        delayMs:
+          getWebViewDelayOverrideMs() ??
+          this.urlFetchOptions.webViewDelayTime ??
+          undefined,
       });
       if (webBody) {
         res = { ...res, body: webBody };

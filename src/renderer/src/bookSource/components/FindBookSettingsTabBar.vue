@@ -7,7 +7,8 @@ export type FindBookSettingsTabId =
   | "edit"
   | "voiceRead"
   | "proxy"
-  | "webDav";
+  | "webDav"
+  | "misc";
 
 defineProps<{
   activeTab: FindBookSettingsTabId;
@@ -81,6 +82,16 @@ const emit = defineEmits<{
           @click="emit('update:activeTab', 'webDav')"
         >
           WebDAV
+        </button>
+        <button
+          type="button"
+          role="tab"
+          class="tabBtn"
+          :class="{ active: activeTab === 'misc' }"
+          :aria-selected="activeTab === 'misc'"
+          @click="emit('update:activeTab', 'misc')"
+        >
+          杂项
         </button>
       </div>
     </ScrollableTabNav>
