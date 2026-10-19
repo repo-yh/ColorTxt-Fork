@@ -28,6 +28,8 @@ window.addEventListener('resize', alignStickyChapter)
 window.addEventListener('scroll', alignStickyChapter, { passive: true })
 alignStickyChapter()
 var currentFile = ''
+var currentFileName = ''
+var fileNameMap = {}
 var chapters = []
 var totalLines = 0
 var sidebarOpen = false
@@ -84,10 +86,12 @@ function saveProgress() {
   if (!currentFile) return
   var line = findTopVisibleLine()
   if (line === null) return
+  var key = currentFileName || currentFile
   var map = {}
   try { map = JSON.parse(localStorage.getItem('colortxt_web_progress')) || {} } catch(e) {}
   if (typeof map !== 'object' || Array.isArray(map)) map = {}
-  map[currentFile] = line
+  map[key] = line
+  if (key !== currentFile) delete map[currentFile]
   try { localStorage.setItem('colortxt_web_progress', JSON.stringify(map)) } catch(e) {}
 }
 
@@ -311,6 +315,7 @@ async function loadFile(filePath, forceRefresh) {
 
   showStatus('正在加载...', false)
   currentFile = filePath
+  currentFileName = fileNameMap[filePath] || filePath
   loadedRanges = []
   totalLines = 0
   chapters = []
@@ -318,10 +323,14 @@ async function loadFile(filePath, forceRefresh) {
 
   try {
     try { localStorage.setItem('colortxt_web_file', currentFile) } catch(e) {}
+    try { localStorage.setItem('colortxt_web_book', currentFileName) } catch(e) {}
     if (currentFile) $select.value = currentFile
-    // 恢复阅读进度：只加载进度行所在三段
+    // 恢复阅读进度：只加载进度行所在三段（先按书名，兜底旧路径键）
     var savedLine = 0
-    try { savedLine = (JSON.parse(localStorage.getItem('colortxt_web_progress')) || {})[currentFile] || 0 } catch(e) {}
+    try {
+      var pm = JSON.parse(localStorage.getItem('colortxt_web_progress')) || {}
+      savedLine = pm[currentFileName] || pm[filePath] || 0
+    } catch(e) {}
     if (savedLine > 0) {
       await jumpToLine(savedLine, forceRefresh)
     } else {
@@ -373,6 +382,7 @@ async function loadFiles() {
     if (!data.ok || !data.files) return ''
     $select.innerHTML = '<option value="">-- 选择文件 --</option>'
     data.files.forEach(function(f) {
+      fileNameMap[f.path] = f.name
       var opt = document.createElement('option')
       opt.value = f.path
       opt.textContent = f.name + (f.active ? ' [当前]' : '')
@@ -412,8 +422,16 @@ try {
 } catch(e) {}
 
 loadFiles().then(function() {
+  var savedBook = ''
   var saved = ''
+  try { savedBook = localStorage.getItem('colortxt_web_book') || '' } catch(e) {}
   try { saved = localStorage.getItem('colortxt_web_file') || '' } catch(e) {}
+  // 优先按书名解析到列表里的当前路径（换版本后 path 变了也能接着读），找不到再退回旧路径
+  if (savedBook) {
+    for (var p in fileNameMap) {
+      if (fileNameMap[p] === savedBook) { saved = p; break }
+    }
+  }
   if (saved) {
     loadFile(saved)
     $select.value = saved

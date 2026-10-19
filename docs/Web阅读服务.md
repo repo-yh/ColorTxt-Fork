@@ -37,7 +37,8 @@
 
 ## 阅读进度保存/恢复（2026-10-08）
 
-- localStorage `colortxt_web_progress`：JSON map `{ 文件路径: 行号 }`，按文件区分
+- localStorage `colortxt_web_progress`：JSON map `{ 书籍条目名: 行号 }`，按书籍区分（2026-10-19 从文件路径改为条目名——书源重下换版本 path 变了进度不丢）；保存时写书名键并删除同书旧路径键（自动迁移），恢复先按书名、兜底旧路径键
+- localStorage `colortxt_web_book`（2026-10-19 新增）：最后阅读的书名；启动时按书名从文件列表解析当前 path（换版本后接续阅读），解析不到退回旧 `colortxt_web_file`（仍按路径写，仅作兜底）
 - 保存：`findTopVisibleLine()` 取视口顶第一个完整可见行（`getBoundingClientRect().top >= 60`），滚动停止 500ms debounce 写入；`beforeunload` 与切换文件兜底
 - 恢复：`loadFile()` 读 savedLine > 0 走 `jumpToLine(savedLine, forceRefresh)`（未加载 → `clearContent()` → 只加载目标三段 → 定位）；服务端 `buildColoredHtmlSegment` 对 start/end 做完整 clamp，总行数未知时发超界 end 请求安全
 - `jumpToLine` 尾部顺序：先 `scrollToLine` → 再 `updateStickyChapter()` → 最后 `setupSentinel()`（避免顶部哨兵以定位前快照误触发 `loadPrevSegment` 推走视口）
