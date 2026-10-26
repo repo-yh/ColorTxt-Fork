@@ -1,4 +1,4 @@
-import { app, BrowserView, BrowserWindow, clipboard, ipcMain, Menu } from "electron";
+import { app, BrowserView, BrowserWindow, clipboard, ipcMain, Menu, session } from "electron";
 import type { WebContents } from "electron";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
@@ -22,6 +22,10 @@ import {
   cookieHeaderForUrl,
 } from "./cookieManager";
 import {
+  clearSessionDomainCookies,
+  seedSessionCookies,
+} from "./backstageWebView";
+import {
   clearLoginSessionAck,
   setLoginSessionAck,
 } from "../store/bookSourceStore";
@@ -33,6 +37,8 @@ const FOOTER_HEIGHT = FOOTER_PADDING * 2 + 32;
 const VERIFICATION_ACTION_CHANNEL = "bookSource:verificationAction";
 /** 登录/验证底栏「更多」：主进程弹出原生菜单（避免 HTML 菜单被内容 BrowserView 盖住） */
 const VERIFICATION_TOOL_CHANNEL = "bookSource:verificationTool";
+/** 登录/验证弹窗专用内存 partition：与 defaultSession 隔离；缓存关闭——历史缓存页会伪装「已登录」 */
+const VERIFICATION_PARTITION = "colortxt-bs-verification";
 
 type VerificationToolbarAction = (confirmed: boolean) => void;
 /** 底栏「更多」点击 → 主进程 Menu.popup */
@@ -440,6 +446,8 @@ async function openVerificationWindowAsync(
   host?: JsExtensionHost,
 ): Promise<void> {
   ensureVerificationIpc();
+  // 先以关缓存配置注册 partition（下方 new BrowserView 的 webPreferences.partition 复用已注册实例）
+  session.fromPartition(VERIFICATION_PARTITION, { cache: false });
 
   const pageUrl = parseVerificationUrl(url);
   host?.log(`[验证] 打开浏览器: ${pageUrl}`);
@@ -477,6 +485,7 @@ async function openVerificationWindowAsync(
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
+      partition: VERIFICATION_PARTITION,
     },
   });
 
@@ -599,6 +608,20 @@ async function openVerificationWindowAsync(
     if (!finished) safeFinish(false);
     else activeWindows.delete(sourceKey);
   });
+
+  // 弹窗以 CookieJar 为准（对齐 backstageWebView/bookSourceBrowser）：
+  // 打开前清该域残留再种 jar 登录态——否则 session 旧 Cookie/缓存页让弹窗显示与 jar 不符的登录态
+  if (/^https?:\/\//i.test(pageUrl)) {
+    try {
+      await clearSessionDomainCookies(content.webContents, pageUrl);
+      const cookieHeader = cookieHeaderForUrl(pageUrl);
+      if (cookieHeader) {
+        await seedSessionCookies(content.webContents, pageUrl, cookieHeader);
+      }
+    } catch {
+      /* 种入失败不阻断打开 */
+    }
+  }
 
   void footer.webContents.loadURL(
     `data:text/html;charset=utf-8,${encodeURIComponent(verificationToolbarHtml())}`,

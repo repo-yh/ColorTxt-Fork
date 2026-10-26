@@ -67,7 +67,7 @@ function createWindow(
     minWidth: 720,
     minHeight: 480,
     autoHideMenuBar: true,
-    show: false,
+    show: true,
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -78,8 +78,6 @@ function createWindow(
   win.removeMenu();
   win.setMenuBarVisibility(false);
   win.webContents.setUserAgent(getWebViewUserAgent());
-
-  win.once("ready-to-show", () => win.show());
 
   // 关窗/导航时把 session Cookie 回写 CookieJar（窗口内登录对引擎静态请求同样生效）
   win.on("close", () => {
