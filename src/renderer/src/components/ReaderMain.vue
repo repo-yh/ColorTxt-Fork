@@ -699,7 +699,7 @@ const emit = defineEmits<{
   searchWithQuote: [text: string];
   readerEditDirtyChange: [dirty: boolean];
   readerEditContentChange: [];
-  readerEditLoaded: [payload: { encoding: string }];
+  readerEditLoaded: [payload: { encoding: string; hasBom?: boolean }];
   readerEditLoadFailed: [];
   readerEditSaveRequest: [];
   readerEditCursorChange: [
@@ -1070,7 +1070,7 @@ async function loadReaderEditFromDisk() {
   const emitReaderEditLoadedAfterViewport = () => {
     sealReaderEditBaseline();
     readerEditSuppressDirty = false;
-    emit("readerEditLoaded", { encoding: r.encoding });
+    emit("readerEditLoaded", { encoding: r.encoding, hasBom: r.hasBom });
     void nextTick(() => emitReaderEditCursorStatus());
   };
 

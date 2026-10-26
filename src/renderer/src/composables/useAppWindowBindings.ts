@@ -89,6 +89,10 @@ export function useAppWindowBindings(deps: {
   readerLetterSpacingPx: Ref<number>;
   monacoFontFamily: Ref<string>;
   fileEncoding: Ref<string>;
+  /** 保存写盘编码（打开文件时按流检测初始化，编辑加载后按整读检测覆盖） */
+  readerSaveEncoding: Ref<string>;
+  /** 保存写盘是否前置 BOM（原文件带 BOM 才为 true，精确保留原文件形态） */
+  readerSaveAddBom: Ref<boolean>;
   loading: Ref<boolean>;
   /** 打开文件流式读取进度 0–100；无总大小时为 null */
   loadingProgressPercent: Ref<number | null>;
@@ -352,6 +356,8 @@ export function useAppWindowBindings(deps: {
         deps.fileEncoding.value = formatTextEncodingLabel(
           payload.encoding || "-",
         );
+        deps.readerSaveEncoding.value = payload.encoding || "utf8";
+        deps.readerSaveAddBom.value = Boolean(payload.hasBom);
         const total = payload.totalBytes;
         deps.loadingProgressPercent.value = total > 0 ? 0 : null;
       }),

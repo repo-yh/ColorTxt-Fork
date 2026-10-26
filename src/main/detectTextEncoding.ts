@@ -152,16 +152,25 @@ export function detectEncodingFromSample(
   return "utf8";
 }
 
+/** 文件是否以已知 BOM 开头（UTF-8 / UTF-16LE / UTF-16BE）——保存时按原样还原 BOM 形态 */
+export function hasBomFromSample(sample: Buffer): boolean {
+  return encodingFromBom(sample) !== null;
+}
+
 export async function detectTextFileEncoding(
   filePath: string,
   locale?: string,
-): Promise<string> {
+): Promise<{ encoding: string; hasBom: boolean }> {
   const fd = await open(filePath, "r");
   const header = Buffer.alloc(SAMPLE_BYTES);
   const { bytesRead } = await fd.read(header, 0, header.length, 0);
   await fd.close();
-  if (bytesRead === 0) return "utf8";
-  return detectEncodingFromSample(header.subarray(0, bytesRead), locale);
+  if (bytesRead === 0) return { encoding: "utf8", hasBom: false };
+  const sample = header.subarray(0, bytesRead);
+  return {
+    encoding: detectEncodingFromSample(sample, locale),
+    hasBom: hasBomFromSample(sample),
+  };
 }
 
 function isUtf8RequestCharset(charset?: string): boolean {

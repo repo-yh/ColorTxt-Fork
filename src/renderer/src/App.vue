@@ -745,6 +745,7 @@ onMounted(() => {
           p,
           nextText,
           normalized,
+          readerSaveAddBom.value,
         );
         if (!written.ok) {
           void appAlert(written.message ?? "保存失败");
@@ -1233,6 +1234,8 @@ const { effectiveClickMode, clickModeAltHeld } = useReaderClickModeAltHold({
 });
 
 const readerSaveEncoding = ref("utf8");
+/** 保存写盘是否前置 BOM（打开/编辑加载时按原文件形态初始化，精确保留原编码与 BOM） */
+const readerSaveAddBom = ref(false);
 /** 编辑态 / 编码另存：整文件写盘中（禁用保存按钮，防重复点） */
 const readerFileSaving = ref(false);
 
@@ -1327,6 +1330,7 @@ function textForReaderDiskSave(): string {
 
 async function saveReaderBufferWithIpcEncoding(
   ipcEncoding: string,
+  addBom: boolean = readerSaveAddBom.value,
 ): Promise<boolean> {
   if (readerFileSaving.value) return false;
   const normalized = normalizeIpcEncoding(ipcEncoding);
@@ -1336,12 +1340,13 @@ async function saveReaderBufferWithIpcEncoding(
   try {
     return await appLoading.with("保存中", async () => {
       const text = textForReaderDiskSave();
-      const r = await window.colorTxt.writeTextFile(p, text, normalized);
+      const r = await window.colorTxt.writeTextFile(p, text, normalized, addBom);
       if (!r.ok) {
         void appAlert(r.message ?? "保存失败");
         return false;
       }
       readerSaveEncoding.value = normalized;
+      readerSaveAddBom.value = addBom;
       fileEncoding.value = formatTextEncodingLabel(normalized);
       readerRef.value?.markReaderEditSaved?.();
       readerEditorDirty.value = false;
@@ -2835,7 +2840,12 @@ async function onApplyPartialPhysicalEdit(payload: {
   try {
     await appLoading.with("保存中", async () => {
       const normalized = normalizeIpcEncoding(readerSaveEncoding.value);
-      const written = await window.colorTxt.writeTextFile(p, nextText, normalized);
+      const written = await window.colorTxt.writeTextFile(
+        p,
+        nextText,
+        normalized,
+        readerSaveAddBom.value,
+      );
       if (!written.ok) {
         void appAlert(written.message ?? "保存失败");
         return;
@@ -3047,13 +3057,15 @@ function onAiSmartFormatSelection() {
 }
 
 async function onFooterSaveFileAsEncoding(codec: "utf8" | "gb2312") {
-  void (await saveReaderBufferWithIpcEncoding(codec));
+  // 显式「另存为编码」按新编码默认形态写盘（无 BOM），成功后 BOM 状态随保存同步
+  void (await saveReaderBufferWithIpcEncoding(codec, false));
 }
 
-function onReaderEditLoaded(payload: { encoding: string }) {
+function onReaderEditLoaded(payload: { encoding: string; hasBom?: boolean }) {
   readerSaveEncoding.value = normalizeIpcEncoding(
     (payload.encoding || "utf8").trim() || "utf8",
   );
+  readerSaveAddBom.value = Boolean(payload.hasBom);
   pendingReaderEditRestoreAnchor.value = null;
   stream.resyncMirrorFromReader();
   if (searchQuery.value.trim()) {
@@ -4002,6 +4014,8 @@ useAppWindowBindings({
   readerLetterSpacingPx,
   monacoFontFamily,
   fileEncoding,
+  readerSaveEncoding,
+  readerSaveAddBom,
   loading,
   loadingProgressPercent,
   pendingRestorePhysicalLine,

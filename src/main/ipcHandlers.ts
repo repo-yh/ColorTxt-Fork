@@ -189,8 +189,24 @@ async function collectTxtFilesUnderRoot(
   return files;
 }
 
-async function detectEncoding(filePath: string): Promise<string> {
+async function detectEncoding(
+  filePath: string,
+): Promise<{ encoding: string; hasBom: boolean }> {
   return detectTextFileEncoding(filePath, app.getLocale());
+}
+
+/** 按编码前置 BOM（仅 utf8/utf16le/utf16be；GBK 系无 BOM 概念原样返回） */
+function withBomPrefix(buf: Buffer, encoding: string): Buffer {
+  if (encoding === "utf8") {
+    return Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), buf]);
+  }
+  if (encoding === "utf16le") {
+    return Buffer.concat([Buffer.from([0xff, 0xfe]), buf]);
+  }
+  if (encoding === "utf16be") {
+    return Buffer.concat([Buffer.from([0xfe, 0xff]), buf]);
+  }
+  return buf;
 }
 
 export function registerMainIpcHandlers(
@@ -588,10 +604,10 @@ export function registerMainIpcHandlers(
       };
     }
     try {
-      const encoding = await detectEncoding(resolved);
+      const { encoding, hasBom } = await detectEncoding(resolved);
       const buf = await readFile(resolved);
       const text = iconv.decode(buf, encoding);
-      return { ok: true as const, text, encoding };
+      return { ok: true as const, text, encoding, hasBom };
     } catch (e) {
       return {
         ok: false as const,
@@ -607,6 +623,7 @@ export function registerMainIpcHandlers(
       filePath: string,
       content: string,
       encodingRaw: unknown,
+      addBomRaw?: unknown,
     ) => {
       const resolved = path.resolve(String(filePath ?? "").trim());
       if (!resolved) {
@@ -617,7 +634,8 @@ export function registerMainIpcHandlers(
           ? encodingRaw.trim()
           : "utf8";
       try {
-        const buf = iconv.encode(content, encoding);
+        const encoded = iconv.encode(content, encoding);
+        const buf = addBomRaw ? withBomPrefix(encoded, encoding) : encoded;
         await mkdir(path.dirname(resolved), { recursive: true });
         await writeFile(resolved, buf);
         return { ok: true as const };
@@ -907,7 +925,7 @@ export function registerMainIpcHandlers(
     }
 
     try {
-      const encoding = await detectEncoding(physicalPath);
+      const { encoding, hasBom } = await detectEncoding(physicalPath);
       const decoder = iconv.getDecoder(encoding);
       const fileStream = createReadStream(physicalPath, {
         highWaterMark: 1024 * 256,
@@ -918,6 +936,7 @@ export function registerMainIpcHandlers(
         requestId,
         ...streamMeta,
         encoding,
+        hasBom,
         totalBytes,
       });
 

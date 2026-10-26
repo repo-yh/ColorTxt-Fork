@@ -139,6 +139,8 @@ export type StreamStart = {
   /** 与阅读会话绑定的逻辑路径（如电子书原路径）；缺省则与 filePath 相同 */
   sessionFilePath?: string;
   encoding?: string;
+  /** 文件是否以已知 BOM 开头（保存时按原样还原 BOM 形态） */
+  hasBom?: boolean;
   totalBytes: number;
 };
 export type StreamChunkPayload = {
@@ -470,15 +472,16 @@ const api = {
     }>,
   readWholeTextFile: (filePath: string) =>
     ipcRenderer.invoke("file:readWholeTextFile", filePath) as Promise<
-      | { ok: true; text: string; encoding: string }
+      | { ok: true; text: string; encoding: string; hasBom: boolean }
       | { ok: false; message: string }
     >,
-  writeTextFile: (filePath: string, content: string, encoding: string) =>
+  writeTextFile: (filePath: string, content: string, encoding: string, addBom?: boolean) =>
     ipcRenderer.invoke(
       "file:writeTextFile",
       filePath,
       content,
       encoding,
+      addBom,
     ) as Promise<{ ok: true } | { ok: false; message: string }>,
   writeBinaryFile: (filePath: string, base64: string) =>
     ipcRenderer.invoke("file:writeBinaryFile", filePath, base64) as Promise<{
