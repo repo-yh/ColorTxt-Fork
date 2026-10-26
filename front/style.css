@@ -33,6 +33,24 @@
   #status { text-align: center; padding: 60px 20px; opacity: 0.4; font-size: 14px; }
   .error { color: #e74c3c; opacity: 1 !important; }
 
+  /* 全文搜索面板 */
+  #searchPanel { display: none; position: fixed; z-index: 12; background: var(--bg); border: 1px solid rgba(128,128,128,0.3); border-radius: 6px; box-shadow: 0 4px 16px rgba(0,0,0,0.18); padding: 8px; }
+  #searchPanel.open { display: block; }
+  #searchPanel .searchBar { display: flex; align-items: center; gap: 8px; }
+  #searchInput { flex: 1; min-width: 0; padding: 4px 8px; border: 1px solid rgba(128,128,128,0.3); border-radius: 4px; background: transparent; color: inherit; font-size: 13px; font-family: inherit; outline: none; }
+  #searchInput:focus { border-color: rgba(128,128,128,0.6); }
+  #btnSearchClose { padding: 2px 8px; border: 1px solid rgba(128,128,128,0.25); border-radius: 4px; background: transparent; cursor: pointer; color: inherit; font-size: 12px; }
+  #btnSearchClose:hover { background: rgba(128,128,128,0.08); }
+  #searchResults { margin-top: 8px; max-height: 45vh; overflow-y: auto; }
+  .searchItem { display: flex; gap: 8px; padding: 4px 8px; border-radius: 3px; cursor: pointer; font-size: 13px; }
+  .searchItem:hover { background: rgba(128,128,128,0.08); }
+  .searchLine { flex: none; min-width: 2.5em; text-align: right; opacity: 0.45; font-size: 12px; line-height: 1.9; }
+  .searchText { word-break: break-all; white-space: pre-wrap; }
+  .searchText mark { background: rgba(255,213,79,0.5); color: inherit; padding: 0 1px; border-radius: 2px; }
+  body.dark .searchText mark { background: rgba(255,213,79,0.28); }
+  .searchStatus { padding: 6px 8px; opacity: 0.5; font-size: 12px; text-align: center; }
+  .searchStatus.error { color: #e74c3c; opacity: 1; }
+
   /* mobile */
   @media (max-width: 768px) {
     #sidebar { position: fixed; left: 0; top: 0; bottom: 0; z-index: 30; display: none; color: inherit; }

@@ -106,6 +106,26 @@ export type ChapterContentResult =
       file: string;
     };
 
+export type SearchMatchItem = {
+  /** 行号（0-based，与 content 的 L<行号> 一致） */
+  line: number;
+  /** 行原文 */
+  text: string;
+};
+
+export type SearchResult =
+  | { ok: false; reason: string }
+  | {
+      ok: true;
+      file: string;
+      query: string;
+      /** 匹配行总数（不受 limit 截断） */
+      total: number;
+      /** true = 匹配行数超过 limit，matches 仅返回前 limit 条 */
+      truncated: boolean;
+      matches: SearchMatchItem[];
+    };
+
 // ---- Cache ----
 
 let cacheDir: string | null = null;
@@ -197,6 +217,7 @@ export function startWebDisplay(
   getChapterTitles: (filePath: string) => Promise<ChapterTitlesResult>,
   applyChapterTitles: (filePath: string, items: Array<{ chapterIndex: number; title: string }>) => Promise<ApplyChapterTitlesResult>,
   getContentForChapter: (filePath: string, chapterIndex: number, refresh?: boolean) => Promise<ChapterContentResult>,
+  searchInFile: (filePath: string, query: string, limit: number) => Promise<SearchResult>,
 ): boolean {
   if (server) return true;
 
@@ -361,6 +382,37 @@ export function startWebDisplay(
           } else {
             result = await getHighlightsForFile(fp);
           }
+        }
+        res.writeHead(200, {
+          "Content-Type": "application/json; charset=utf-8",
+        });
+        res.end(JSON.stringify(result));
+      } catch {
+        res.writeHead(500, {
+          "Content-Type": "application/json; charset=utf-8",
+        });
+        res.end(JSON.stringify({ ok: false, reason: "服务内部错误" }));
+      }
+      return;
+    }
+
+    if (url.pathname === "/api/search") {
+      const fileParam = url.searchParams.get("file");
+      const q = url.searchParams.get("q") ?? "";
+      const limitStr = url.searchParams.get("limit");
+      let limit = limitStr != null ? parseInt(limitStr, 10) : 500;
+      if (!Number.isFinite(limit) || limit <= 0) limit = 500;
+      if (limit > 2000) limit = 2000;
+
+      try {
+        const fp = fileParam ?? getCurrentFilePath();
+        let result: SearchResult;
+        if (!q) {
+          result = { ok: false, reason: "搜索词为空" };
+        } else if (!fp) {
+          result = { ok: false, reason: "未打开文件" };
+        } else {
+          result = await searchInFile(fp, q, limit);
         }
         res.writeHead(200, {
           "Content-Type": "application/json; charset=utf-8",

@@ -23,6 +23,14 @@
   <button id="btnRefresh" onclick="loadFile(currentFile, true)">刷新</button>
   <button id="btnFontMinus" onclick="changeFontSize(-1)">A−</button>
   <button id="btnFontPlus" onclick="changeFontSize(1)">A+</button>
+  <button id="btnSearch" onclick="toggleSearch()">搜索</button>
+</div>
+<div id="searchPanel">
+  <div class="searchBar">
+    <input id="searchInput" type="text" placeholder="搜索全文，回车执行" onkeydown="onSearchKeydown(event)">
+    <button id="btnSearchClose" onclick="toggleSearch(false)" title="关闭">✕</button>
+  </div>
+  <div id="searchResults"></div>
 </div>
 <div id="content"><div id="status">请选择文件</div></div>
 </div>

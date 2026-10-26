@@ -11,6 +11,9 @@ var $main = document.getElementById('main')
 var $stickyChapter = document.getElementById('stickyChapter')
 var $btnFontMinus = document.getElementById('btnFontMinus')
 var $btnFontPlus = document.getElementById('btnFontPlus')
+var $searchPanel = document.getElementById('searchPanel')
+var $searchInput = document.getElementById('searchInput')
+var $searchResults = document.getElementById('searchResults')
 var $sentinel = null
 var $sentinelTop = null
 
@@ -22,6 +25,11 @@ function alignStickyChapter() {
     $stickyChapter.style.top = rect.bottom + 'px'
     $stickyChapter.style.left = rect.left + 'px'
     $stickyChapter.style.right = (window.innerWidth - rect.right) + 'px'
+    if ($searchPanel) {
+      $searchPanel.style.left = rect.left + 'px'
+      $searchPanel.style.right = (window.innerWidth - rect.right) + 'px'
+      $searchPanel.style.top = (rect.bottom + 4) + 'px'
+    }
   }
 }
 window.addEventListener('resize', alignStickyChapter)
@@ -312,6 +320,7 @@ async function loadPrevSegment() {
 
 async function loadFile(filePath, forceRefresh) {
   $btn.disabled = true
+  toggleSearch(false)
 
   showStatus('正在加载...', false)
   currentFile = filePath
@@ -420,6 +429,97 @@ try {
   var savedSize = parseInt(localStorage.getItem('colortxt_web_font_size')) || 0
   if (savedSize >= FONT_MIN && savedSize <= FONT_MAX) applyFontSize(savedSize)
 } catch(e) {}
+
+// ---- 全文搜索 ----
+
+var searchSeq = 0
+
+function escapeHtml(s) {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+}
+
+function toggleSearch(show) {
+  var open = typeof show === 'boolean' ? show : !$searchPanel.classList.contains('open')
+  $searchPanel.classList.toggle('open', open)
+  if (open) {
+    alignStickyChapter()
+    $searchInput.focus()
+    $searchInput.select()
+  } else {
+    searchSeq++
+    $searchResults.innerHTML = ''
+  }
+}
+
+function onSearchKeydown(e) {
+  if (e.key === 'Enter') { e.preventDefault(); doSearch() }
+}
+
+async function doSearch() {
+  var q = $searchInput.value
+  if (!q || !currentFile) return
+  var seq = ++searchSeq
+  $searchResults.innerHTML = '<div class="searchStatus">搜索中...</div>'
+  try {
+    var r = await fetch('/api/search?file=' + encodeURIComponent(currentFile) + '&q=' + encodeURIComponent(q))
+    var data = await r.json()
+    if (seq !== searchSeq) return
+    if (!data.ok) {
+      $searchResults.innerHTML = '<div class="searchStatus error">' + escapeHtml(data.reason || '搜索失败') + '</div>'
+      return
+    }
+    renderSearchResults(q, data)
+  } catch (e) {
+    if (seq !== searchSeq) return
+    $searchResults.innerHTML = '<div class="searchStatus">搜索失败：请确认 ColorTxt 已开启 Web 展示服务</div>'
+  }
+}
+
+function renderSearchResults(q, data) {
+  var matches = data.matches || []
+  if (!matches.length) {
+    $searchResults.innerHTML = '<div class="searchStatus">无匹配结果</div>'
+    return
+  }
+  var qLower = q.toLowerCase()
+  var html = ''
+  for (var i = 0; i < matches.length; i++) {
+    var m = matches[i]
+    html += '<div class="searchItem" onclick="jumpToSearchResult(' + m.line + ')">' +
+      '<span class="searchLine">' + (m.line + 1) + '</span>' +
+      '<span class="searchText">' + highlightQuery(m.text, qLower) + '</span></div>'
+  }
+  if (data.truncated) {
+    html += '<div class="searchStatus">已显示前 ' + matches.length + ' 条，共 ' + data.total + ' 行匹配</div>'
+  } else {
+    html += '<div class="searchStatus">共 ' + data.total + ' 行匹配</div>'
+  }
+  $searchResults.innerHTML = html
+}
+
+// 点击结果：收起面板并跳转到匹配行（jumpToLine 会自动加载目标段）
+function jumpToSearchResult(line) {
+  toggleSearch(false)
+  jumpToLine(line)
+}
+
+// 大小写不敏感高亮：先在原文上定位命中片段，再逐片转义拼接，避免先转义错位
+function highlightQuery(text, qLower) {
+  var lower = text.toLowerCase()
+  var out = ''
+  var pos = 0
+  while (true) {
+    var idx = lower.indexOf(qLower, pos)
+    if (idx < 0) { out += escapeHtml(text.slice(pos)); break }
+    out += escapeHtml(text.slice(pos, idx)) + '<mark>' + escapeHtml(text.slice(idx, idx + qLower.length)) + '</mark>'
+    pos = idx + qLower.length
+  }
+  return out
+}
+
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape' && $searchPanel.classList.contains('open')) toggleSearch(false)
+})
 
 loadFiles().then(function() {
   var savedBook = ''

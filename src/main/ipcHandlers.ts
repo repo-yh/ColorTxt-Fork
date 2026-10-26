@@ -21,7 +21,7 @@ import {
 } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { startWebDisplay, stopWebDisplay, isWebDisplayRunning, clearCache, setCurrentFilePath, getCurrentFilePath, type ContentResult, type FileListItem, type HighlightsResult, type ChapterTitlesResult, type ApplyChapterTitlesResult, type ChapterContentResult } from "./webDisplay";
+import { startWebDisplay, stopWebDisplay, isWebDisplayRunning, clearCache, setCurrentFilePath, getCurrentFilePath, type ContentResult, type FileListItem, type HighlightsResult, type ChapterTitlesResult, type ApplyChapterTitlesResult, type ChapterContentResult, type SearchResult, type SearchMatchItem } from "./webDisplay";
 import { getFonts } from "font-list";
 import iconv from "iconv-lite";
 import { detectTextFileEncoding } from "./detectTextEncoding";
@@ -1348,6 +1348,51 @@ function unknownQuoteAttributions(
       }
     };
 
+    const getSearchInFileFn = async (
+      filePath: string,
+      query: string,
+      limit: number,
+    ): Promise<SearchResult> => {
+      const w = findWindow();
+      if (!w) return { ok: false as const, reason: "无可用窗口" as const };
+
+      // 与分段请求共享同一份文本缓存，避免重复读盘
+      let fullText = textCache.get(filePath) ?? null;
+      if (fullText == null) {
+        fullText = await readFullTextViaWindow(w, filePath);
+        if (fullText == null) {
+          return { ok: false as const, reason: "读取文件失败" as const };
+        }
+        textCache.set(filePath, fullText);
+        if (textCache.size > 5) {
+          const firstKey = textCache.keys().next().value;
+          if (firstKey) textCache.delete(firstKey);
+        }
+      }
+
+      // 与主程序 Monaco 查找默认一致：字面量匹配、不区分大小写
+      const needle = query.toLowerCase();
+      const lines = fullText.split("\n");
+      const matches: SearchMatchItem[] = [];
+      let total = 0;
+      for (let i = 0; i < lines.length; i++) {
+        if (lines[i].toLowerCase().includes(needle)) {
+          total++;
+          if (matches.length < limit) {
+            matches.push({ line: i, text: lines[i] });
+          }
+        }
+      }
+      return {
+        ok: true as const,
+        file: filePath,
+        query,
+        total,
+        truncated: total > matches.length,
+        matches,
+      };
+    };
+
     const started = startWebDisplay(
       getCurrentContent,
       getContentForFileFn,
@@ -1363,6 +1408,7 @@ function unknownQuoteAttributions(
       getChapterTitlesFn,
       applyChapterTitlesFn,
       getContentForChapterFn,
+      getSearchInFileFn,
     );
 
     return { ok: started, reason: started ? undefined : "端口被占用" };
