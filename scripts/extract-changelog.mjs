@@ -1,11 +1,14 @@
-// 从 CHANGELOG.md 顶部截取当前版本条目段（第一个 ## 到第二个 ## 前），写入 release-notes.md
-// 用法：node scripts/extract-changelog.mjs <version>   例如 3.8.16
-// 顶部第一个条目必须就是该版本，否则报错退出——防止把旧版本说明发进 release
+// 从 CHANGELOG.md 截取「当前版本 .. 上一个公开版本」之间的所有条目段，写入 release-notes.md
+// 用法：node scripts/extract-changelog.mjs <version> [prevVersion]
+// - 顶部第一个条目必须就是 <version>，否则报错退出——防止把旧版本说明发进 release
+// - 提供 prevVersion 且其条目存在时，截取 [version .. prevVersion) 全部条目（一次 tag 带多个 CHANGELOG 版本发布的场景）
+// - 未提供 prevVersion 或找不到其条目时，回退为仅提取 version 单段
 import { readFileSync, writeFileSync } from "node:fs";
 
 const version = process.argv[2];
+const prevVersion = process.argv[3] || "";
 if (!version) {
-  console.error("usage: node scripts/extract-changelog.mjs <version>");
+  console.error("usage: node scripts/extract-changelog.mjs <version> [prevVersion]");
   process.exit(1);
 }
 
@@ -25,11 +28,21 @@ if (lines[start].trim() !== header) {
   process.exit(1);
 }
 
-let end = lines.length;
-for (let i = start + 1; i < lines.length; i++) {
-  if (/^##\s/.test(lines[i])) {
-    end = i;
-    break;
+const nextIdx = (() => {
+  for (let i = start + 1; i < lines.length; i++) {
+    if (/^##\s/.test(lines[i])) return i;
+  }
+  return lines.length;
+})();
+
+let end = nextIdx;
+if (prevVersion && prevVersion !== version) {
+  const prevHeader = `## ${prevVersion}`;
+  const prevIdx = lines.findIndex((l, i) => i > start && l.trim() === prevHeader);
+  if (prevIdx > start) {
+    end = prevIdx;
+  } else {
+    console.error(`CHANGELOG.md 未找到 ${prevHeader}，回退为仅提取 ${header} 单段`);
   }
 }
 

@@ -198,15 +198,21 @@ jobs:
           fi
           npx electron-builder publish --policy always "${args[@]}"
 
-      # 提取当前版本的 CHANGELOG 条目（tag 触发按 tag 版本，手动触发按 package.json 版本）
+      # 提取当前版本的 CHANGELOG 条目（tag 触发按 tag 版本）
+      # 范围 = 当前版本 .. 上一个公开（非 draft）release 版本之间的全部条目（一次 tag 带多个 CHANGELOG 版本发布时全量覆盖）
       # 顶部条目与版本不一致时只告警并跳过追加，不让 publish job 失败
       - name: Extract current version changelog
         id: changelog
         if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          if node scripts/extract-changelog.mjs "$VERSION"; then
+          PREV=$(gh release list --exclude-drafts --limit 10 --json tagName --jq '.[].tagName' \
+            | grep -v "^${GITHUB_REF_NAME}$" | head -1 | sed 's/^v//')
+          echo "prev public release: ${PREV:-none}"
+          if node scripts/extract-changelog.mjs "$VERSION" "$PREV"; then
             echo "appended=true" >> "$GITHUB_OUTPUT"
           else
             echo "::warning::CHANGELOG.md 顶部条目与版本 ${VERSION} 不一致，跳过 release 描述追加"
