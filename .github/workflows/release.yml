@@ -213,16 +213,11 @@ jobs:
             echo "appended=false" >> "$GITHUB_OUTPUT"
           fi
 
-      # 更新 electron-builder 创建的 draft release：仅追加 CHANGELOG 描述，不覆盖已有资产
+      # 更新 electron-builder 创建的 draft release：追加 CHANGELOG 描述
+      # 用 gh release edit 而非 softprops——后者在 duplicate draft 处理路径下会丢 body（v3.8.16 实测）
       - name: Append changelog to draft release
         if: startsWith(github.ref, 'refs/tags/') && steps.changelog.outputs.appended == 'true'
-        uses: softprops/action-gh-release@v2.6.2
-        with:
-          tag_name: ${{ github.ref_name }}
-          name: ${{ github.ref_name }}
-          draft: true # 关键：保持草稿状态，不要自动 publish
-          append_body: true # 追加到 electron-builder 已写描述后面
-          body_path: ./release-notes.md
-          overwrite_files: false
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: gh release edit "${{ github.ref_name }}" --notes-file release-notes.md --append
