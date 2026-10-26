@@ -9,7 +9,12 @@ import {
   watch,
 } from "vue";
 import { nextTick, type ComponentPublicInstance } from "vue";
-import { getChapterMatchRules, type Chapter } from "./chapter";
+import {
+  getChapterMatchRules,
+  setActiveScopedChapterRuleIds,
+  type Chapter,
+  type ChapterMatchRule,
+} from "./chapter";
 import {
   appReplaceRulesChangedEvent,
   type ReplaceRule,
@@ -129,6 +134,7 @@ import {
 import {
   fileNameKey,
   findFileMetaRecord,
+  setFileScopedChapterRuleIds,
   upsertFileMetaRecord,
   normalizeFileMetaPathKey,
   type BlockedChapterRecord,
@@ -540,92 +546,113 @@ onMounted(() => {
   void refreshAiSidebarFlags();
   refreshReplaceRulesCache();
   window.addEventListener(appReplaceRulesChangedEvent, onReplaceRulesChanged);
+  /** Web 桥接（Web 展示服务）：临时切换到目标书籍的专属章节规则 id 上下文，完成后恢复当前书 */
+  const withWebBridgeScopedRules = async <T>(
+    filePath: string,
+    fn: () => Promise<T> | T,
+  ): Promise<T> => {
+    const meta = findFileMetaRecord(fileMetaRecords.value, filePath);
+    const homePath = currentFile.value;
+    const homeScoped = homePath
+      ? findFileMetaRecord(fileMetaRecords.value, homePath)
+          ?.scopedChapterRuleIds
+      : undefined;
+    setActiveScopedChapterRuleIds(meta?.scopedChapterRuleIds);
+    try {
+      return await fn();
+    } finally {
+      setActiveScopedChapterRuleIds(homeScoped);
+    }
+  };
   window.__colorTxtGenerateColoredHtmlForText = async (
     text: string,
     filePath: string,
-  ) => {
-    // 合并全局 + 文件级高亮词
-    let hl = highlightWordsByIndexGlobal.value;
-    const meta = findFileMetaRecord(fileMetaRecords.value, filePath);
-    if (meta?.highlightWordsByIndex) {
-      const merged: Record<string, any[]> = { ...hl };
-      for (const [idx, words] of Object.entries(
-        meta.highlightWordsByIndex,
-      )) {
-        merged[idx] = [...(merged[idx] ?? []), ...words];
+  ) =>
+    withWebBridgeScopedRules(filePath, async () => {
+      // 合并全局 + 文件级高亮词
+      let hl = highlightWordsByIndexGlobal.value;
+      const meta = findFileMetaRecord(fileMetaRecords.value, filePath);
+      if (meta?.highlightWordsByIndex) {
+        const merged: Record<string, any[]> = { ...hl };
+        for (const [idx, words] of Object.entries(
+          meta.highlightWordsByIndex,
+        )) {
+          merged[idx] = [...(merged[idx] ?? []), ...words];
+        }
+        hl = merged;
       }
-      hl = merged;
-    }
-    return (
-      readerRef.value?.generateColoredHtmlForText?.(
-        text,
-        filePath,
-        hl,
-        meta?.blockedChapters,
-      ) ?? {
-        ok: false as const,
-        reason: "阅读器未就绪" as const,
-      }
-    );
-  };
+      return (
+        readerRef.value?.generateColoredHtmlForText?.(
+          text,
+          filePath,
+          hl,
+          meta?.blockedChapters,
+        ) ?? {
+          ok: false as const,
+          reason: "阅读器未就绪" as const,
+        }
+      );
+    });
   window.__colorTxtGenerateColoredHtmlForSegment = async (
     text: string,
     filePath: string,
     startLine: number,
     endLine: number,
-  ) => {
-    let hl = highlightWordsByIndexGlobal.value;
-    const meta = findFileMetaRecord(fileMetaRecords.value, filePath);
-    if (meta?.highlightWordsByIndex) {
-      const merged: Record<string, any[]> = { ...hl };
-      for (const [idx, words] of Object.entries(
-        meta.highlightWordsByIndex,
-      )) {
-        merged[idx] = [...(merged[idx] ?? []), ...words];
+  ) =>
+    withWebBridgeScopedRules(filePath, async () => {
+      let hl = highlightWordsByIndexGlobal.value;
+      const meta = findFileMetaRecord(fileMetaRecords.value, filePath);
+      if (meta?.highlightWordsByIndex) {
+        const merged: Record<string, any[]> = { ...hl };
+        for (const [idx, words] of Object.entries(
+          meta.highlightWordsByIndex,
+        )) {
+          merged[idx] = [...(merged[idx] ?? []), ...words];
+        }
+        hl = merged;
       }
-      hl = merged;
-    }
-    return (
-      readerRef.value?.generateColoredHtmlForSegment?.(
-        text,
-        filePath,
-        hl,
-        startLine,
-        endLine,
-        meta?.blockedChapters,
-      ) ?? {
-        ok: false as const,
-        reason: "阅读器未就绪" as const,
-      }
-    );
-  };
+      return (
+        readerRef.value?.generateColoredHtmlForSegment?.(
+          text,
+          filePath,
+          hl,
+          startLine,
+          endLine,
+          meta?.blockedChapters,
+        ) ?? {
+          ok: false as const,
+          reason: "阅读器未就绪" as const,
+        }
+      );
+    });
   window.__colorTxtGenerateHighlightLinesForText = async (
     text: string,
     filePath: string,
-  ) => {
-    let hl = highlightWordsByIndexGlobal.value;
-    const meta = findFileMetaRecord(fileMetaRecords.value, filePath);
-    if (meta?.highlightWordsByIndex) {
-      const merged: Record<string, any[]> = { ...hl };
-      for (const [idx, words] of Object.entries(
-        meta.highlightWordsByIndex,
-      )) {
-        merged[idx] = [...(merged[idx] ?? []), ...words];
+  ) =>
+    withWebBridgeScopedRules(filePath, async () => {
+      let hl = highlightWordsByIndexGlobal.value;
+      const meta = findFileMetaRecord(fileMetaRecords.value, filePath);
+      if (meta?.highlightWordsByIndex) {
+        const merged: Record<string, any[]> = { ...hl };
+        for (const [idx, words] of Object.entries(
+          meta.highlightWordsByIndex,
+        )) {
+          merged[idx] = [...(merged[idx] ?? []), ...words];
+        }
+        hl = merged;
       }
-      hl = merged;
-    }
-    return (
-      readerRef.value?.generateHighlightLinesForText?.(
-        text,
-        filePath,
-        hl,
-        meta?.blockedChapters,
-      ) ?? {
-        ok: false as const,
-        reason: "阅读器未就绪" as const,
-      }
-    );
-  };
+      return (
+        readerRef.value?.generateHighlightLinesForText?.(
+          text,
+          filePath,
+          hl,
+          meta?.blockedChapters,
+        ) ?? {
+          ok: false as const,
+          reason: "阅读器未就绪" as const,
+        }
+      );
+    });
   window.__colorTxtGetFileList = () => {
     return txtFiles.value.map((f) => {
       const meta = findFileMetaRecord(fileMetaRecords.value, f.path);
@@ -647,23 +674,25 @@ onMounted(() => {
     if (!fp) return { ok: false as const, reason: "未打开文件" as const };
     const text = readerRef.value?.getAllText?.() ?? "";
     if (!text) return { ok: false as const, reason: "文件无内容" as const };
-    let hl = highlightWordsByIndexGlobal.value;
-    const meta = findFileMetaRecord(fileMetaRecords.value, fp);
-    if (meta?.highlightWordsByIndex) {
-      const merged: Record<string, any[]> = { ...hl };
-      for (const [idx, words] of Object.entries(
-        meta.highlightWordsByIndex,
-      )) {
-        merged[idx] = [...(merged[idx] ?? []), ...words];
+    return withWebBridgeScopedRules(fp, async () => {
+      let hl = highlightWordsByIndexGlobal.value;
+      const meta = findFileMetaRecord(fileMetaRecords.value, fp);
+      if (meta?.highlightWordsByIndex) {
+        const merged: Record<string, any[]> = { ...hl };
+        for (const [idx, words] of Object.entries(
+          meta.highlightWordsByIndex,
+        )) {
+          merged[idx] = [...(merged[idx] ?? []), ...words];
+        }
+        hl = merged;
       }
-      hl = merged;
-    }
-    return (
-      readerRef.value?.getFullText?.(text, fp, hl, opts, meta?.blockedChapters) ?? {
-        ok: false as const,
-        reason: "阅读器未就绪" as const,
-      }
-    );
+      return (
+        readerRef.value?.getFullText?.(text, fp, hl, opts, meta?.blockedChapters) ?? {
+          ok: false as const,
+          reason: "阅读器未就绪" as const,
+        }
+      );
+    });
   };
   // 章节列表（当前书）：供内置 AI 补全章节名
   window.__colorTxtGetChapterTitles = async () => {
@@ -1139,6 +1168,15 @@ const currentFileMetaRecord = computed(() => {
 const currentFileCharacterRoster = computed(
   () => currentFileMetaRecord.value?.characterRoster ?? [],
 );
+
+/** 本书专属章节规则 id 集合（面板合并展示只切换开关状态 + 检测合并应用；其他书籍读不到该值） */
+const currentBookScopedChapterRuleIds = computed<string[]>(
+  () => currentFileMetaRecord.value?.scopedChapterRuleIds ?? [],
+);
+
+watch(currentBookScopedChapterRuleIds, (ids) => {
+  setActiveScopedChapterRuleIds(ids);
+});
 
 const currentFileCharacterBookStyle = computed(
   () => currentFileMetaRecord.value?.characterBookStyle,
@@ -2521,8 +2559,26 @@ const {
   jumpToPrevChapter,
   jumpToNextChapter,
   onProbeLineChange,
-  applyChapterMatchRules,
+  applyChapterMatchRules: applyChapterMatchRulesFromNav,
 } = chapterNav;
+
+/** 章节规则保存：全局列表走 nav 链路；本书专属只保存规则 id 集合并立即生效 */
+function applyChapterMatchRules(payload: {
+  rules: ChapterMatchRule[];
+  scopedRuleIds: string[];
+}) {
+  const path = currentFile.value;
+  if (path) {
+    fileMetaRecords.value = setFileScopedChapterRuleIds(
+      fileMetaRecords.value,
+      path,
+      payload.scopedRuleIds,
+    );
+    persistFileMeta();
+    setActiveScopedChapterRuleIds(payload.scopedRuleIds);
+  }
+  void applyChapterMatchRulesFromNav({ rules: payload.rules });
+}
 
 const {
   mode: voiceReadMode,
@@ -4755,6 +4811,7 @@ useAppShellThemeWatch({
       :txtr-delimited-match-cross-line="txtrDelimitedMatchCrossLine"
       :chapter-rules="chapterRuleState.rules"
       :chapter-rule-error-text="chapterRuleErrorText"
+      :scoped-chapter-rule-ids="currentBookScopedChapterRuleIds"
       :reader-edit-mode="readerEditMode"
       :replace-rule-scope-book-name="replaceRuleScopeBookName"
       :editing-bookmark-line="editingBookmarkLine"

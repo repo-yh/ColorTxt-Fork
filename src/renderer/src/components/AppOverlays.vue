@@ -84,6 +84,8 @@ const props = defineProps<{
   translationSettings: import("@shared/translationTypes").TranslationSettings;
   chapterRules: ChapterMatchRule[];
   chapterRuleErrorText: string;
+  /** 本书专属章节规则 id 集合（只存 id；内容与顺序参照全局规则列表管理） */
+  scopedChapterRuleIds?: string[];
   /** 编辑态打开文本替换时面板主按钮为「应用」 */
   readerEditMode?: boolean;
   /** 主窗口文本替换「当前书名」建议：打开文件的文件名；无打开文件则空 */
@@ -145,7 +147,9 @@ const props = defineProps<{
 const emit = defineEmits<{
   applySettings: [payload: SettingsApplyPayload];
   togglePinOtherFont: [fontName: string];
-  applyChapterRules: [payload: { rules: ChapterMatchRule[] }];
+  applyChapterRules: [
+    payload: { rules: ChapterMatchRule[]; scopedRuleIds: string[] },
+  ];
   confirmAddBookmark: [];
   updateBookmarkToCurrentViewportLine: [];
   confirmRemoveActiveBookmark: [];
@@ -366,6 +370,7 @@ const busyOverlayText = computed(() => {
   <ChapterRulePanel
     v-model="showChapterRulePanel"
     :rules="chapterRules"
+    :scoped-rule-ids="scopedChapterRuleIds"
     :error-text="chapterRuleErrorText"
     @apply="emit('applyChapterRules', $event)"
   />

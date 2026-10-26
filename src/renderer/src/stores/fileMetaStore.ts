@@ -115,6 +115,12 @@ export type FileMetaRecord = {
   chapterCount?: number;
   /** 本书被手动屏蔽的章节（从章节目录隐藏）；按 title + lineNumber 去重 */
   blockedChapters?: BlockedChapterRecord[];
+  /**
+   * 仅本书生效的章节匹配规则 id 集合（只存 id；规则内容与顺序全部参照
+   * 全局规则列表管理，面板合并展示时同 id 行只切换开关状态为「本书」。
+   * 全局列表中该规则保持 enabled=false，其他书籍读到时即为禁用态）。
+   */
+  scopedChapterRuleIds?: string[];
 };
 
 type FileMetaPayload = {
@@ -314,6 +320,24 @@ function normalizeBlockedChapters(
     if (seen.has(key)) continue;
     seen.add(key);
     out.push({ title, lineNumber, charCount });
+  }
+  return out.length ? out : undefined;
+}
+
+const MAX_SCOPED_CHAPTER_RULES = 50;
+
+function normalizeScopedChapterRuleIds(
+  raw: unknown,
+): string[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const item of raw.slice(0, MAX_SCOPED_CHAPTER_RULES + 10)) {
+    if (typeof item !== "string") continue;
+    const id = item.trim();
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    out.push(id);
   }
   return out.length ? out : undefined;
 }
@@ -529,6 +553,9 @@ function normalizeRecord(item: Partial<FileMetaRecord>): FileMetaRecord | null {
       ? Math.floor(item.chapterCount)
       : undefined;
   const blockedChapters = normalizeBlockedChapters(item.blockedChapters);
+  const scopedChapterRuleIds = normalizeScopedChapterRuleIds(
+    item.scopedChapterRuleIds,
+  );
   return {
     path,
     fileName,
@@ -546,6 +573,7 @@ function normalizeRecord(item: Partial<FileMetaRecord>): FileMetaRecord | null {
     ...(characterRoster?.length ? { characterRoster } : {}),
     ...(chapterCount ? { chapterCount } : {}),
     ...(blockedChapters ? { blockedChapters } : {}),
+    ...(scopedChapterRuleIds ? { scopedChapterRuleIds } : {}),
   };
 }
 
@@ -711,6 +739,7 @@ export function upsertFileMetaRecord(
     characterRoster: prev?.characterRoster,
     chapterCount: prev?.chapterCount,
     blockedChapters: prev?.blockedChapters,
+    scopedChapterRuleIds: prev?.scopedChapterRuleIds,
     ...nextPartial,
     path,
     fileName: nextPartial.fileName ?? prev?.fileName ?? fileNameKey(path),
@@ -760,6 +789,18 @@ export function removeBookmarkForFile(
 
 export function clearBookmarksForFile(items: FileMetaRecord[], path: string) {
   return upsertFileMetaRecord(items, path, () => ({ bookmarks: [] }));
+}
+
+/** 写入 / 清除本书专属章节匹配规则 id 集合（undefined/空数组即清除） */
+export function setFileScopedChapterRuleIds(
+  items: FileMetaRecord[],
+  path: string,
+  ids: string[] | undefined,
+) {
+  const normalized = normalizeScopedChapterRuleIds(ids);
+  return upsertFileMetaRecord(items, path, () => ({
+    scopedChapterRuleIds: normalized,
+  }));
 }
 
 /** 将单词汇组归到指定高亮色（选区添词） */

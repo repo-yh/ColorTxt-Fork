@@ -32,6 +32,12 @@ const BUILTIN_RULE_NUM_ORDERED_ID = "builtin-num-ordered";
 
 let rulesState: ChapterMatchRule[] = createDefaultChapterRulesInternal();
 let enabledRegexList: RegExp[] = [];
+/**
+ * 当前书籍的专属规则 id 上下文（切书/规则保存/Web 桥接时切换）。
+ * 只存 id：内容与顺序全部参照全局规则列表管理（拖动/编辑都改全局），
+ * 本书生效 = 全局列表中该 id 规则按原位置参与检测（enabled 视为真）。
+ */
+let activeScopedRuleIds: Set<string> = new Set();
 
 function createDefaultChapterRulesInternal(): ChapterMatchRule[] {
   return [
@@ -98,10 +104,16 @@ function cloneChapterMatchRule(r: ChapterMatchRule): ChapterMatchRule {
   };
 }
 
-function rebuildEnabledRegexes(rules: ChapterMatchRule[]) {
+function rebuildEnabledRegexes(
+  rules: ChapterMatchRule[],
+  scopedIds: ReadonlySet<string>,
+) {
+  // 顺序唯一来源是全局规则列表：按全局序遍历，规则生效 = 全局 enabled
+  // 或本书专属（id 在 scopedIds 中，内容仍取全局条目）；其他书籍读不到
+  // 该书 id 集合，规则对它们保持全局 enabled 态（禁用）。
   const next: RegExp[] = [];
   for (const r of rules) {
-    if (!r.enabled) continue;
+    if (!r.enabled && !scopedIds.has(r.id)) continue;
     const p = r.pattern?.trim();
     if (!p) continue;
     try {
@@ -112,17 +124,23 @@ function rebuildEnabledRegexes(rules: ChapterMatchRule[]) {
       );
     }
   }
-  if (next.length === 0) {
-    throw new Error("至少需要启用一条非空的匹配规则");
-  }
+  // 允许为空：全局全禁 + 本书也无专属规则时，检测结果即无章节（三态开关的合法形态）
   enabledRegexList = next;
 }
 
+/** 设置当前书籍的专属规则 id 上下文（空/undefined 清空）；立即重编译生效列表 */
+export function setActiveScopedChapterRuleIds(
+  ids?: readonly string[] | null,
+): void {
+  activeScopedRuleIds = new Set(ids ?? []);
+  rebuildEnabledRegexes(rulesState, activeScopedRuleIds);
+}
+
 try {
-  rebuildEnabledRegexes(rulesState);
+  rebuildEnabledRegexes(rulesState, activeScopedRuleIds);
 } catch {
   rulesState = createDefaultChapterRulesInternal();
-  rebuildEnabledRegexes(rulesState);
+  rebuildEnabledRegexes(rulesState, activeScopedRuleIds);
 }
 
 /** 章节标题展示用：去除首尾空白（含全角空格 U+3000 等 Unicode 空白） */
@@ -157,7 +175,7 @@ export function setChapterMatchRules(rules: ChapterMatchRule[]) {
     seen.add(r.id);
   }
   const next = rules.map(cloneChapterMatchRule);
-  rebuildEnabledRegexes(next);
+  rebuildEnabledRegexes(next, activeScopedRuleIds);
   rulesState = next;
 }
 

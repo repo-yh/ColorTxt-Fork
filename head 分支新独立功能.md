@@ -377,3 +377,50 @@ App.vue 四个桥接（已各自查 meta 合并高亮词，复用同一次查询
 | `src/renderer/src/components/ReaderSidebar.vue` | 从 meta 解析当前文件屏蔽列表透传 + 事件转发 |
 | `src/renderer/src/App.vue` | `isCurrentChapterBlocked` / `onBlockChapter` / `onUnblockChapter` + chapterNav 依赖 + 事件挂载 + Web 桥接注入 blockedChapters |
 | `src/renderer/src/components/ReaderMain.vue` | Web 内容链路 `buildChapterList` 屏蔽过滤（缓存存全量、输出时过滤）+ 4 个 expose 透传 |
+
+## 12. 章节正则规则三态开关（禁用 / 全局开启 / 仅当前书籍）— 2026-10-26 新增
+
+### 12.1 行为
+
+- 规则面板（ChapterRulePanel）每行最前面的开关由滑动开关改为**三色循环按钮**，循环顺序：`关`（灰，禁用）→ `本书`（橙 #d97706，仅当前书籍生效）→ `开`（accent 色，全局启用）→ `关`。三个转换的动作语义（2026-10-26 拍板）：**切到「关」清两个状态**（全局 enabled=false + 清本书 id）；**切到「开」**设置全局启用（enabled=true）+ 清理本书单独开状态（清 id）；**切到「本书」**清理全局启用（enabled=false）+ 设置本书 id。
+- 「本书」态 = 全局列表该规则保持 `enabled=false`（其他书籍读到时即禁用态）+ 该规则 id 写入本书 meta 的专属集合。
+- **合并展示时只切换开关状态**：面板里同一条全局规则只显示一行；行状态判定**全局启用优先**——`enabled=true` 一律显示「开」（含跨书产生的双真态：全局开 + 本书 id 残留），`enabled=false` 且 id 在本书专属集合显示「本书」（橙色 badge），否则「关」。规则**内容与顺序全部参照全局列表管理**（meta 不保存内容、不保存顺序）。
+- 面板**合并展示顺序** = 全局规则列表顺序（本书规则在全局什么位置就在什么位置）；拖拽改全局列表顺序，本书规则跟随移动（拖拽有效果）。
+- 其他书籍：读不到本书 meta 的 id 集合，该规则显示/生效均为禁用态；打开该书面板时全局列表的 disabled 条目恢复显示。
+- 本书行/全局行的**编辑都直接改全局条目**（内容单源，改动对所有书可见）；「移除本书专属」（本书行删除按钮，含内置规则）= 只从 id 集合删除（规则条目保留，回到全局禁用态显示）；全局自定义行删除 = 从全局列表移除 + id 集合清理。
+- 本书行的编辑/开关操作照常可用；拖拽手柄仅在非「本书」态行显示（本书态行位置 = 全局列表位置，不独立存在）。
+
+### 12.2 数据结构
+
+- **meta 只存 id**：`FileMetaRecord.scopedChapterRuleIds?: string[]` + `normalizeScopedChapterRuleIds`（字符串、trim 非空、去重、上限 50、空→undefined）+ upsert 保留链 + `setFileScopedChapterRuleIds` helper。`ChapterMatchRule` 类型不变，无新规则类型。
+- `chapter.ts` 模块级上下文：`activeScopedRuleIds: Set<string>` + `setActiveScopedChapterRuleIds(ids?)`（重编译）。
+- `rebuildEnabledRegexes(rules, scopedIds)`：按全局列表顺序遍历，**规则生效 = `enabled` 为真或 id 在本书专属集合中**（内容仍取全局条目），编译失败 throw（内容来自全局列表、面板编辑有即时校验）；**空列表允许**（去掉原「至少需要启用一条非空的匹配规则」throw——用户可把所有规则都设为仅本书）。`setChapterMatchRules` 仍保留「列表非空 + id 唯一」校验。
+
+### 12.3 生效链路（零侵入设计）
+
+- `detectChapterTitle` 及全部下游（`readerDisplayPipeline` 章节检测/缩进豁免、标注豁免、`useAppChapterNavigation` 三分支、ReaderMain `buildChapterList`）**零改动**——只读模块级 `enabledRegexList`，scoped 合并已在 rebuild 时完成。
+- markdown 链路（`detectMarkdownHeading` ATX）与正则规则无关，不受影响。
+- App.vue `watch(currentBookScopedChapterRuleIds)` → `setActiveScopedChapterRuleIds`（切书/meta 更新自动切换）。
+- 规则保存：`@apply-chapter-rules` → App.vue 包装函数 `applyChapterMatchRules({ rules, scopedRuleIds })` → `setFileScopedChapterRuleIds` 写当前书 meta + `persistFileMeta()` + `setActiveScopedChapterRuleIds` → nav 原 `applyChapterMatchRulesFromNav({ rules })`（全局列表保存 + 章节表重建）。
+- **Web 展示链路**：App.vue 4 个桥接（`__colorTxtGenerateColoredHtmlForText/ForSegment/HighlightLinesForText/GetFullText`）经 `withWebBridgeScopedRules(filePath, fn)` 临时切换到目标书 scoped → try/finally 恢复当前书（实时读 currentFile meta）。
+
+### 12.4 陷阱（重写时必须保留）
+
+1. **meta 只存 id，内容/顺序单源全局列表（用户拍板：不要保存具体内容与顺序，合并时只切换开关状态）**：本书态 = 全局条目 enabled=false + meta 记 id；面板同一条规则只显示一行。不要加回整条副本——副本会让编辑/拖拽双源漂移、拖拽失去对本书规则的效果。
+2. **规则编译失败仍 throw（无静默跳过）**：规则内容全部来自全局列表（面板编辑有即时校验），meta 只存 id 不会产生无效规则；全局列表中出现无效正则时保存/切书即报错（模块初始化 try/catch 回退默认规则仍保留）。
+3. **「至少启用一条」校验已放宽**：rebuild 允许空列表（全局全禁 + 本书无专属 = 无章节，合法形态）；但 `setChapterMatchRules` 仍拒绝空规则列表（面板无法保存 0 条规则）。
+4. **合并展示顺序 = 全局列表顺序**（本书规则在全局什么位置就在什么位置，不固定尾部）：拖拽 moveRule 按 rows 索引→id→globalDraft 索引移动，本书规则跟随；本书态行无拖拽手柄（位置=全局同 id 条目位置，不独立存在）。
+5. **规则被全局删除时 id 集合残留无害**：rebuild 只遍历全局列表，残留 id 匹配不到任何规则即自然失效；全局自定义行删除时同步清理 id 集合（面板内）。
+6. **跨书双真态是有意特性（id 残留接力，2026-10-26 拍板）**：书 A「本书」态的规则被其他书切到「全局开」时**不清理书 A 的 id**（其他书操作只碰自己的 meta 集合）——书 A 显示「开」（全局启用优先）；将来任何书把该规则切回「关」（enabled=false）后，书 A 凭残留 id 自动回到「本书」态单独生效。只有本书自己的「切到关/切到开」动作才清理本书 id，且**清 id 范围永远限于当前书**：草稿只持当前书集合，保存经 `setFileScopedChapterRuleIds` → `upsertFileMetaRecord` 仅替换当前书 path 的记录（其他书记录原样保留）；行删除按钮按显示态分流（本书态=「移除本书专属」只清 id，关/开态=「移除」删全局条目+清 id）。
+7. **Web 桥接 try/finally 恢复用「进入时捕获的 currentFile meta」**：桥接执行期间用户切书的竞态窗口极小且章节表瞬时偏差可自愈，不做加锁。
+8. **「保存」按钮是唯一生效点**：三态切换按钮/编辑/拖拽均只改面板内草稿（globalRules/scopedIds）——循环中的清理动作（切到关清两状态、切到开清本书 id、切到本书清全局启用）同样只作用于草稿，点击切换全程不写 meta、不触发重检测、不持久化；点底部「保存」按钮才 emit → 写本书 meta + persist + 全局列表保存 + 章节表重建（生效点唯一）。关闭/esc/遮罩直接丢弃草稿。`props.scopedRuleIds` 变化（含打开面板时）经 `watch(..., deep)` 重置双源草稿，编辑中改动不回写 props。
+
+### 12.5 涉及文件清单（§12）
+
+| 文件 | 职责 |
+|------|------|
+| `src/renderer/src/chapter.ts` | `activeScopedRuleIds` 模块级 id 上下文（set/get）+ `rebuildEnabledRegexes` 合并生效（enabled 或 id 在集合，按全局序编译、空列表允许） |
+| `src/renderer/src/stores/fileMetaStore.ts` | `scopedChapterRuleIds: string[]` 字段 + normalize/去重/上限 + upsert 保留链 + `setFileScopedChapterRuleIds` |
+| `src/renderer/src/components/ChapterRulePanel.vue` | 三色循环按钮（关→本书→全局开循环；切关双清/切开清 id/切本书清全局+置 id；行状态全局启用优先显示）+ globalRules/scopedIds 双源草稿 + 合并展示（同一条规则一行只切开关状态、顺序=全局列表）+ apply emit `{ rules, scopedRuleIds }` |
+| `src/renderer/src/components/AppOverlays.vue` | `scopedChapterRuleIds` prop 透传 + apply payload 类型扩展 |
+| `src/renderer/src/App.vue` | `currentBookScopedChapterRuleIds` computed + watch setActive + apply 包装（写 meta + persist）+ `withWebBridgeScopedRules` 4 桥接切换/恢复 |
