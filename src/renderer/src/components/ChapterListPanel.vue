@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch, type ComponentPublicInstance } from "vue";
 import type { Chapter } from "../chapter";
+import type { BlockedChapterRecord } from "../stores/fileMetaStore";
 import { icons } from "../icons";
 import { useAnchoredAppShellMenu } from "../composables/useAnchoredAppShellMenu";
 import { appToast } from "../services/appToast";
 import VirtualList from "./VirtualList.vue";
 import AppShellMenuTeleport from "./AppShellMenuTeleport.vue";
+import AppContextMenu from "./AppContextMenu.vue";
 import { READER_SIDEBAR_ROW_STRIDE } from "../composables/useReaderSidebarLists";
 import {
   CHAPTER_LIST_INDENT_PX,
@@ -37,9 +39,12 @@ const props = withDefaults(
     formatCharCount: (n: number) => string;
     /** 侧栏标题行「更多」按钮（锚定菜单） */
     menuAnchorEl?: HTMLButtonElement | null;
+    /** 当前文件被屏蔽的章节（file.meta.blockedChapters） */
+    blockedChapters?: BlockedChapterRecord[];
   }>(),
   {
     menuAnchorEl: null,
+    blockedChapters: undefined,
   },
 );
 
@@ -47,6 +52,8 @@ const emit = defineEmits<{
   jumpToChapter: [chapter: Chapter];
   closeCurrentFile: [];
   bindListRef: [value: InstanceType<typeof VirtualList> | null];
+  blockChapter: [chapter: Chapter];
+  unblockChapter: [record: BlockedChapterRecord];
 }>();
 
 const moreBtnRef = ref<HTMLButtonElement | null>(null);
@@ -76,6 +83,48 @@ const {
 function bindMorePanel(el: HTMLElement | null) {
   morePanelRef.value = el;
 }
+
+/** 章节行右键菜单：屏蔽此章节 */
+const rowMenuOpen = ref(false);
+const rowMenuX = ref(0);
+const rowMenuY = ref(0);
+const rowMenuChapter = ref<Chapter | null>(null);
+
+const rowMenuItems = computed(() =>
+  rowMenuChapter.value
+    ? [
+        {
+          id: "block-chapter",
+          label: "屏蔽此章节",
+          iconHtml: icons.close,
+        },
+      ]
+    : [],
+);
+
+function onRowContextMenu(ev: MouseEvent, ch: Chapter) {
+  rowMenuChapter.value = ch;
+  rowMenuX.value = ev.clientX;
+  rowMenuY.value = ev.clientY;
+  rowMenuOpen.value = true;
+}
+
+function onRowMenuSelect(id: string) {
+  rowMenuOpen.value = false;
+  if (id === "block-chapter" && rowMenuChapter.value) {
+    emit("blockChapter", rowMenuChapter.value);
+  }
+}
+
+/** 已屏蔽章节折叠区（footer 上方） */
+const blockedExpanded = ref(false);
+
+watch(
+  () => props.currentFilePath,
+  () => {
+    blockedExpanded.value = false;
+  },
+);
 
 /** 已折叠的父级键；空集合 = 全部展开 */
 const collapsedKeys = ref<Set<string>>(new Set());
@@ -296,6 +345,9 @@ function onBindListRef(value: Element | ComponentPublicInstance | null) {
                   : undefined
               "
               @click="emit('jumpToChapter', displayedChapters[index])"
+              @contextmenu.prevent.stop="
+                onRowContextMenu($event, displayedChapters[index])
+              "
             >
               <span
                 class="chapterItemMain"
@@ -345,6 +397,45 @@ function onBindListRef(value: Element | ComponentPublicInstance | null) {
         </VirtualList>
       </div>
     </div>
+    <div
+      v-if="currentFilePath && blockedChapters?.length"
+      class="blockedChaptersWrap"
+    >
+      <button
+        type="button"
+        class="blockedChaptersToggle"
+        :aria-expanded="blockedExpanded"
+        @click="blockedExpanded = !blockedExpanded"
+      >
+        <span
+          class="blockedChaptersChevron"
+          :class="{ 'blockedChaptersChevron--expanded': blockedExpanded }"
+          aria-hidden="true"
+          v-html="icons.fold"
+        />
+        <span class="blockedChaptersLabel"
+          >已屏蔽章节（{{ blockedChapters.length }}）</span
+        >
+      </button>
+      <div v-if="blockedExpanded" class="blockedChaptersList">
+        <div
+          v-for="(rec, i) in blockedChapters"
+          :key="`${rec.title}:${rec.lineNumber}:${i}`"
+          class="blockedChapterRow"
+          :title="rec.title"
+        >
+          <span class="blockedChapterTitle">{{ rec.title }}</span>
+          <button
+            type="button"
+            class="blockedChapterRestore"
+            title="取消屏蔽"
+            @click="emit('unblockChapter', rec)"
+          >
+            恢复
+          </button>
+        </div>
+      </div>
+    </div>
     <div v-if="currentFilePath" class="sidebarTabFooter">
       <div class="sidebarTabFooterStart">
         <span class="sidebarTabFooterStat"
@@ -389,6 +480,15 @@ function onBindListRef(value: Element | ComponentPublicInstance | null) {
         <span class="appShellMenuLabel">复制目录</span>
       </button>
     </AppShellMenuTeleport>
+    <AppContextMenu
+      :open="rowMenuOpen"
+      :x="rowMenuX"
+      :y="rowMenuY"
+      :items="rowMenuItems"
+      :min-width="120"
+      @close="rowMenuOpen = false"
+      @select="onRowMenuSelect"
+    />
   </div>
 </template>
 
@@ -540,5 +640,96 @@ function onBindListRef(value: Element | ComponentPublicInstance | null) {
 }
 .sidebarTabFooterAction {
   flex-shrink: 0;
+}
+.blockedChaptersWrap {
+  flex-shrink: 0;
+  border-top: 1px solid var(--border);
+  background: var(--bg);
+  user-select: none;
+}
+.blockedChaptersToggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  padding: 5px 10px;
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+  text-align: left;
+}
+.blockedChaptersToggle:hover {
+  color: var(--list-item-fg);
+  background: var(--list-item-bg-hover);
+}
+.blockedChaptersChevron {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  height: 12px;
+  transform: rotate(-90deg);
+  transition: transform 0.12s ease;
+}
+.blockedChaptersChevron--expanded {
+  transform: rotate(0deg);
+}
+.blockedChaptersChevron :deep(svg) {
+  width: 11px;
+  height: 11px;
+  display: block;
+}
+.blockedChaptersChevron :deep(svg path) {
+  fill: currentColor;
+}
+.blockedChaptersLabel {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.blockedChaptersList {
+  max-height: 180px;
+  overflow-y: auto;
+  padding: 0 6px 6px;
+}
+.blockedChapterRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+  color: var(--secondary);
+}
+.blockedChapterRow:hover {
+  background: var(--list-item-bg-hover);
+}
+.blockedChapterTitle {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-decoration: line-through;
+  opacity: 0.8;
+}
+.blockedChapterRestore {
+  flex-shrink: 0;
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.blockedChapterRestore:hover {
+  color: var(--list-item-fg-active);
+  background: var(--list-item-bg-active);
 }
 </style>

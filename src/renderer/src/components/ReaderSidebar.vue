@@ -14,6 +14,8 @@ import type { TxtFileItem } from "../services/fileListService";
 import type { SidebarFileItem } from "../composables/useReaderSidebarLists";
 import type { CategoryEditorRow } from "../constants/fileCategories";
 import type { FileMetaRecord, HighlightWord } from "../stores/fileMetaStore";
+import { findFileMetaRecord } from "../stores/fileMetaStore";
+import type { BlockedChapterRecord } from "../stores/fileMetaStore";
 import type {
   CharacterBookStylePersisted,
   CharacterRosterEntry,
@@ -347,6 +349,8 @@ const emit = defineEmits<{
       characterRoster?: CharacterRosterEntry[];
     },
   ];
+  blockChapter: [chapter: Chapter];
+  unblockChapter: [record: BlockedChapterRecord];
 }>();
 
 const chapterListPanelRef = ref<InstanceType<typeof ChapterListPanel> | null>(
@@ -371,6 +375,16 @@ const {
 } = useReaderSidebarLists(props, (e, chapter) => emit(e, chapter), {
   resolveDisplayedChapterIndex: () =>
     chapterListPanelRef.value?.displayedIndexOfActive(),
+});
+
+/** 当前文件被手动屏蔽的章节（file.meta.blockedChapters）；供章节面板折叠区展示 */
+const currentFileBlockedChapters = computed<BlockedChapterRecord[]>(() => {
+  const fp = props.currentFilePath?.trim();
+  if (!fp) return [];
+  const records = props.fileMetaRecords
+    ? [...props.fileMetaRecords]
+    : [];
+  return findFileMetaRecord(records, fp)?.blockedChapters ?? [];
 });
 
 const activeTab = computed(() => props.activeTab);
@@ -1211,9 +1225,12 @@ defineExpose({
         :show-chapter-counts="showChapterCounts"
         :format-char-count="formatCharCount"
         :menu-anchor-el="chaptersHeaderMoreBtnRef"
+        :blocked-chapters="currentFileBlockedChapters"
         @jump-to-chapter="onChapterItemClick"
         @close-current-file="emit('closeCurrentFile')"
         @bind-list-ref="bindChapterListRef"
+        @block-chapter="(ch) => emit('blockChapter', ch)"
+        @unblock-chapter="(rec) => emit('unblockChapter', rec)"
       />
       <FileListPanel
         ref="fileListPanelRef"

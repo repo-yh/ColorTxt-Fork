@@ -86,6 +86,7 @@ import {
   type InitialWindowLoadIntent,
 } from "./reader/initialSidebarTab";
 import { pickActiveChapterIdx } from "./reader/chapterIndex";
+import { isChapterBlockedByRecords } from "./reader/chapterBlock";
 import {
   WORDCLOUD_DEFAULT_ANGLE_MODE,
   WORDCLOUD_DEFAULT_FONT_FAMILY,
@@ -130,6 +131,7 @@ import {
   findFileMetaRecord,
   upsertFileMetaRecord,
   normalizeFileMetaPathKey,
+  type BlockedChapterRecord,
   type FileMetaRecord,
   type HighlightWordsByIndex,
   type ReaderLineationType,
@@ -555,7 +557,12 @@ onMounted(() => {
       hl = merged;
     }
     return (
-      readerRef.value?.generateColoredHtmlForText?.(text, filePath, hl) ?? {
+      readerRef.value?.generateColoredHtmlForText?.(
+        text,
+        filePath,
+        hl,
+        meta?.blockedChapters,
+      ) ?? {
         ok: false as const,
         reason: "阅读器未就绪" as const,
       }
@@ -585,6 +592,7 @@ onMounted(() => {
         hl,
         startLine,
         endLine,
+        meta?.blockedChapters,
       ) ?? {
         ok: false as const,
         reason: "阅读器未就绪" as const,
@@ -607,7 +615,12 @@ onMounted(() => {
       hl = merged;
     }
     return (
-      readerRef.value?.generateHighlightLinesForText?.(text, filePath, hl) ?? {
+      readerRef.value?.generateHighlightLinesForText?.(
+        text,
+        filePath,
+        hl,
+        meta?.blockedChapters,
+      ) ?? {
         ok: false as const,
         reason: "阅读器未就绪" as const,
       }
@@ -646,7 +659,7 @@ onMounted(() => {
       hl = merged;
     }
     return (
-      readerRef.value?.getFullText?.(text, fp, hl, opts) ?? {
+      readerRef.value?.getFullText?.(text, fp, hl, opts, meta?.blockedChapters) ?? {
         ok: false as const,
         reason: "阅读器未就绪" as const,
       }
@@ -2389,6 +2402,62 @@ function persistChapterCountForFile(path: string, count: number) {
   persistFileMeta();
 }
 
+/** 当前文件被手动屏蔽的章节（file.meta.blockedChapters）：按 title + 行号/字数匹配 */
+function isCurrentChapterBlocked(ch: Chapter): boolean {
+  const fp = currentFile.value;
+  if (!fp) return false;
+  const blocked =
+    findFileMetaRecord(fileMetaRecords.value, fp)?.blockedChapters;
+  if (!blocked || blocked.length === 0) return false;
+  return isChapterBlockedByRecords(ch, blocked);
+}
+
+function onBlockChapter(ch: Chapter) {
+  const fp = currentFile.value;
+  if (!fp) return;
+  fileMetaRecords.value = upsertFileMetaRecord(
+    fileMetaRecords.value,
+    fp,
+    (prev) => {
+      const base = prev?.blockedChapters ?? [];
+      if (
+        base.some(
+          (b) => b.title === ch.title && b.lineNumber === ch.lineNumber,
+        )
+      ) {
+        return {};
+      }
+      return {
+        blockedChapters: [
+          ...base,
+          { title: ch.title, lineNumber: ch.lineNumber, charCount: ch.charCount },
+        ],
+      };
+    },
+  );
+  persistFileMeta();
+  chapterNav.reapplyChapterBlockFilter();
+  appToast("已屏蔽章节，可在章节列表底部恢复", { kind: "success" });
+}
+
+function onUnblockChapter(record: BlockedChapterRecord) {
+  const fp = currentFile.value;
+  if (!fp) return;
+  fileMetaRecords.value = upsertFileMetaRecord(
+    fileMetaRecords.value,
+    fp,
+    (prev) => ({
+      blockedChapters: (prev?.blockedChapters ?? []).filter(
+        (b) =>
+          !(b.title === record.title && b.lineNumber === record.lineNumber),
+      ),
+    }),
+  );
+  persistFileMeta();
+  chapterNav.reapplyChapterBlockFilter();
+  appToast("已恢复章节", { kind: "success", duration: 1200 });
+}
+
 const chapterNav = useAppChapterNavigation({
   readerRef,
   chapters,
@@ -2421,6 +2490,7 @@ const chapterNav = useAppChapterNavigation({
   readingRulerEnabled,
   isVoiceReadActive: () => isVoiceReadActive.value,
   onChaptersApplied: persistChapterCountForFile,
+  isChapterBlocked: isCurrentChapterBlocked,
 });
 
 /** 视口已按物理行恢复且 probe 已更新后：重算章节并居中侧栏（加载结束等） */
@@ -4242,6 +4312,8 @@ useAppShellThemeWatch({
           @open-file-in-new-window="onOpenFileInNewWindow"
           @close-current-file="closeCurrentFile"
           @refresh-chapters-from-reader="applyChaptersFromReaderPlainText"
+          @block-chapter="onBlockChapter"
+          @unblock-chapter="onUnblockChapter"
           @jump-to-bookmark="jumpToBookmarkWithVoiceRead"
           @clear-bookmarks="clearCurrentFileBookmarks"
           @remove-bookmarks="removeCurrentFileBookmarks"

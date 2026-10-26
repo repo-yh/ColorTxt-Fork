@@ -1,8 +1,10 @@
-# head 分支新独立功能 — 高亮词体系指导意见
+# head 分支新独立功能 — 重做指导意见
 
-> 目的：记录当前 `main` 分支上高亮词功能**相对上游的独立实现**。下个大版本若与上游合并后高亮词功能偏离、需要重做，按本文档的「数据结构 + 调用链 + 重写要点」恢复即可。
+> 目的：记录当前 `main` 分支上 **fork 相对上游的独立功能实现**。下个大版本若与上游合并后功能偏离、需要重做，按对应章节的「数据结构 + 调用链 + 重写要点」恢复即可。
 >
-> 基准 commit：`2be2c2f`（一键染色按颜色分组多色滚动条染色）。
+> 当前收录：① 高亮词体系（§1–§10）；② 章节屏蔽（§11，2026-10-26 新增）。
+>
+> 基准 commit：`2be2c2f`（一键染色按颜色分组多色滚动条染色）；§11 基准：实施当日工作区（typecheck 通过）。
 
 ---
 
@@ -263,3 +265,113 @@ highlightWordsByIndexGlobal.value = ...
 | `src/renderer/src/components/ReaderMain.vue` | Monaco 编辑器 + defineExpose（setInlineSearchGroups 等） |
 | `src/renderer/src/App.vue` | 事件绑定 + 全局词状态 + onFavorite/onUnfavorite |
 | `src/renderer/src/monaco/txtrHighlightMonarch.ts` | Monarch 前景色染色（高亮词实时着色） |
+
+---
+
+## 11. 章节屏蔽（右键屏蔽章节目录单个章节）— 2026-10-26 新增
+
+> 动机：章节目录由全局章节正则规则检测，个别书会抓到「不合适的章节」（正文引用的"第X章"、目录页、广告行等）。为某本书单独调全局正则会波及所有书，故做 per-file 的手动屏蔽。语义判断（这行不是章节）机器按格式匹配区分不了，屏蔽是唯一精确手段。
+
+### 11.1 行为
+
+- 侧栏章节列表**右键章节行** → 菜单「屏蔽此章节」→ 从目录/导航隐藏（正文内容与标题样式不动，只动目录导航层）+ toast。
+- 恢复：章节列表 footer 上方「**已屏蔽章节（N）**」折叠条，展开后逐条「恢复」（切换文件自动收起）。
+- 生效范围（全走过滤后的章节表）：侧栏章节列表、上一章/下一章导航、当前章高亮、粘性章节条锚点（`setChapters`）、语音朗读计章、AI 章节名补全、文件列表「N章」、面板「共 N 章」。
+- **统计语义（用户拍板）**：统计数字 = **屏蔽后数量**；被屏蔽章节的 `charCount` **并入上一个保留章节**（误抓行本就是上一章正文的延续，且避免上一章因字数不足被 minCharCount 误滤）。
+- Web 展示服务（8888）经**桥接层注入过滤**生效（2026-10-26 修复）：Web 前端章节列表来自 `/api/content` 响应的 `chapters` 字段，由 ReaderMain `buildChapterList` **独立重检测**（不走 `chapters.value`），需 App.vue 桥接按 filePath 查 meta 把 `blockedChapters` 传进 ReaderMain 过滤（见 11.3b）；`/api/chapters`（AI 补全）才直接吃 `chapters.value`。
+- 替换文件：`replaceFileInList` 整条 meta 迁移（`{ ...prevMeta, path }`），屏蔽列表自动跟随。
+
+### 11.2 数据结构（`src/renderer/src/stores/fileMetaStore.ts`）
+
+```ts
+export type BlockedChapterRecord = {
+  title: string;
+  lineNumber: number;   // 屏蔽时刻的标题行号（主锚）
+  charCount: number;    // 屏蔽时刻的章节字数（行号漂移时的兜底锚）
+};
+// FileMetaRecord.blockedChapters?: BlockedChapterRecord[]（per-file 持久化）
+```
+
+- `normalizeBlockedChapters`：title 非空 + `lineNumber ≥ 1`，按 **`title + lineNumber`** 去重，上限 500，**空数组归一为 undefined（不落盘）**。
+- `upsertFileMetaRecord` 保留链含 `blockedChapters: prev?.blockedChapters`（漏了会被任何一次 meta 写入静默清掉）。
+- 屏蔽记录在 meta 上 → 替换文件（`replaceFileInList` 的 `{ ...prevMeta, path }` 整记录迁移）自动跟随，无需单独处理。
+
+### 11.3 过滤位置：章节检测「应用层」（`composables/useAppChapterNavigation.ts`）
+
+```
+applyChapterListResult(detected)        // 检测产物（全量）先入缓存
+  lastDetectedChapters = detected; lastDetectedFilePath = currentFile
+  filtered = filterBlockedChapters(detected)
+    // 剔除被屏蔽章节；其 charCount 并入 out 中上一个保留章节（首章被屏蔽则字数丢弃）
+  chapters.value = filtered             // 单点过滤，下游全部自动生效
+  onChaptersApplied(path, filtered.length)   // 文件列表「N章」= 屏蔽后数量
+  readerRef.setChapters(filtered)       // 粘性章节条/导航锚点 = 过滤后
+  activeChapterIdx = pickActiveChapterIdx(chapters, lastProbeLine)
+
+reapplyChapterBlockFilter()             // 屏蔽/恢复后调用：免重扫，从缓存重过滤
+  // 校验 lastDetectedFilePath === currentFile，防切换文件后误用旧书缓存
+```
+
+- 上/下章导航、`pickActiveChapterIdx`、`jumpToChapter` 基于 `chapters`（过滤后）**天然跳过被屏蔽章节**，无需单独改导航逻辑。
+- 视口落在被屏蔽章节区段内时，`pickActiveChapterIdx` 自动落到前一个保留章节（语义正确：屏蔽区段归属上一章）。
+- 编辑模式刷新 / 章节规则变更 / 手动刷新都走同一条 `applyChapterListResult`，屏蔽自动重应用。
+- `chapterMinCharCount` 过滤（侧栏层 `chapterMeetsMinCharCount`）与屏蔽过滤是**两层叠加**：先屏蔽（应用层、含字数合并），后 minCharCount（侧栏 `chaptersVisible`）。
+
+### 11.3b Web 展示链路过滤（`components/ReaderMain.vue` buildChapterList，2026-10-26 补）
+
+Web 前端（`front/app.js`）的章节列表**不是**来自 `/api/chapters`，而是 `/api/content` 响应里的 `chapters` 字段（`renderChapters(data.chapters)`）；该字段由 ReaderMain 的 `buildChapterList(fullText, filePath, lines)` 从原始全文**独立重检测**（txt 走 `buildChaptersFromPlainText`，md 走 ATX 标题），与主程序 `chapters.value` 是两条链路。屏蔽对 Web 生效的做法：
+
+```
+App.vue 四个桥接（已各自查 meta 合并高亮词，复用同一次查询）
+  __colorTxtGenerateColoredHtmlForText / ForSegment / HighlightLinesForText / GetFullText
+  → 把 meta?.blockedChapters 作为新参数传给 ReaderMain expose
+  → buildColoredHtml / buildColoredHtmlSegment / buildHighlightLines / getFullText
+  → buildChapterList(..., blockedChapters)
+      缓存 chaptersCache 存「文本指纹 → 全量 Chapter[]」（过滤在输出时做，缓存与屏蔽无关）
+      kept = filterChaptersByBlockedRecords(chapters, blockedChapters)   // 共享纯函数
+      chapterList（目录输出）= kept 映射；chapterLineSet（正文标题行样式）= 全量（样式不随屏蔽变化）
+  → getFullText 按 chapterIndex 切章用过滤后列表（被屏蔽区段并入上一章，
+    与 /api/chapters 的过滤后索引天然对齐）
+```
+
+- 共享过滤纯函数在 `reader/chapterBlock.ts`：`isChapterBlockedByRecords`（title + lineNumber || charCount 匹配）、`filterChaptersByPredicate`（剔除 + charCount 并入上一章）、`filterChaptersByBlockedRecords`。主程序链路（`useAppChapterNavigation.filterBlockedChapters`）、App.vue `isCurrentChapterBlocked`、Web 链路三处共用，杜绝逻辑漂移。
+- 主进程（`webDisplay.ts` / `ipcHandlers.ts`）**零改动**：屏蔽注入完全发生在渲染进程桥接内部，主进程不感知 meta。
+
+### 11.4 事件调用链
+
+```
+屏蔽：章节行 @contextmenu.prevent.stop（ChapterListPanel）
+  → AppContextMenu「屏蔽此章节」（icons.close，point 定位）
+  → emit("blockChapter", chapter) → ReaderSidebar 转发 → App.vue onBlockChapter
+  → upsertFileMetaRecord（blockedChapters 追加，title+lineNumber 去重）
+  → persistFileMeta() → chapterNav.reapplyChapterBlockFilter() → toast
+
+恢复：「已屏蔽章节（N）」折叠条「恢复」按钮（ChapterListPanel）
+  → emit("unblockChapter", record) → App.vue onUnblockChapter
+  → 按 title + lineNumber 删除 → persistFileMeta → reapply → toast
+```
+
+- ReaderSidebar 用 `findFileMetaRecord(props.fileMetaRecords, currentFilePath)` 取 `blockedChapters` 传给 ChapterListPanel（props `blockedChapters`），不新增跨层状态。
+- 屏蔽判断 `isChapterBlocked(ch)`（App.vue `isCurrentChapterBlocked`）：`b.title === ch.title && (b.lineNumber === ch.lineNumber || b.charCount === ch.charCount)`——**在检测全量章节上判定**（filterBlockedChapters 的输入），不在过滤后列表上。
+
+### 11.5 陷阱（重写时必须保留）
+
+1. **锚定匹配有降级**：主锚 `title+lineNumber`；文件重编辑后行号漂移时 `charCount` 兜底；都匹配不上则不再隐藏（无害，重新屏蔽即可）。不要改成只按 title——同名标题（正文误抓 + 真章节同名）会误伤真章节。
+2. **`reapplyChapterBlockFilter` 必须校验 `lastDetectedFilePath === currentFile`**：切文件后章节表未重建时防误用上一本的缓存。
+3. **屏蔽/恢复走重过滤而非重新检测**：大书（5 万行+走 heavy 分块路径）重检测会卡，缓存全量后重过滤瞬时生效。
+4. **`blockedChapters` 空数组要归一为 undefined**，否则空数组随每条 meta 落盘。
+5. **`chapters` 全链路共享（但仅限应用层链路）**：语音朗读（`useAppVoiceRead({ chapters })`）、AI 章节名补全（`__colorTxtGetChapterTitles`）吃 `chapters.value`，屏蔽后自动一致——不要给它们单独回退到全量。**Web `/api/content` 链路例外**：它由 ReaderMain `buildChapterList` 独立检测，必须经桥接注入 `blockedChapters`（见 11.3b），不会自动生效。
+6. 右键菜单在章节行上要 `.stop`，否则冒泡到全屏布局的 `@contextmenu`（App.vue `onLayoutContextMenu`）重复弹菜单。
+7. **Web 链路的屏蔽过滤必须在输出时做、缓存存全量**：`chaptersCache` 键只有 filePath+文本指纹，若把过滤后列表存进缓存，屏蔽/恢复后（文本未变）会命中旧缓存永不刷新；`chapterLineSet`（正文标题行样式）保持全量——与主程序「标题样式不动，只动目录导航层」语义一致。
+
+### 11.6 涉及文件清单（§11）
+
+| 文件 | 职责 |
+|------|------|
+| `src/renderer/src/stores/fileMetaStore.ts` | `BlockedChapterRecord` + `blockedChapters` 字段 normalize/去重/上限 + upsert 保留链 |
+| `src/renderer/src/reader/chapterBlock.ts` | 共享屏蔽过滤纯函数（记录匹配 / 剔除+字数并入），主程序与 Web 链路共用 |
+| `src/renderer/src/composables/useAppChapterNavigation.ts` | `isChapterBlocked` 依赖、应用层过滤（复用 chapterBlock 纯函数）、`reapplyChapterBlockFilter` |
+| `src/renderer/src/components/ChapterListPanel.vue` | 章节行右键菜单 + 已屏蔽折叠区 + block/unblock 事件与样式 |
+| `src/renderer/src/components/ReaderSidebar.vue` | 从 meta 解析当前文件屏蔽列表透传 + 事件转发 |
+| `src/renderer/src/App.vue` | `isCurrentChapterBlocked` / `onBlockChapter` / `onUnblockChapter` + chapterNav 依赖 + 事件挂载 + Web 桥接注入 blockedChapters |
+| `src/renderer/src/components/ReaderMain.vue` | Web 内容链路 `buildChapterList` 屏蔽过滤（缓存存全量、输出时过滤）+ 4 个 expose 透传 |

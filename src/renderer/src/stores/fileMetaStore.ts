@@ -71,6 +71,13 @@ export type ReaderAnnotationRecord = {
   stale?: boolean;
 };
 
+/** 手动屏蔽（从章节目录隐藏）的章节：屏蔽时刻的标题行快照，按 title + 行号定位 */
+export type BlockedChapterRecord = {
+  title: string;
+  lineNumber: number;
+  charCount: number;
+};
+
 export type FileMetaRecord = {
   path: string;
   fileName: string;
@@ -106,6 +113,8 @@ export type FileMetaRecord = {
   characterRoster?: CharacterRosterEntry[];
   /** 本书最后一次章节检测的总章节数（文件列表展示用；0/无效不存） */
   chapterCount?: number;
+  /** 本书被手动屏蔽的章节（从章节目录隐藏）；按 title + lineNumber 去重 */
+  blockedChapters?: BlockedChapterRecord[];
 };
 
 type FileMetaPayload = {
@@ -278,6 +287,35 @@ function clampStr(s: string, max: number): string {
 function normalizeCharacterGender(raw: unknown): CharacterGender {
   if (raw === "male" || raw === "female" || raw === "unknown") return raw;
   return "unknown";
+}
+
+const MAX_BLOCKED_CHAPTERS = 500;
+
+function normalizeBlockedChapters(
+  raw: unknown,
+): BlockedChapterRecord[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const seen = new Set<string>();
+  const out: BlockedChapterRecord[] = [];
+  for (const item of raw.slice(0, MAX_BLOCKED_CHAPTERS + 50)) {
+    if (typeof item !== "object" || item === null) continue;
+    const o = item as Record<string, unknown>;
+    const title = typeof o.title === "string" ? o.title.trim() : "";
+    const lineNumber =
+      typeof o.lineNumber === "number" && Number.isFinite(o.lineNumber)
+        ? Math.max(1, Math.floor(o.lineNumber))
+        : 0;
+    const charCount =
+      typeof o.charCount === "number" && Number.isFinite(o.charCount)
+        ? Math.max(0, Math.floor(o.charCount))
+        : 0;
+    if (!title || lineNumber < 1) continue;
+    const key = `${title}\n${lineNumber}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ title, lineNumber, charCount });
+  }
+  return out.length ? out : undefined;
 }
 
 export function normalizeCharacterBookStyle(
@@ -490,6 +528,7 @@ function normalizeRecord(item: Partial<FileMetaRecord>): FileMetaRecord | null {
     item.chapterCount >= 1
       ? Math.floor(item.chapterCount)
       : undefined;
+  const blockedChapters = normalizeBlockedChapters(item.blockedChapters);
   return {
     path,
     fileName,
@@ -506,6 +545,7 @@ function normalizeRecord(item: Partial<FileMetaRecord>): FileMetaRecord | null {
     ...(characterBookStyle ? { characterBookStyle } : {}),
     ...(characterRoster?.length ? { characterRoster } : {}),
     ...(chapterCount ? { chapterCount } : {}),
+    ...(blockedChapters ? { blockedChapters } : {}),
   };
 }
 
@@ -670,6 +710,7 @@ export function upsertFileMetaRecord(
     characterBookStyle: prev?.characterBookStyle,
     characterRoster: prev?.characterRoster,
     chapterCount: prev?.chapterCount,
+    blockedChapters: prev?.blockedChapters,
     ...nextPartial,
     path,
     fileName: nextPartial.fileName ?? prev?.fileName ?? fileNameKey(path),

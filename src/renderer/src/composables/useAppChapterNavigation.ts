@@ -7,6 +7,7 @@ import {
   type ChapterMatchRule,
 } from "../chapter";
 import { pickActiveChapterIdx } from "../reader/chapterIndex";
+import { filterChaptersByPredicate } from "../reader/chapterBlock";
 import {
   buildChaptersFromMarkdownEditorText,
   buildChaptersFromMarkdownPhysicalLines,
@@ -64,6 +65,8 @@ export function useAppChapterNavigation(deps: {
   onAfterChapterListRefresh?: () => void | Promise<void>;
   /** 章节检测完成后回调（如写入 file.meta 总章节数）；path 为当前文件 */
   onChaptersApplied?: (path: string, count: number) => void;
+  /** 当前文件章节屏蔽判断（file.meta.blockedChapters）；未提供视为无屏蔽 */
+  isChapterBlocked?: (ch: Chapter) => boolean;
   readingRulerEnabled: Ref<boolean>;
   /** 晚绑定：朗读中（含暂停）不走阅读尺居中切章 */
   isVoiceReadActive?: () => boolean;
@@ -155,7 +158,24 @@ export function useAppChapterNavigation(deps: {
     }
   }
 
-  function applyChapterListResult(filtered: Chapter[]) {
+  /** 最近一次检测的全量章节与所属文件；屏蔽/恢复后免重扫直接重过滤 */
+  let lastDetectedChapters: Chapter[] = [];
+  let lastDetectedFilePath: string | null = null;
+
+  /**
+   * 应用章节屏蔽：剔除被屏蔽章节，其字数并入上一个保留章节
+   *（被屏蔽的误抓行本就是上一章正文的延续）。
+   */
+  function filterBlockedChapters(detected: Chapter[]): Chapter[] {
+    const isBlocked = deps.isChapterBlocked;
+    if (!isBlocked) return detected;
+    return filterChaptersByPredicate(detected, isBlocked);
+  }
+
+  function applyChapterListResult(detected: Chapter[]) {
+    lastDetectedChapters = detected;
+    lastDetectedFilePath = deps.currentFile.value;
+    const filtered = filterBlockedChapters(detected);
     deps.chapters.value = filtered;
     const path = deps.currentFile.value;
     if (path) deps.onChaptersApplied?.(path, filtered.length);
@@ -171,6 +191,18 @@ export function useAppChapterNavigation(deps: {
       deps.chapters.value,
       deps.lastProbeLine.value,
     );
+  }
+
+  /** 屏蔽/恢复章节后调用：从最近检测全量重过滤（同步统计、锚点与当前章） */
+  function reapplyChapterBlockFilter() {
+    if (
+      lastDetectedChapters.length === 0 ||
+      lastDetectedFilePath === null ||
+      lastDetectedFilePath !== deps.currentFile.value
+    ) {
+      return;
+    }
+    applyChapterListResult(lastDetectedChapters);
   }
 
   /** 对当前 Monaco 展示全文统一匹配章节（加载后 / 规则变更 / 刷新章节） */
@@ -310,5 +342,6 @@ export function useAppChapterNavigation(deps: {
     refreshChapterListFromReader,
     refreshChapterListFromReaderAsync,
     applyChapterMatchRules,
+    reapplyChapterBlockFilter,
   };
 }

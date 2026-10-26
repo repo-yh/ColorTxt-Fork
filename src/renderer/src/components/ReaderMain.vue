@@ -71,8 +71,10 @@ import {
   buildChaptersFromPlainText,
   chapterTitleForDisplay,
   leadingWhitespaceColumnCount,
+  type Chapter,
 } from "../chapter";
 import { pickActiveChapterIdx } from "../reader/chapterIndex";
+import { filterChaptersByBlockedRecords } from "../reader/chapterBlock";
 import { ensureSearchAnchorCursorInViewport } from "../reader/ensureSearchAnchorCursorInViewport";
 import {
   compressBlankLinesInText,
@@ -172,6 +174,7 @@ import {
   type LineationLastColorPrefs,
 } from "../constants/annotationColors";
 import type {
+  BlockedChapterRecord,
   HighlightWordsByIndex,
   ReaderAnnotationRecord,
 } from "../stores/fileMetaStore";
@@ -4631,7 +4634,7 @@ function buildLineHtml(
 
 const chaptersCache = new Map<
   string,
-  { text: string; list: { title: string; line: number }[] }
+  { text: string; chapters: Chapter[] }
 >();
 
 /** 章节缓存指纹：全文 MD5，检测正文变化后失效章节缓存 */
@@ -4639,43 +4642,51 @@ function chapterTextFingerprint(fullText: string): string {
   return md5(fullText);
 }
 
+/** 标题行号修正：检测行内容不含标题文本时取上一行（标题前有空行/前缀的场景） */
+function chapterTargetLine(c: Chapter, lines: string[]): number {
+  const titleText = chapterTitleForDisplay(c.title);
+  const detectedLine = c.lineNumber;
+  return detectedLine > 0 && !lines[detectedLine]?.includes(titleText)
+    ? detectedLine - 1
+    : detectedLine;
+}
+
 function buildChapterList(
   fullText: string,
   filePath: string,
   lines: string[],
+  blockedChapters?: BlockedChapterRecord[],
 ): {
   chapterList: { title: string; line: number }[];
   chapterLineSet: Set<number>;
 } {
   const fingerprint = chapterTextFingerprint(fullText);
   const cached = chaptersCache.get(filePath);
-  if (cached && cached.text === fingerprint) {
-    const set = new Set(cached.list.map((c) => c.line));
-    return { chapterList: cached.list, chapterLineSet: set };
+  const chapters =
+    cached && cached.text === fingerprint
+      ? cached.chapters
+      : isMarkdownFilePath(filePath)
+        ? buildChaptersFromMarkdownEditorText(fullText, {
+            minCharCount: props.chapterMinCharCount ?? 0,
+          })
+        : buildChaptersFromPlainText(
+            fullText,
+            props.chapterMinCharCount ?? 0,
+          );
+  if (!cached || cached.text !== fingerprint) {
+    chaptersCache.set(filePath, { text: fingerprint, chapters });
   }
 
-  // md 走 ATX 标题层级检测（与侧边章节栏一致），txt 走章节匹配正则
-  const chapters = isMarkdownFilePath(filePath)
-    ? buildChaptersFromMarkdownEditorText(fullText, {
-        minCharCount: props.chapterMinCharCount ?? 0,
-      })
-    : buildChaptersFromPlainText(
-        fullText,
-        props.chapterMinCharCount ?? 0,
-      );
+  // 屏蔽过滤只作用于目录列表；chapterLineSet 用全量（正文标题行样式不随屏蔽变化）
+  const kept = filterChaptersByBlockedRecords(chapters, blockedChapters);
   const chapterLineSet = new Set<number>();
-  const chapterList = chapters.map((c) => {
-    const titleText = chapterTitleForDisplay(c.title);
-    const detectedLine = c.lineNumber;
-    const targetLine =
-      detectedLine > 0 &&
-      !lines[detectedLine]?.includes(titleText)
-        ? detectedLine - 1
-        : detectedLine;
-    chapterLineSet.add(targetLine);
-    return { title: titleText, line: targetLine };
-  });
-  chaptersCache.set(filePath, { text: fingerprint, list: chapterList });
+  for (const c of chapters) {
+    chapterLineSet.add(chapterTargetLine(c, lines));
+  }
+  const chapterList = kept.map((c) => ({
+    title: chapterTitleForDisplay(c.title),
+    line: chapterTargetLine(c, lines),
+  }));
   return { chapterList, chapterLineSet };
 }
 
@@ -4713,6 +4724,7 @@ async function buildColoredHtml(
   fullText: string,
   filePath: string,
   highlightWords: HighlightWordsByIndex | undefined,
+  blockedChapters?: BlockedChapterRecord[],
 ) {
   const { palette, tokenColorMap } = makeTokenColorMap();
   const tokenLines = await tokenizeWithCache(
@@ -4726,6 +4738,7 @@ async function buildColoredHtml(
     fullText,
     filePath,
     lines,
+    blockedChapters,
   );
 
   let html = "";
@@ -4755,6 +4768,7 @@ async function buildColoredHtmlSegment(
   highlightWords: HighlightWordsByIndex | undefined,
   startLine: number,
   endLine: number,
+  blockedChapters?: BlockedChapterRecord[],
 ) {
   const { palette, tokenColorMap } = makeTokenColorMap();
   const tokenLines = await tokenizeWithCache(
@@ -4772,6 +4786,7 @@ async function buildColoredHtmlSegment(
     fullText,
     filePath,
     lines,
+    blockedChapters,
   );
 
   let html = "";
@@ -4803,6 +4818,7 @@ async function buildHighlightLines(
   fullText: string,
   filePath: string,
   highlightWords: HighlightWordsByIndex | undefined,
+  blockedChapters?: BlockedChapterRecord[],
 ) {
   const tokenLines = await tokenizeWithCache(
     fullText,
@@ -4813,7 +4829,12 @@ async function buildHighlightLines(
   const lines = fullText.split("\n");
   const total = lines.length;
 
-  const { chapterList } = buildChapterList(fullText, filePath, lines);
+  const { chapterList } = buildChapterList(
+    fullText,
+    filePath,
+    lines,
+    blockedChapters,
+  );
 
   const matchedLines: { line: number; text: string; words: string[] }[] = [];
   for (let i = 0; i < lines.length; i++) {
@@ -4878,6 +4899,7 @@ async function getFullText(
   fullText: string,
   filePath: string,
   opts: { chapterIndex?: number; start?: number; end?: number },
+  blockedChapters?: BlockedChapterRecord[],
 ): Promise<
   | { ok: false; reason: string }
   | {
@@ -4895,7 +4917,12 @@ async function getFullText(
   let start: number;
   let end: number;
   if (typeof opts.chapterIndex === "number" && opts.chapterIndex >= 0) {
-    const { chapterList } = buildChapterList(fullText, filePath, lines);
+    const { chapterList } = buildChapterList(
+      fullText,
+      filePath,
+      lines,
+      blockedChapters,
+    );
     if (chapterList.length === 0) {
       return {
         ok: false as const,
@@ -5034,8 +5061,9 @@ defineExpose({
     fullText: string,
     filePath: string,
     highlightWords: HighlightWordsByIndex | undefined,
+    blockedChapters?: BlockedChapterRecord[],
   ) => {
-    return buildColoredHtml(fullText, filePath, highlightWords);
+    return buildColoredHtml(fullText, filePath, highlightWords, blockedChapters);
   },
 
   generateColoredHtmlForSegment: async (
@@ -5044,6 +5072,7 @@ defineExpose({
     highlightWords: HighlightWordsByIndex | undefined,
     startLine: number,
     endLine: number,
+    blockedChapters?: BlockedChapterRecord[],
   ) => {
     return buildColoredHtmlSegment(
       fullText,
@@ -5051,6 +5080,7 @@ defineExpose({
       highlightWords,
       startLine,
       endLine,
+      blockedChapters,
     );
   },
 
@@ -5058,8 +5088,9 @@ defineExpose({
     fullText: string,
     filePath: string,
     highlightWords: HighlightWordsByIndex | undefined,
+    blockedChapters?: BlockedChapterRecord[],
   ) => {
-    return buildHighlightLines(fullText, filePath, highlightWords);
+    return buildHighlightLines(fullText, filePath, highlightWords, blockedChapters);
   },
 
   getFullText: async (
@@ -5067,8 +5098,9 @@ defineExpose({
     filePath: string,
     _highlightWords: HighlightWordsByIndex | undefined,
     opts: { chapterIndex?: number; start?: number; end?: number },
+    blockedChapters?: BlockedChapterRecord[],
   ) => {
-    return getFullText(fullText, filePath, opts);
+    return getFullText(fullText, filePath, opts, blockedChapters);
   },
 
   generateColoredHtml: async () => {
