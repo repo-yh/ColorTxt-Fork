@@ -199,20 +199,23 @@ jobs:
           npx electron-builder publish --policy always "${args[@]}"
 
       # 提取当前版本的 CHANGELOG 条目（tag 触发按 tag 版本，手动触发按 package.json 版本）
+      # 顶部条目与版本不一致时只告警并跳过追加，不让 publish job 失败
       - name: Extract current version changelog
+        id: changelog
         if: startsWith(github.ref, 'refs/tags/')
         shell: bash
         run: |
-          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
-            VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="${GITHUB_REF_NAME#v}"
+          if node scripts/extract-changelog.mjs "$VERSION"; then
+            echo "appended=true" >> "$GITHUB_OUTPUT"
           else
-            VERSION=$(node -p "require('./package.json').version")
+            echo "::warning::CHANGELOG.md 顶部条目与版本 ${VERSION} 不一致，跳过 release 描述追加"
+            echo "appended=false" >> "$GITHUB_OUTPUT"
           fi
-          node scripts/extract-changelog.mjs "$VERSION"
 
       # 更新 electron-builder 创建的 draft release：仅追加 CHANGELOG 描述，不覆盖已有资产
       - name: Append changelog to draft release
-        if: startsWith(github.ref, 'refs/tags/')
+        if: startsWith(github.ref, 'refs/tags/') && steps.changelog.outputs.appended == 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
