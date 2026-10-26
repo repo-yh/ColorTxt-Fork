@@ -4677,10 +4677,11 @@ function buildChapterList(
     chaptersCache.set(filePath, { text: fingerprint, chapters });
   }
 
-  // 屏蔽过滤只作用于目录列表；chapterLineSet 用全量（正文标题行样式不随屏蔽变化）
+  // 屏蔽过滤同时作用于目录列表与正文标题行样式：被屏蔽章节的标题行按普通正文渲染，
+  // 不加 chapter-title 类（2026-10-26 用户拍板；chaptersCache 仍存全量，过滤在输出时做）
   const kept = filterChaptersByBlockedRecords(chapters, blockedChapters);
   const chapterLineSet = new Set<number>();
-  for (const c of chapters) {
+  for (const c of kept) {
     chapterLineSet.add(chapterTargetLine(c, lines));
   }
   const chapterList = kept.map((c) => ({

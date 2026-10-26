@@ -329,7 +329,9 @@ App.vue 四个桥接（已各自查 meta 合并高亮词，复用同一次查询
   → buildChapterList(..., blockedChapters)
       缓存 chaptersCache 存「文本指纹 → 全量 Chapter[]」（过滤在输出时做，缓存与屏蔽无关）
       kept = filterChaptersByBlockedRecords(chapters, blockedChapters)   // 共享纯函数
-      chapterList（目录输出）= kept 映射；chapterLineSet（正文标题行样式）= 全量（样式不随屏蔽变化）
+      chapterList（目录输出）与 chapterLineSet（正文标题行样式）都用 kept：
+      被屏蔽章节标题行按普通正文渲染、不加 chapter-title 类（2026-10-26 用户拍板；
+      与主程序「标题样式不动，只动目录导航层」语义不同，重写时勿混同）
   → getFullText 按 chapterIndex 切章用过滤后列表（被屏蔽区段并入上一章，
     与 /api/chapters 的过滤后索引天然对齐）
 ```
@@ -362,7 +364,7 @@ App.vue 四个桥接（已各自查 meta 合并高亮词，复用同一次查询
 4. **`blockedChapters` 空数组要归一为 undefined**，否则空数组随每条 meta 落盘。
 5. **`chapters` 全链路共享（但仅限应用层链路）**：语音朗读（`useAppVoiceRead({ chapters })`）、AI 章节名补全（`__colorTxtGetChapterTitles`）吃 `chapters.value`，屏蔽后自动一致——不要给它们单独回退到全量。**Web `/api/content` 链路例外**：它由 ReaderMain `buildChapterList` 独立检测，必须经桥接注入 `blockedChapters`（见 11.3b），不会自动生效。
 6. 右键菜单在章节行上要 `.stop`，否则冒泡到全屏布局的 `@contextmenu`（App.vue `onLayoutContextMenu`）重复弹菜单。
-7. **Web 链路的屏蔽过滤必须在输出时做、缓存存全量**：`chaptersCache` 键只有 filePath+文本指纹，若把过滤后列表存进缓存，屏蔽/恢复后（文本未变）会命中旧缓存永不刷新；`chapterLineSet`（正文标题行样式）保持全量——与主程序「标题样式不动，只动目录导航层」语义一致。
+7. **Web 链路的屏蔽过滤必须在输出时做、缓存存全量**：`chaptersCache` 键只有 filePath+文本指纹，若把过滤后列表存进缓存，屏蔽/恢复后（文本未变）会命中旧缓存永不刷新；`chapterList` 与 `chapterLineSet` 都从过滤后的 `kept` 构造——被屏蔽章节标题行不加 `chapter-title` 类（2026-10-26 用户拍板，Web 端与主程序「标题样式不动」语义不同）。
 
 ### 11.6 涉及文件清单（§11）
 
