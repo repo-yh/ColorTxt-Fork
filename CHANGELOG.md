@@ -1,3 +1,11 @@
+## 3.8.17
+
+其他：
+
+- GitHub Actions 依赖锁定：新增 actions.lock（gh actions-lock 生成），release.yml 全部 action 引用从可变 tag pin 到精确版本并配套校验，防 mutable tag 供应链劫持
+- Release 流程 CHANGELOG 追加改用 gh release edit：v3.8.16 实测 softprops/action-gh-release 在 duplicate draft 处理路径下最终 body 为 null，改用 runner 自带 gh 定位 release 后 --notes-file --append 追加，无创建/删重逻辑
+- CHANGELOG 追加提取范围升级为当前 tag 与上一个公开 release 之间的全部条目：一次 tag 带多个 CHANGELOG 版本发布时全量覆盖，上个版本找不到时回退单段并告警
+
 ## 3.8.16
 
 新功能：
