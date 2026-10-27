@@ -19,6 +19,7 @@ import type { AITokenUsageTotals } from "@shared/aiTokenUsage";
 import { chatCompletionOnce } from "../chat/chat";
 import { fetchChapterPlainTextFromRenderer } from "../rag/chapterPlainTextBridge";
 import { getOrBuildChapterFreq } from "../rag/segmentCache";
+import { isFetchAborted } from "../txt2img/shared";
 import {
   countTermsInChapters,
   fetchChaptersPlainTextRange,
@@ -26,6 +27,31 @@ import {
   pickSampleChapterIndices,
   topWordsFromFreq,
 } from "./wordcloudChapterFetch";
+
+/** 用户停止检索：携带已抽到的词项，供调用方返回部分结果 */
+class WordcloudStoppedWithTerms extends Error {
+  readonly terms: string[];
+  constructor(terms: string[]) {
+    super("Stopped");
+    this.name = "WordcloudStoppedWithTerms";
+    this.terms = terms;
+  }
+}
+
+function isWordcloudAbort(e: unknown, signal?: AbortSignal): boolean {
+  return isFetchAborted(e) || signal?.aborted === true;
+}
+
+function throwStoppedOrAbort(
+  signal: AbortSignal | undefined,
+  partialTerms: readonly string[],
+  candidateMax: number,
+): never {
+  const partial = dedupeSemanticTerms(partialTerms, candidateMax);
+  if (partial.length > 0) throw new WordcloudStoppedWithTerms(partial);
+  throwIfAborted(signal);
+  throw new DOMException("Aborted", "AbortError");
+}
 
 /** 词云展示：抽样与候选上限（控制体积与出图质量） */
 const SAMPLE_CHAPTER_COUNT = 12;
@@ -238,21 +264,34 @@ async function refineSemanticTerms(opts: {
 
   const merged: string[] = [];
   for (let i = 0; i < chunks.length; i++) {
-    throwIfAborted(opts.signal);
-    if (chunks.length > 1) {
-      opts.onProgress?.(
-        SEMANTIC_REFINE_PROGRESS_TITLE,
-        semanticExtractProgressDetail(
-          "正在按用户语义筛选候选词…",
-          `当前进度：${i + 1}/${chunks.length}`,
-        ),
-      );
+    try {
+      throwIfAborted(opts.signal);
+      if (chunks.length > 1) {
+        opts.onProgress?.(
+          SEMANTIC_REFINE_PROGRESS_TITLE,
+          semanticExtractProgressDetail(
+            "正在按用户语义筛选候选词…",
+            `当前进度：${i + 1}/${chunks.length}`,
+          ),
+        );
+      }
+      const part = await refineSemanticTermsChunk({
+        ...opts,
+        candidates: chunks[i]!,
+      });
+      merged.push(...part);
+    } catch (e) {
+      if (e instanceof WordcloudStoppedWithTerms) throw e;
+      if (isWordcloudAbort(e, opts.signal)) {
+        // 已筛完的批次优先；尚未筛完则退回抽取候选（仍是已检索到的词）
+        throwStoppedOrAbort(
+          opts.signal,
+          merged.length > 0 ? merged : opts.candidates,
+          opts.collect.candidateMax,
+        );
+      }
+      throw e;
     }
-    const part = await refineSemanticTermsChunk({
-      ...opts,
-      candidates: chunks[i]!,
-    });
-    merged.push(...part);
   }
   return dedupeSemanticTerms(merged, opts.collect.candidateMax);
 }
@@ -324,16 +363,28 @@ async function extractSemanticTerms(opts: {
 
   const extractedAll: string[] = [];
   for (let i = 0; i < batches.length; i++) {
-    throwIfAborted(opts.signal);
-    const batch = batches[i]!;
-    const part = await extractSemanticTermsFromSamples({
-      ...opts,
-      sampleTexts: batch,
-      batchLabel:
-        batches.length > 1 ? `${i + 1}/${batches.length}` : undefined,
-    });
-    extractedAll.push(...part);
-    if (extractedAll.length >= opts.collect.candidateMax) break;
+    try {
+      throwIfAborted(opts.signal);
+      const batch = batches[i]!;
+      const part = await extractSemanticTermsFromSamples({
+        ...opts,
+        sampleTexts: batch,
+        batchLabel:
+          batches.length > 1 ? `${i + 1}/${batches.length}` : undefined,
+      });
+      extractedAll.push(...part);
+      if (extractedAll.length >= opts.collect.candidateMax) break;
+    } catch (e) {
+      if (e instanceof WordcloudStoppedWithTerms) throw e;
+      if (isWordcloudAbort(e, opts.signal)) {
+        throwStoppedOrAbort(
+          opts.signal,
+          extractedAll,
+          opts.collect.candidateMax,
+        );
+      }
+      throw e;
+    }
   }
 
   opts.onProgress?.(
@@ -348,15 +399,24 @@ async function extractSemanticTerms(opts: {
     extractedAll,
     opts.collect.candidateMax,
   );
-  const terms = await refineSemanticTerms({
-    semanticQuery: opts.semanticQuery,
-    candidates: extracted,
-    chat: opts.chat,
-    collect: opts.collect,
-    onTokenUsage: opts.onTokenUsage,
-    onProgress: opts.onProgress,
-    signal: opts.signal,
-  });
+  let terms: string[];
+  try {
+    terms = await refineSemanticTerms({
+      semanticQuery: opts.semanticQuery,
+      candidates: extracted,
+      chat: opts.chat,
+      collect: opts.collect,
+      onTokenUsage: opts.onTokenUsage,
+      onProgress: opts.onProgress,
+      signal: opts.signal,
+    });
+  } catch (e) {
+    if (e instanceof WordcloudStoppedWithTerms) throw e;
+    if (isWordcloudAbort(e, opts.signal)) {
+      throwStoppedOrAbort(opts.signal, extracted, opts.collect.candidateMax);
+    }
+    throw e;
+  }
 
   opts.onProgress?.(
     SEMANTIC_EXTRACT_PROGRESS_TITLE,
@@ -505,23 +565,37 @@ export async function runWordcloudTool(
     if (sampleTexts.length === 0) {
       throw new Error("无法抽样章节正文以抽取语义词项");
     }
-    const terms = await extractSemanticTerms({
-      semanticQuery,
-      sampleTexts,
-      chat: ctx.chat,
-      collect,
-      onTokenUsage: ctx.onTokenUsage,
-      onProgress: ctx.onProgress,
-      signal: ctx.signal,
-    });
+    let terms: string[];
+    let stoppedEarly = false;
+    try {
+      terms = await extractSemanticTerms({
+        semanticQuery,
+        sampleTexts,
+        chat: ctx.chat,
+        collect,
+        onTokenUsage: ctx.onTokenUsage,
+        onProgress: ctx.onProgress,
+        signal: ctx.signal,
+      });
+    } catch (e) {
+      if (e instanceof WordcloudStoppedWithTerms) {
+        terms = e.terms;
+        stoppedEarly = true;
+      } else {
+        throw e;
+      }
+    }
     termsExtracted = terms.length;
-    ctx.onProgress?.(
-      "统计词频",
-      semanticExtractProgressDetail(
-        `在 ${chapterSlices.length} 章正文中统计 ${terms.length} 个候选词`,
-        "当前进度：计数中",
-      ),
-    );
+    if (!stoppedEarly) {
+      ctx.onProgress?.(
+        "统计词频",
+        semanticExtractProgressDetail(
+          `在 ${chapterSlices.length} 章正文中统计 ${terms.length} 个候选词`,
+          "当前进度：计数中",
+        ),
+      );
+    }
+    // 词频统计为本地同步，停止后仍可用已抽词项排序
     const termFreq = countTermsInChapters(chapterSlices, terms);
     words = topWordsFromFreq(termFreq, maxWords);
   }

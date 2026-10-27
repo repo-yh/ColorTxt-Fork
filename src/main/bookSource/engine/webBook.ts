@@ -2156,98 +2156,64 @@ export async function getChapterList(
     ar.setBook(book).setRuleData({ variable: { ...variables } });
   }
 
-  // Legado：bookUrl == tocUrl 且有 tocHtml 时直接解析，免再请求（搜索响应即详情时常见）
+  // Legado：bookUrl == tocUrl 且有 tocHtml 时用缓存作首页 body，免再请求首页；
+  // 仍须走下方 nextTocUrl 翻页（BookChapterList.analyzeChapterList），不可在此提前 return
   const tocHtmlCached = bookInput.tocHtml?.trim() ?? "";
   const bookUrlForTocCmp = String(bookInput.bookUrl || "").trim();
   const tocUrlForTocCmp = String(bookInput.tocUrl || bookInput.bookUrl || "").trim();
-  if (tocHtmlCached && bookUrlForTocCmp && bookUrlForTocCmp === tocUrlForTocCmp) {
-    const chapters: BookChapter[] = [];
-    const { listRule, reversePrefix } = parseTocListRule(rule.chapterList ?? "");
-    const base = tocUrlForTocCmp;
-    const arToc = new AnalyzeRule(source, logs, host)
-      .setContent(tocHtmlCached, base)
-      .setRedirectUrl(base)
-      .setBook(book)
-      .setRuleData({ variable: { ...variables } });
-    const list = await arToc.getElements(listRule, tocHtmlCached);
-    for (const el of list) {
-      arToc.setContent(el, base);
-      const chapterCtx = { title: "", url: "", tag: "" };
-      arToc.setChapter(chapterCtx);
-      const title = await arToc.getString(rule.chapterName, el);
-      let url = rule.chapterUrl
-        ? await arToc.getUrl(rule.chapterUrl, el)
-        : "";
-      const updateTag = rule.updateTime
-        ? await arToc.getString(rule.updateTime, el)
-        : "";
-      if (updateTag && !chapterCtx.tag) chapterCtx.tag = updateTag;
-      const isVolume = await resolveChapterIsVolume(arToc, rule.isVolume, el);
-      if (!title) continue;
-      if (!url) {
-        if (isVolume) url = `${title}${chapters.length}`;
-        else url = base;
-      }
-      if (!url && !isVolume) continue;
-      const tag = String(chapterCtx.tag || updateTag || "").trim();
-      chapters.push({
-        title,
-        url: url || base,
-        isVolume,
-        isVip: isTruthy(await arToc.getString(rule.isVip, el)),
-        isPay: isTruthy(await arToc.getString(rule.isPay, el)),
-        ...(tag ? { tag } : {}),
-      });
-    }
-    // 须与下方联网拉目录同一套 `-` 语义（修前误写成 reversePrefix 才 reverse）
-    applyTocReversePrefix(chapters, reversePrefix);
-    let out = dedupeChapters(chapters);
-    if (rule.formatJs?.trim()) {
-      await applyTocFormatJs(out, rule.formatJs, source, host);
-    }
-    if (!out.length) {
-      logs.push("未解析到章节（tocHtml 缓存）");
-    }
-    return out;
-  }
+  const useTocHtmlCache =
+    Boolean(tocHtmlCached) &&
+    Boolean(bookUrlForTocCmp) &&
+    bookUrlForTocCmp === tocUrlForTocCmp;
 
   const fetchTocUrlFinal = String(book.tocUrl || fetchTocUrl);
-  const analyzeUrl = new AnalyzeUrl({
-    mUrl: resolvedTocUrl,
-    baseUrl: String(book.bookUrl || bookPageUrl),
-    source,
-    host,
-    logs,
-    ruleVariables: variables,
-  });
-  let res = await fetchWithLoginCheck(analyzeUrl, source, "", logs);
-  let body = res.body;
-  let redirectUrl = res.url;
-  // bookId 误带 90000001_ 前缀时 all-chapter 返回空 rows，去掉前缀再试
-  if (
-    body.trim().startsWith("{") &&
-    /"rows"\s*:\s*\[\s*\]/.test(body) &&
-    /[?&]bookId=\d+_\d+/i.test(fetchTocUrlFinal)
-  ) {
-    const stripped = fetchTocUrlFinal.replace(
-      /([?&]bookId=)\d+_/i,
-      "$1",
-    );
-    if (stripped !== fetchTocUrlFinal) {
-      logs.push(`目录 bookId 含前缀且 rows 为空，重试: ${stripped.slice(0, 120)}`);
-      const retryUrl = new AnalyzeUrl({
-        mUrl: stripped,
-        baseUrl: String(book.bookUrl || bookPageUrl),
-        source,
-        host,
-        logs,
-        ruleVariables: variables,
-      });
-      const retry = await fetchWithLoginCheck(retryUrl, source, "", logs);
-      body = retry.body;
-      redirectUrl = retry.url;
-      resolvedTocUrl = stripped;
-      book.tocUrl = stripped;
+  let body: string;
+  let redirectUrl: string;
+  let firstPageBaseUrl: string;
+  if (useTocHtmlCache) {
+    body = tocHtmlCached;
+    redirectUrl = tocUrlForTocCmp;
+    firstPageBaseUrl = tocUrlForTocCmp;
+  } else {
+    const analyzeUrl = new AnalyzeUrl({
+      mUrl: resolvedTocUrl,
+      baseUrl: String(book.bookUrl || bookPageUrl),
+      source,
+      host,
+      logs,
+      ruleVariables: variables,
+    });
+    const res = await fetchWithLoginCheck(analyzeUrl, source, "", logs);
+    body = res.body;
+    redirectUrl = res.url;
+    firstPageBaseUrl = res.url;
+    // bookId 误带 90000001_ 前缀时 all-chapter 返回空 rows，去掉前缀再试
+    if (
+      body.trim().startsWith("{") &&
+      /"rows"\s*:\s*\[\s*\]/.test(body) &&
+      /[?&]bookId=\d+_\d+/i.test(fetchTocUrlFinal)
+    ) {
+      const stripped = fetchTocUrlFinal.replace(
+        /([?&]bookId=)\d+_/i,
+        "$1",
+      );
+      if (stripped !== fetchTocUrlFinal) {
+        logs.push(`目录 bookId 含前缀且 rows 为空，重试: ${stripped.slice(0, 120)}`);
+        const retryUrl = new AnalyzeUrl({
+          mUrl: stripped,
+          baseUrl: String(book.bookUrl || bookPageUrl),
+          source,
+          host,
+          logs,
+          ruleVariables: variables,
+        });
+        const retry = await fetchWithLoginCheck(retryUrl, source, "", logs);
+        body = retry.body;
+        redirectUrl = retry.url;
+        firstPageBaseUrl = retry.url;
+        resolvedTocUrl = stripped;
+        book.tocUrl = stripped;
+      }
     }
   }
   const chapters: BookChapter[] = [];
@@ -2306,10 +2272,11 @@ export async function getChapterList(
       });
     }
   };
-  await collect(body, res.url, redirectUrl);
+  await collect(body, firstPageBaseUrl, redirectUrl);
   if (rule.nextTocUrl?.trim()) {
     // nextTocUrl 里常按 baseUrl 匹配 UrlOption（如 limit=500）；须用带 option 的原 toc URL，不能只用 res.url
-    const tocRuleBaseUrl = resolvedTocUrl || fetchTocUrlFinal || res.url;
+    const tocRuleBaseUrl =
+      resolvedTocUrl || fetchTocUrlFinal || firstPageBaseUrl;
     const ar = new AnalyzeRule(source, logs, host)
       .setContent(body, tocRuleBaseUrl)
       .setRedirectUrl(redirectUrl)
@@ -2323,6 +2290,7 @@ export async function getChapterList(
       const visited = new Set<string>([
         tocVisitKey(resolvedTocUrl),
         tocVisitKey(fetchTocUrlFinal),
+        tocVisitKey(firstPageBaseUrl),
       ]);
       while (next && !visited.has(tocVisitKey(next))) {
         visited.add(tocVisitKey(next));
@@ -2360,7 +2328,9 @@ export async function getChapterList(
   }
   if (!list.length) {
     logs.push(
-      `未解析到章节（tocUrl: ${fetchTocUrlFinal.slice(0, 120)}${fetchTocUrlFinal.length > 120 ? "…" : ""}）`,
+      useTocHtmlCache
+        ? "未解析到章节（tocHtml 缓存）"
+        : `未解析到章节（tocUrl: ${fetchTocUrlFinal.slice(0, 120)}${fetchTocUrlFinal.length > 120 ? "…" : ""}）`,
     );
   }
   return list;

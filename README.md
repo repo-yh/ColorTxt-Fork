@@ -22,7 +22,22 @@
 </p>
 
 
-## 功能特性 <span style="font-size: 18px; font-weight: normal">[[预览图](./IMAGES.md)]</span>
+<h3 align="center">
+  <a href="#下载">下载</a> ｜ <a href="#功能特性">功能特性</a> ｜ <a href="./IMAGES.md">预览图</a> ｜ <a href="#常见问题">常见问题</a>
+</h3>
+
+
+## 下载
+
+按操作系统选择安装包 `v3.8.11`（也可前往 [Releases](https://github.com/ssnangua/ColorTxt/releases/latest) 查看全部版本与更新说明）：
+
+| 系统 | 下载 |
+| --- | --- |
+| Windows | [![安装包 x64](https://img.shields.io/badge/安装包-x64-blue?logo=data:image/svg%2bxml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI%2BPHBhdGggZmlsbD0iI2ZmZiIgZD0iTTAgMy40NDkgOS43NSAyLjF2OS40NTFIMG0xMC45NDktOS42MDJMMjQgMHYxMS40SDEwLjk0OU0wIDEyLjZoOS43NXY5LjQ1MUwwIDIwLjY5OU0xMC45NDkgMTIuNkgyNFYyNGwtMTIuOS0xLjgwMSIvPjwvc3ZnPg%3D%3D)](https://github.com/ssnangua/ColorTxt/releases/download/v3.8.11/colortxt-3.8.11-Setup.exe) [![便携版 x64](https://img.shields.io/badge/便携版-x64-blue?logo=data:image/svg%2bxml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI%2BPHBhdGggZmlsbD0iI2ZmZiIgZD0iTTAgMy40NDkgOS43NSAyLjF2OS40NTFIMG0xMC45NDktOS42MDJMMjQgMHYxMS40SDEwLjk0OU0wIDEyLjZoOS43NXY5LjQ1MUwwIDIwLjY5OU0xMC45NDkgMTIuNkgyNFYyNGwtMTIuOS0xLjgwMSIvPjwvc3ZnPg%3D%3D)](https://github.com/ssnangua/ColorTxt/releases/download/v3.8.11/colortxt-3.8.11-Portable.exe) |
+| macOS | [![DMG Apple Silicon](https://img.shields.io/badge/DMG-Apple%20Silicon-black?logo=apple&logoColor=white)](https://github.com/ssnangua/ColorTxt/releases/download/v3.8.11/colortxt-3.8.11-arm64.dmg) [![DMG Intel x64](https://img.shields.io/badge/DMG-Intel%20x64-black?logo=apple&logoColor=white)](https://github.com/ssnangua/ColorTxt/releases/download/v3.8.11/colortxt-3.8.11-x64.dmg) |
+| Linux | [![AppImage x64](https://img.shields.io/badge/AppImage-x64-FCBF25?logo=linux&logoColor=white)](https://github.com/ssnangua/ColorTxt/releases/download/v3.8.11/colortxt-3.8.11-x86_64.AppImage) [![AppImage arm64](https://img.shields.io/badge/AppImage-arm64-FCBF25?logo=linux&logoColor=white)](https://github.com/ssnangua/ColorTxt/releases/download/v3.8.11/colortxt-3.8.11-arm64.AppImage) |
+
+## 功能特性
 
 |  | 功能 | 说明 |
 | :---: | --- | --- |
@@ -321,6 +336,21 @@ ColorTxt/
 
 - 名称中的「**-简**」表示对应 **简体中文（SC）** 字体族，与 macOS 字体册中常见命名一致；并非「只能显示简体字」，而是字形与排版习惯面向简体场景。
 - **Linux** 环境需自行安装常见中文字体包（如 Noto CJK、文泉驿、文鼎 UKai 等），否则可能回退到系统默认字体。
+
+## 常见问题
+
+<details>
+<summary>上色异常</summary>
+
+> 上色异常通常是**引号/括号不成对**导致，比如：
+> - 只有 `“` `（` 没有对应的 `”` `）`，一个常见的场景是颜文字，如 `:(`，只有开符号没有闭符号
+> - 一边全角一边半角，如 `“..."` `（...)`
+> 
+> 解决方法：
+> 1. 方法一：「设置 → 阅读」，关闭「引号/括号匹配支持跨行」，可以降低影响范围，代价是多行对话只会高亮第一行
+> 2. 方法二（**推荐**）：「设置 → 编辑」，打开「启用小地图」，进编辑模式，通过小地图快速定位到上色异常的地方，手动修正
+
+</details>
 
 ## 其他
 

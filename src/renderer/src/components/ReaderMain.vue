@@ -19,6 +19,7 @@ import {
   refreshStickyChapterScrollWidget,
   registerChapterStickyScrollProviders,
 } from "../monaco/chapterStickyScroll";
+import { bindMonacoScrollbarTrackJumpGuard } from "../monaco/scrollbarTrackJumpGuard";
 import {
   buildChapterMinimapSectionHeaderDecorations,
   buildChapterTitleDecorations,
@@ -106,6 +107,7 @@ import {
   computeScrollTopForLineAtViewportSlot,
   computeScrollTopForReaderViewportRestoreAnchor,
   READER_BOOKMARK_JUMP_SLOT_FROM_TOP,
+  READER_VIEWPORT_RESTORE_SLOT_FROM_TOP,
   resolveDisplayLineForViewportRestore,
   type ReaderViewportRestoreAnchor,
 } from "../reader/readerViewportAnchor";
@@ -136,6 +138,7 @@ import {
   defaultMonacoCjkWrapOptimize,
   defaultMonacoCustomHighlight,
   defaultMonacoSmoothScrolling,
+  defaultDisableScrollbarTrackJump,
   defaultMouseWheelScrollSensitivity,
   defaultFastScrollSensitivity,
   defaultStickyChapterTitleEnabled,
@@ -167,7 +170,10 @@ import {
   type ReaderSurfaceColorEnabled,
   type ReaderSurfacePalette,
 } from "../constants/appUi";
-import { DEFAULT_HIGHLIGHT_COLORS_LIGHT } from "../constants/highlightColors";
+import {
+  DEFAULT_HIGHLIGHT_COLORS_LIGHT,
+  DEFAULT_HIGHLIGHT_LAST_COLOR,
+} from "../constants/highlightColors";
 import { DEFAULT_LINEATION_COLORS_LIGHT } from "../constants/lineationColors";
 import {
   DEFAULT_LINEATION_LAST_COLORS,
@@ -185,6 +191,7 @@ import {
 } from "../constants/selectionToolbar";
 import { annotationMarkerCssRules } from "../reader/readerAnnotationDecor";
 import { floorReadingPercentFromScrollRatio } from "../utils/format";
+import { whenSystemFontFacesReady } from "../utils/systemFontCatalog";
 import { bookTitleForExport } from "../utils/readerAnnotationExport";
 import { buildHighlightFindQuery, type HighlightListTerm } from "../utils/highlightWords";
 import {
@@ -417,6 +424,7 @@ let removeHlGlobalListeners: (() => void) | null = null;
 let unsubModalStack: (() => void) | null = null;
 let removeVoiceReadKeyCapture: (() => void) | null = null;
 let removeSmartFormatReviewKeyCapture: (() => void) | null = null;
+let removeSelectionToolbarDigitKeyCapture: (() => void) | null = null;
 const builtInThemes = new Set(["vs", "vs-dark"]);
 /** 脚注/补全等溢出挂件容器（须带 `monaco-editor` + 主题类，否则挂到 body 后默认样式失效） */
 let readerMonacoOverflowHost: HTMLDivElement | null = null;
@@ -502,6 +510,8 @@ const props = withDefaults(
     horizontalInsetPx?: number;
     /** Monaco 平滑滚动（滚轮、revealLine、setScrollTop 等） */
     monacoSmoothScrolling?: boolean;
+    /** 禁用点击滚动条轨道跳转（仍可拖动滑块）；仅只读，编辑 / Diff 预览不拦截 */
+    disableScrollbarTrackJump?: boolean;
     /** Monaco 滚轮滚动倍率 */
     mouseWheelScrollSensitivity?: number;
     /** Monaco 按住 Alt 时的滚轮加速倍率 */
@@ -546,6 +556,8 @@ const props = withDefaults(
     /** 本书阅读器划线 / 笔记 */
     readerAnnotations?: ReaderAnnotationRecord[];
     lineationLastColors?: LineationLastColorPrefs;
+    /** 选区工具条高亮词上次选用的色槽索引 */
+    highlightLastColor?: number;
     /** 已打开文件路径；主窗无路径时不显示选区工具条（找书可关标注工具后仍显示） */
     readerFilePath?: string | null;
     /**
@@ -622,6 +634,7 @@ const props = withDefaults(
     letterSpacingPx: defaultLetterSpacingPx,
     horizontalInsetPx: defaultReaderHorizontalInsetPx,
     monacoSmoothScrolling: defaultMonacoSmoothScrolling,
+    disableScrollbarTrackJump: defaultDisableScrollbarTrackJump,
     mouseWheelScrollSensitivity: defaultMouseWheelScrollSensitivity,
     fastScrollSensitivity: defaultFastScrollSensitivity,
     stickyChapterTitleEnabled: defaultStickyChapterTitleEnabled,
@@ -649,6 +662,7 @@ const props = withDefaults(
     highlightWordsByIndexBookOnly: undefined,
     readerAnnotations: () => [],
     lineationLastColors: () => ({ ...DEFAULT_LINEATION_LAST_COLORS }),
+    highlightLastColor: DEFAULT_HIGHLIGHT_LAST_COLOR,
     readerFilePath: null,
     showSelectionAnnotationTools: true,
     showSelectChapterMenuItem: true,
@@ -694,6 +708,7 @@ const emit = defineEmits<{
   updateLineationLastColor: [
     payload: { type: import("../stores/fileMetaStore").ReaderLineationType; colorIndex: number },
   ];
+  updateHighlightLastColor: [colorIndex: number];
   askAiWithQuote: [text: string];
   /** 选区工具条「查找」→ 侧栏全文搜索 */
   searchWithQuote: [text: string];
@@ -836,6 +851,8 @@ const readerAnn = useReaderAnnotations({
   model,
   readerAnnotations: () => props.readerAnnotations ?? [],
   lineationLastColors: () => props.lineationLastColors ?? DEFAULT_LINEATION_LAST_COLORS,
+  highlightLastColor: () =>
+    props.highlightLastColor ?? DEFAULT_HIGHLIGHT_LAST_COLOR,
   readerFilePath: () => props.readerFilePath,
   readerEditMode: () => props.readerEditMode === true,
   showSelectionAnnotationTools: () => props.showSelectionAnnotationTools !== false,
@@ -849,6 +866,8 @@ const readerAnn = useReaderAnnotations({
   emitUpsert: (ann) => emit("upsertReaderAnnotation", ann),
   emitRemove: (id) => emit("removeReaderAnnotation", id),
   emitUpdateLineationColor: (payload) => emit("updateLineationLastColor", payload),
+  emitUpdateHighlightLastColor: (colorIndex) =>
+    emit("updateHighlightLastColor", colorIndex),
   emitAddHighlightTerm: (payload) => emit("addHighlightTerm", payload),
   emitRemoveHighlightTerm: (payload) => emit("removeHighlightTerm", payload),
   emitAskAiWithQuote: (text) => emit("askAiWithQuote", text),
@@ -907,6 +926,7 @@ const {
   translatePopupRootRef,
   closeTranslatePopup,
   onToolbarAction,
+  onSelectionToolbarDigitKey,
   onHighlightPickConfirm,
   onHighlightPickRemove,
   onLineationPickConfirm,
@@ -1216,11 +1236,19 @@ function resolveDisplayLineToPhysical(displayLine: number): number {
   return Math.max(1, Math.floor(map(displayLine)));
 }
 
-function captureViewportRestoreAnchor(): ReaderViewportRestoreAnchor | null {
+function captureViewportRestoreAnchor(opts?: {
+  skipLayout?: boolean;
+}): ReaderViewportRestoreAnchor | null {
   const e = editor.value;
   const m = model.value;
   if (!e || !m) return null;
-  return captureReaderViewportRestoreAnchor(e, m, resolveDisplayLineToPhysical);
+  return captureReaderViewportRestoreAnchor(
+    e,
+    m,
+    resolveDisplayLineToPhysical,
+    READER_VIEWPORT_RESTORE_SLOT_FROM_TOP,
+    opts,
+  );
 }
 
 function restoreViewportToRestoreAnchor(
@@ -4335,11 +4363,16 @@ function scrollLineToBottom(lineNumber: number, smooth = false) {
   e.setPosition({ lineNumber: line, column: 1 });
 }
 
-/** 供 `colorTxt.file.meta` 持久化；深拷贝为可 JSON 序列化的纯对象 */
-function getSerializedEditorViewState(): Record<string, unknown> | null {
+/** 内存短生命周期快照（全屏进出恢复）；勿持久化，可能含不可 JSON 的引用 */
+function captureEditorViewState(): monaco.editor.ICodeEditorViewState | null {
   const e = editor.value;
   if (!e) return null;
-  const vs = e.saveViewState();
+  return e.saveViewState();
+}
+
+/** 供 `colorTxt.file.meta` 持久化；深拷贝为可 JSON 序列化的纯对象 */
+function getSerializedEditorViewState(): Record<string, unknown> | null {
+  const vs = captureEditorViewState();
   if (!vs) return null;
   try {
     return JSON.parse(JSON.stringify(vs)) as Record<string, unknown>;
@@ -4355,6 +4388,7 @@ function restoreEditorViewState(state: unknown): boolean {
   try {
     e.restoreViewState(state as monaco.editor.ICodeEditorViewState);
     scheduleReaderBackgroundStickyAlign();
+    emitProbeLine(false);
     return true;
   } catch {
     return false;
@@ -5030,6 +5064,7 @@ defineExpose({
   scrollLineToBottom,
   getScrollTop,
   scrollToScrollTop,
+  captureEditorViewState,
   getSerializedEditorViewState,
   restoreEditorViewState,
   applyEmbeddedImageAnchors,
@@ -5227,6 +5262,21 @@ onMounted(() => {
       stickyChapterTitleEnabled: props.stickyChapterTitleEnabled,
     }),
   });
+  // 字重 @font-face 晚于编辑器创建时，重新测量以便按锁定字重排版
+  void whenSystemFontFacesReady().then(() => {
+    const e = editor.value;
+    if (!e || !currentFontFamily) return;
+    const size = e.getOption(monaco.editor.EditorOption.fontSize);
+    const family = currentFontFamily;
+    const done = () => {
+      if (!editor.value) return;
+      monaco.editor.remeasureFonts();
+      setFontFamily(family);
+    };
+    const pending = document.fonts?.load(`${size}px ${family}`);
+    if (pending) void pending.then(done, done);
+    else done();
+  });
   chapterTitleDecorationsCollection.value =
     editor.value.createDecorationsCollection();
   inlineSearchDecorationsCollection.value =
@@ -5328,6 +5378,15 @@ onMounted(() => {
      * 右键在捕获阶段截断，不交给 Monaco（否则会把光标移到点击处并清空选区）；菜单改由原生 contextmenu 打开。
      */
     const editorHost = editorEl.value;
+    /** 挂在 editorHost 捕获阶段，早于 Monaco 轨道节点上的 bubble 监听；仅只读 */
+    const disposeScrollbarTrackJumpGuard = bindMonacoScrollbarTrackJumpGuard(
+      e,
+      () =>
+        props.disableScrollbarTrackJump !== false &&
+        !props.readerEditMode &&
+        !smartFormatReviewActive.value,
+      editorHost,
+    );
     const onReaderPointerDownCapture = (ev: PointerEvent) => {
       if (ev.button === 2) {
         // 只截断冒泡到 Monaco，勿 preventDefault（否则可能不再触发 contextmenu）
@@ -5446,6 +5505,7 @@ onMounted(() => {
     editorHost?.addEventListener("click", onFindNavigateAnchorCapture, true);
     window.addEventListener("keydown", onFindNavigateKeyCapture, true);
     onBeforeUnmount(() => {
+      disposeScrollbarTrackJumpGuard();
       d1.dispose();
       dLayout.dispose();
       window.removeEventListener("resize", flushReaderBackgroundStickyAlign);
@@ -5509,6 +5569,8 @@ onBeforeUnmount(() => {
   removeVoiceReadKeyCapture = null;
   removeSmartFormatReviewKeyCapture?.();
   removeSmartFormatReviewKeyCapture = null;
+  removeSelectionToolbarDigitKeyCapture?.();
+  removeSelectionToolbarDigitKeyCapture = null;
   disposeAnnotationDecorations();
   editor.value?.dispose();
   model.value?.dispose();
@@ -5596,6 +5658,22 @@ watch(readerClickTurnPageActive, (active) => {
   if (!active) endClickModePointerGesture(false);
   applyReaderClickModeMouseStyle();
 });
+
+watch(
+  () => !props.readerEditMode,
+  (enabled) => {
+    removeSelectionToolbarDigitKeyCapture?.();
+    removeSelectionToolbarDigitKeyCapture = null;
+    if (!enabled) return;
+    const onKey = (ev: KeyboardEvent) => {
+      onSelectionToolbarDigitKey(ev);
+    };
+    document.addEventListener("keydown", onKey, true);
+    removeSelectionToolbarDigitKeyCapture = () =>
+      document.removeEventListener("keydown", onKey, true);
+  },
+  { immediate: true },
+);
 
 watch(
   () => props.voiceReadScrollLocked,

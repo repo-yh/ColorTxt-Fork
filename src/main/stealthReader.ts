@@ -13,8 +13,14 @@ import {
   type StealthBounds,
   type StealthCommand,
   type StealthEnterPayload,
+  type StealthHoverCursor,
   type StealthPagePayload,
 } from "@shared/stealthReaderIpc";
+import {
+  releaseMacHoverCursor,
+  setMacHoverCursor,
+  warmMacHoverCursor,
+} from "./macNsCursor";
 import {
   DEFAULT_STEALTH_NAV_SHORTCUTS,
   normalizeStealthNavShortcuts,
@@ -29,6 +35,18 @@ import {
 } from "./stealthSettingsWindow";
 
 const STEALTH_FLAG = "__colortxtStealthReader";
+
+const STEALTH_HOVER_CURSORS = new Set<StealthHoverCursor>([
+  "arrow",
+  "ns",
+  "ew",
+  "nesw",
+  "nwse",
+]);
+
+function isStealthHoverCursor(raw: unknown): raw is StealthHoverCursor {
+  return typeof raw === "string" && STEALTH_HOVER_CURSORS.has(raw as StealthHoverCursor);
+}
 
 const DEFAULT_EXIT_ACCEL = "F9";
 
@@ -68,6 +86,8 @@ let stealthZOrderFallbackTimer: ReturnType<typeof setInterval> | null = null;
 let stealthCursorWasOverTaskbar = false;
 /** 取消过期的置顶重申（进出任务栏可能连续触发） */
 let stealthZOrderReassertGen = 0;
+/** macOS：非 key 窗收不到 mouseMoved，改由主进程按屏幕坐标设系统光标。 */
+let macHoverCursorTimer: ReturnType<typeof setInterval> | null = null;
 
 const STEALTH_AOT_LEVEL = "screen-saver" as const;
 /** 相对同级再抬一层，减轻被任务栏盖住 */
@@ -136,6 +156,60 @@ function assertStealthOverlayAlwaysOnTop(win: BrowserWindow): void {
   } catch {
     /* ignore */
   }
+}
+
+/** 与摸鱼窗 CSS 边缘热区一致：四边 4px，四角 6px。 */
+const MAC_EDGE_PX = 4;
+const MAC_CORNER_PX = 6;
+
+function macHoverCursorAtPoint(
+  px: number,
+  py: number,
+  b: StealthBounds,
+): StealthHoverCursor | null {
+  if (px < b.x || py < b.y || px >= b.x + b.width || py >= b.y + b.height) {
+    return null;
+  }
+  const left = px - b.x;
+  const top = py - b.y;
+  const right = b.x + b.width - px;
+  const bottom = b.y + b.height - py;
+  if (left < MAC_CORNER_PX && top < MAC_CORNER_PX) return "nwse";
+  if (right < MAC_CORNER_PX && top < MAC_CORNER_PX) return "nesw";
+  if (left < MAC_CORNER_PX && bottom < MAC_CORNER_PX) return "nesw";
+  if (right < MAC_CORNER_PX && bottom < MAC_CORNER_PX) return "nwse";
+  if (top < MAC_EDGE_PX || bottom < MAC_EDGE_PX) return "ns";
+  if (left < MAC_EDGE_PX || right < MAC_EDGE_PX) return "ew";
+  return "arrow";
+}
+
+function stopMacHoverCursorWatch(): void {
+  if (macHoverCursorTimer != null) {
+    clearInterval(macHoverCursorTimer);
+    macHoverCursorTimer = null;
+  }
+  releaseMacHoverCursor();
+}
+
+/**
+ * 其它应用在前台时，摸鱼窗收不到 mouseMoved，渲染进程里的光标同步不会跑。
+ * 主进程按屏幕坐标判断边缘，并设置系统光标；不把窗口变成 key，避免抢走前台。
+ */
+function startMacHoverCursorWatch(win: BrowserWindow): void {
+  stopMacHoverCursorWatch();
+  if (process.platform !== "darwin" || win.isDestroyed()) return;
+  macHoverCursorTimer = setInterval(() => {
+    if (win.isDestroyed() || !win.isVisible()) return;
+    const bounds = overlayLogicalBounds ?? win.getBounds();
+    const point = screen.getCursorScreenPoint();
+    const hit = macHoverCursorAtPoint(point.x, point.y, bounds);
+    if (hit && hit !== "arrow") {
+      setMacHoverCursor(hit);
+      return;
+    }
+    if (hit === "arrow") setMacHoverCursor("arrow");
+    else releaseMacHoverCursor();
+  }, 16);
 }
 
 function stopStealthZOrderWatch(): void {
@@ -484,6 +558,7 @@ function createOverlayWindow(bounds: StealthBounds): BrowserWindow {
   win.setResizable(false);
   lockEmptyWindowTitle(win);
   applyOverlayShape(win);
+  warmMacHoverCursor();
 
   win.webContents.on("before-input-event", (event, input) => {
     const isToggleDevToolsKey =
@@ -503,6 +578,20 @@ function createOverlayWindow(bounds: StealthBounds): BrowserWindow {
   return win;
 }
 
+/**
+ * 覆盖层 `setVisibleOnAllWorkspaces({ visibleOnFullScreen: true })` 在 macOS 上会
+ * `DockHide`（进程变成 UIElement），程序坞图标消失。关窗不会自动 DockShow。
+ * 应用未激活时 `dock.show()` 只改回前台策略，不会把应用抢到前面。
+ */
+function restoreDarwinDockIcon(): void {
+  if (process.platform !== "darwin" || !app.dock) return;
+  try {
+    if (!app.dock.isVisible()) void app.dock.show();
+  } catch {
+    /* 退出过程中可能已不可调 */
+  }
+}
+
 function restoreOwner(owner: BrowserWindow, line: number): void {
   if (owner.isDestroyed()) return;
   owner.setSkipTaskbar(false);
@@ -519,6 +608,7 @@ function restoreOwner(owner: BrowserWindow, line: number): void {
 function teardown(restore: boolean): void {
   if (tearingDown) return;
   tearingDown = true;
+  stopMacHoverCursorWatch();
   const s = session;
   session = null;
   stopStealthZOrderWatch();
@@ -535,6 +625,7 @@ function teardown(restore: boolean): void {
     overlay.destroy();
   }
   overlayLogicalBounds = null;
+  restoreDarwinDockIcon();
   if (restore && s && !s.owner.isDestroyed()) {
     restoreOwner(s.owner, line);
   }
@@ -560,6 +651,7 @@ export function setStealthOverlayHiddenByHotkey(hidden: boolean): void {
     s.overlay.hide();
     s.overlayHiddenByStealthHotkey = true;
     stopStealthZOrderWatch();
+    stopMacHoverCursorWatch();
     return;
   }
   s.overlayHiddenByStealthHotkey = false;
@@ -567,6 +659,7 @@ export function setStealthOverlayHiddenByHotkey(hidden: boolean): void {
   s.overlay.showInactive();
   assertStealthOverlayAlwaysOnTop(s.overlay);
   startStealthZOrderWatch(s.overlay);
+  startMacHoverCursorWatch(s.overlay);
 }
 
 function enterFromOwner(
@@ -645,6 +738,7 @@ function enterFromOwner(
     assertStealthOverlayAlwaysOnTop(overlay);
     registerPageShortcuts();
     startStealthZOrderWatch(overlay);
+    startMacHoverCursorWatch(overlay);
   });
 
   return { ok: true };
@@ -840,6 +934,16 @@ export function registerStealthReaderIpc(): void {
   ipcMain.on(STEALTH_READER_IPC.getCursorScreenPoint, (evt) => {
     const p = screen.getCursorScreenPoint();
     evt.returnValue = { x: p.x, y: p.y };
+  });
+
+  ipcMain.on(STEALTH_READER_IPC.setHoverCursor, (evt, raw: unknown) => {
+    evt.returnValue = null;
+    if (process.platform !== "darwin") return;
+    const win = BrowserWindow.fromWebContents(evt.sender);
+    if (!win || win.isDestroyed()) return;
+    if (!(win as unknown as Record<string, unknown>)[STEALTH_FLAG]) return;
+    if (!isStealthHoverCursor(raw)) return;
+    setMacHoverCursor(raw);
   });
 
   ipcMain.on(STEALTH_READER_IPC.setBounds, (evt, raw: unknown) => {

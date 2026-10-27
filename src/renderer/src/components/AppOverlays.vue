@@ -55,6 +55,7 @@ const props = defineProps<{
   readerLetterSpacingPx: number;
   readerHorizontalInsetPx: number;
   monacoSmoothScrolling: boolean;
+  disableScrollbarTrackJump: boolean;
   monacoCjkWrapOptimize: boolean;
   webDisplayEnabled: boolean;
   mouseWheelScrollSensitivity: number;
@@ -296,6 +297,7 @@ const busyOverlayText = computed(() => {
     :reader-letter-spacing-px="readerLetterSpacingPx"
     :reader-horizontal-inset-px="readerHorizontalInsetPx"
     :monaco-smooth-scrolling="monacoSmoothScrolling"
+    :disable-scrollbar-track-jump="disableScrollbarTrackJump"
     :monaco-cjk-wrap-optimize="monacoCjkWrapOptimize"
     :web-display-enabled="webDisplayEnabled"
     :mouse-wheel-scroll-sensitivity="mouseWheelScrollSensitivity"

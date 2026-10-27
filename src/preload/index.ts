@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron";
 import type { FileFilter } from "electron";
 import { EBOOK_CONVERT_DEFAULT_SUBDIR } from "@shared/ebookConvertPaths";
+import type { RawSystemFontFace } from "@shared/systemFontFace";
 import { CHARACTER_PORTRAIT_DEFAULT_SUBDIR } from "@shared/characterPortraitPaths";
 import {
   defaultAiDataCacheRoot,
@@ -26,6 +27,7 @@ import {
   type StealthCommand,
   type StealthChapterNavDirection,
   type StealthEnterPayload,
+  type StealthHoverCursor,
   type StealthOwnerChapterNavPayload,
   type StealthOwnerProgressPayload,
   type StealthPagePayload,
@@ -606,6 +608,10 @@ const api = {
     ipcRenderer.send(STEALTH_READER_IPC.setPosition, x, y),
   stealthReaderSetMinSize: (width: number, height: number) =>
     ipcRenderer.send(STEALTH_READER_IPC.setMinSize, width, height),
+  /** macOS 摸鱼窗边缘：CSS cursor 不生效，改由主进程设系统光标（同步，避免离开窗口后改写别的光标） */
+  stealthReaderSetHoverCursor: (cursor: StealthHoverCursor) => {
+    ipcRenderer.sendSync(STEALTH_READER_IPC.setHoverCursor, cursor);
+  },
   stealthReaderBlur: () => ipcRenderer.send(STEALTH_READER_IPC.blur),
   /** 重申摸鱼窗透明（不改尺寸）；`nudge` 时水平微移逼 DWM 重绘 */
   stealthReaderRefreshTransparency(nudge?: boolean): void {
@@ -727,8 +733,15 @@ const api = {
   },
   setNativeTheme: (theme: string) => ipcRenderer.send("theme:set", theme),
   getPathForFile: (file: File) => webUtils.getPathForFile(file),
-  listSystemFonts: () =>
-    ipcRenderer.invoke("fonts:listSystemFonts") as Promise<string[]>,
+  listSystemFonts: (opts?: { force?: boolean }) =>
+    ipcRenderer.invoke("fonts:listSystemFonts", opts) as Promise<
+      RawSystemFontFace[]
+    >,
+  /** 把绝对路径重新注册为 colortxt-local URL（启动恢复字重 pin 用） */
+  registerFontFilePaths: (paths: string[]) =>
+    ipcRenderer.invoke("fonts:registerFontFilePaths", paths) as Promise<
+      Record<string, string>
+    >,
   /** 解析当前用户终端默认字体族名（Windows Terminal / 控制台 FaceName / 平台回退）。 */
   getTerminalDefaultFontFace: () =>
     ipcRenderer.invoke("fonts:getTerminalDefaultFace") as Promise<string | null>,

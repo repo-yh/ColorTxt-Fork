@@ -4,12 +4,24 @@ import {
   computed,
   watch,
   nextTick,
+  onMounted,
+  onBeforeUnmount,
 } from "vue";
 import { icons } from "../icons";
 import IconButton from "./IconButton.vue";
 import LoadingDotsBounce from "./LoadingDotsBounce.vue";
 import VirtualList from "./VirtualList.vue";
+import AppCustomSelect, {
+  type CustomSelectItem,
+} from "./AppCustomSelect.vue";
 import { cssFontFamilyStack } from "../utils/fontFamilyCss";
+import {
+  ensureListedFontFacePinned,
+  ensureSystemFontCatalog,
+  peekSystemFontCatalog,
+  refreshSystemFontCatalog,
+} from "../utils/systemFontCatalog";
+import type { ListedSystemFont } from "@shared/systemFontFace";
 import {
   PRESET_FONT_KEYS,
   detectFontPickerSelection,
@@ -26,6 +38,37 @@ import {
 } from "../utils/stealthReaderSettings";
 import { useAnchoredAppShellMenu } from "../composables/useAnchoredAppShellMenu";
 import type { AnchoredMenuPlacement } from "../utils/appShellMenuPosition";
+import {
+  fontPickerDistinguishWeightsKey,
+  fontPickerListModeResetEvent,
+} from "../constants/appUi";
+
+const LIST_MODE_OPTIONS = [
+  { id: "family", label: "字体族" },
+  { id: "weight", label: "区分字重" },
+] as const;
+
+type ListModeId = (typeof LIST_MODE_OPTIONS)[number]["id"];
+
+function readDistinguishWeights(): boolean {
+  try {
+    return localStorage.getItem(fontPickerDistinguishWeightsKey) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function writeDistinguishWeights(value: boolean): void {
+  try {
+    localStorage.setItem(fontPickerDistinguishWeightsKey, value ? "1" : "0");
+  } catch {
+    /* ignore quota / private mode */
+  }
+}
+
+function listModeLabel(id: ListModeId): string {
+  return LIST_MODE_OPTIONS.find((o) => o.id === id)?.label ?? id;
+}
 
 const props = withDefaults(
   defineProps<{
@@ -56,8 +99,31 @@ const emit = defineEmits<{
 
 const fontMenuOpen = ref(false);
 const showOtherFontsPanel = ref(false);
-const systemFonts = ref<string[]>([]);
+const systemFontsFamilies = ref<ListedSystemFont[]>([]);
+const systemFontsByWeight = ref<ListedSystemFont[]>([]);
 const systemFontsLoading = ref(false);
+/** 刷新按钮：禁用并旋转（至少 400ms，避免一闪而过） */
+const systemFontsRefreshing = ref(false);
+/** 默认不拆字重，只列字体族；「区分字重」后列出同族各字重（localStorage 持久化） */
+const distinguishWeights = ref(readDistinguishWeights());
+const listModeId = computed<ListModeId>(() =>
+  distinguishWeights.value ? "weight" : "family",
+);
+const listModeDisplayLabel = computed(() => listModeLabel(listModeId.value));
+const listModeSelectItems: readonly CustomSelectItem[] = LIST_MODE_OPTIONS.map(
+  (o) => ({ kind: "item" as const, id: o.id, label: o.label }),
+);
+/** 嵌套在字体菜单内，面板需高于菜单本身 */
+const listModeSelectPanelZIndex = computed(() => props.menuZIndex + 20);
+
+function onListModeSelect(id: string) {
+  distinguishWeights.value = id === "weight";
+}
+
+function onListModeResetEvent() {
+  distinguishWeights.value = false;
+  writeDistinguishWeights(false);
+}
 
 const fontPickerAnchorEl = ref<HTMLElement | null>(null);
 const otherFontFilterInputRef = ref<HTMLInputElement | null>(null);
@@ -68,11 +134,22 @@ const fontOtherVirtualListRef = ref<InstanceType<typeof VirtualList> | null>(
 /** 系统字体列表过滤关键字 */
 const otherFontFilter = ref("");
 
+const systemFonts = computed(() =>
+  distinguishWeights.value
+    ? systemFontsByWeight.value
+    : systemFontsFamilies.value,
+);
+
 const filteredSystemFonts = computed(() => {
   const list = systemFonts.value;
   const q = otherFontFilter.value.trim().toLowerCase();
   if (!q) return list;
-  return list.filter((f) => f.toLowerCase().includes(q));
+  return list.filter(
+    (f) =>
+      f.label.toLowerCase().includes(q) ||
+      f.previewFamily.toLowerCase().includes(q) ||
+      f.cssFamily.toLowerCase().includes(q),
+  );
 });
 
 /** 虚拟列表单行高度（px），与 `.fontOtherItem` 一致 */
@@ -156,17 +233,48 @@ function setFontAndClose(fontFamily: string) {
 }
 
 async function ensureSystemFontsLoaded() {
-  if (systemFonts.value.length > 0 || systemFontsLoading.value) return;
-  const listFn = window.colorTxt?.listSystemFonts;
-  if (typeof listFn !== "function") return;
+  if (systemFontsLoading.value) return;
+  const peeked = peekSystemFontCatalog();
+  if (peeked) {
+    systemFontsFamilies.value = peeked.families;
+    systemFontsByWeight.value = peeked.byWeight;
+    return;
+  }
   systemFontsLoading.value = true;
   try {
-    const fonts = await listFn();
-    systemFonts.value = Array.isArray(fonts) ? fonts : [];
+    const catalog = await ensureSystemFontCatalog();
+    systemFontsFamilies.value = catalog.families;
+    systemFontsByWeight.value = catalog.byWeight;
   } catch {
-    systemFonts.value = [];
+    systemFontsFamilies.value = [];
+    systemFontsByWeight.value = [];
   } finally {
     systemFontsLoading.value = false;
+  }
+}
+
+function waitMs(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+async function refreshSystemFontsList() {
+  if (systemFontsRefreshing.value || systemFontsLoading.value) return;
+  systemFontsRefreshing.value = true;
+  const minSpin = waitMs(400);
+  try {
+    const catalog = await refreshSystemFontCatalog();
+    systemFontsFamilies.value = catalog.families;
+    systemFontsByWeight.value = catalog.byWeight;
+    await nextTick();
+    await scrollSelectedOtherFontIntoView();
+  } catch {
+    systemFontsFamilies.value = [];
+    systemFontsByWeight.value = [];
+  } finally {
+    await minSpin;
+    systemFontsRefreshing.value = false;
   }
 }
 
@@ -267,7 +375,12 @@ async function backFromOtherFonts() {
   fontMenuLayoutSettled.value = true;
 }
 
-function chooseOtherFont(fontName: string) {
+function chooseOtherFont(font: ListedSystemFont) {
+  ensureListedFontFacePinned(font);
+  setFontAndClose(cssFontFamilyStack([font.cssFamily]));
+}
+
+function chooseOtherFontByName(fontName: string) {
   setFontAndClose(cssFontFamilyStack([fontName]));
 }
 
@@ -276,7 +389,7 @@ function onOtherFontRowClick(fontName: string) {
     void openOtherFonts();
     return;
   }
-  chooseOtherFont(fontName);
+  chooseOtherFontByName(fontName);
 }
 
 function onPinOtherFontClick(fontName: string, ev: MouseEvent) {
@@ -290,22 +403,95 @@ function isOtherFontSelected(fontName: string) {
   return normalizeOtherFontName(fontName) === selectedOtherFontNormalized.value;
 }
 
+/** 把当前选中的 css/label 解析回稳定族名（避免短族名 startsWith 误伤长族名） */
+function resolveSelectedFontFamily(selectedRaw: string): string | null {
+  const selected = normalizeOtherFontName(selectedRaw);
+  if (!selected) return null;
+  const pools = [
+    systemFontsByWeight.value,
+    systemFontsFamilies.value,
+  ] as const;
+  for (const list of pools) {
+    for (const f of list) {
+      if (
+        normalizeOtherFontName(f.cssFamily) === selected ||
+        normalizeOtherFontName(f.label) === selected
+      ) {
+        return normalizeOtherFontName(f.family);
+      }
+    }
+  }
+  for (const f of systemFontsFamilies.value) {
+    if (normalizeOtherFontName(f.family) === selected) {
+      return normalizeOtherFontName(f.family);
+    }
+  }
+  return null;
+}
+
+function isListedFontSelected(font: ListedSystemFont) {
+  if (selectedFont.value.key !== "other") return false;
+  const selected = selectedOtherFontNormalized.value;
+  if (!selected) return false;
+  const css = normalizeOtherFontName(font.cssFamily);
+  const label = normalizeOtherFontName(font.label);
+  if (css === selected || label === selected) return true;
+  // 「字体族」模式：选中该族某字重时高亮对应族名行
+  if (distinguishWeights.value) return false;
+  const selectedFamily = resolveSelectedFontFamily(selected);
+  if (!selectedFamily) return false;
+  return normalizeOtherFontName(font.family) === selectedFamily;
+}
+
+function listedFontPreviewStyle(font: ListedSystemFont) {
+  return {
+    fontFamily: cssFontFamilyStack([font.previewFamily]),
+    fontWeight: String(font.previewWeight),
+  };
+}
+
+function findSelectedListedFontIndex(selectedRaw: string): number {
+  const selected = normalizeOtherFontName(selectedRaw);
+  if (!selected) return -1;
+  const list = filteredSystemFonts.value;
+  const exact = list.findIndex((f) => {
+    const css = normalizeOtherFontName(f.cssFamily);
+    const label = normalizeOtherFontName(f.label);
+    return css === selected || label === selected;
+  });
+  if (exact >= 0) return exact;
+  const selectedFamily = resolveSelectedFontFamily(selected);
+  if (!selectedFamily) return -1;
+  return list.findIndex(
+    (f) => normalizeOtherFontName(f.family) === selectedFamily,
+  );
+}
+
 async function scrollSelectedOtherFontIntoView() {
   const selected = selectedOtherFontNormalized.value;
   if (!selected) return;
-  const list = filteredSystemFonts.value;
-  const idx = list.findIndex((f) => f.trim() === selected.trim());
+  const idx = findSelectedListedFontIndex(selected);
   if (idx < 0) return;
   await fontOtherVirtualListRef.value?.scrollToIndex(idx, { align: "center" });
 }
 
-watch(otherFontFilter, () => {
+function refreshOtherFontListScroll(options?: { resetTop?: boolean }) {
   if (!showOtherFontsPanel.value || systemFontsLoading.value) return;
   if (!fontMenuLayoutSettled.value) return;
-  void nextTick().then(async () => {
-    fontOtherVirtualListRef.value?.scrollToTop();
-    await scrollSelectedOtherFontIntoView();
-  });
+  void nextTick()
+    .then(() => waitDoubleRaf())
+    .then(async () => {
+      if (options?.resetTop) {
+        fontOtherVirtualListRef.value?.scrollToTop();
+      }
+      await scrollSelectedOtherFontIntoView();
+    });
+}
+
+watch(otherFontFilter, () => refreshOtherFontListScroll({ resetTop: true }));
+watch(distinguishWeights, (value) => {
+  writeDistinguishWeights(value);
+  refreshOtherFontListScroll();
 });
 
 watch(
@@ -314,6 +500,16 @@ watch(
     if (locked) closeFontMenu();
   },
 );
+
+onMounted(() => {
+  window.addEventListener(fontPickerListModeResetEvent, onListModeResetEvent);
+});
+onBeforeUnmount(() => {
+  window.removeEventListener(
+    fontPickerListModeResetEvent,
+    onListModeResetEvent,
+  );
+});
 </script>
 
 <template>
@@ -434,7 +630,18 @@ watch(
 
       <div v-else class="fontOtherPanel">
         <div class="fontOtherHeader">
-          <div class="fontOtherTitle">选择系统字体</div>
+          <div class="fontOtherTitleRow">
+            <div class="fontOtherTitle">选择系统字体</div>
+            <IconButton
+              class="fontOtherRefreshBtn"
+              :class="{ 'fontOtherRefreshBtn--spinning': systemFontsRefreshing }"
+              :icon-html="icons.refresh"
+              :disabled="systemFontsRefreshing || systemFontsLoading"
+              title="刷新系统字体列表"
+              aria-label="刷新系统字体列表"
+              @click="refreshSystemFontsList"
+            />
+          </div>
           <button class="btn" @click="backFromOtherFonts">返回</button>
         </div>
 
@@ -444,16 +651,31 @@ watch(
 
         <template v-else>
           <div class="fontOtherFilterRow">
-            <input
-              ref="otherFontFilterInputRef"
-              v-model="otherFontFilter"
-              type="search"
-              class="fontOtherFilterInput"
-              placeholder="过滤字体名称…"
-              autocomplete="off"
-              spellcheck="false"
-              @click.stop
-            />
+            <div class="fontOtherFilterGroup">
+              <input
+                ref="otherFontFilterInputRef"
+                v-model="otherFontFilter"
+                type="search"
+                class="fontOtherFilterInput"
+                placeholder="过滤字体名称…"
+                autocomplete="off"
+                spellcheck="false"
+                @click.stop
+              />
+              <AppCustomSelect
+                class="fontOtherListModeSelect"
+                :model-value="listModeId"
+                :display-label="listModeDisplayLabel"
+                :fixed-top-items="[]"
+                :scroll-items="listModeSelectItems"
+                :fixed-bottom-items="[]"
+                :scroll-max-height="120"
+                :min-panel-width="96"
+                :panel-z-index="listModeSelectPanelZIndex"
+                ariaLabel="字体列表模式"
+                @update:model-value="onListModeSelect"
+              />
+            </div>
           </div>
 
           <div v-if="systemFonts.length === 0" class="fontOtherEmpty">
@@ -473,21 +695,20 @@ watch(
             :row-stride="FONT_ROW_STRIDE"
             :overscan="VIRTUAL_OVERSCAN"
             :scroll-padding="10"
-            :item-key="(i) => filteredSystemFonts[i] ?? i"
+            :item-key="(i) => filteredSystemFonts[i]?.cssFamily ?? i"
           >
             <template #default="{ index }">
               <button
+                v-if="filteredSystemFonts[index]"
                 type="button"
                 class="fontOtherItem"
                 :class="{
-                  active: isOtherFontSelected(filteredSystemFonts[index]),
+                  active: isListedFontSelected(filteredSystemFonts[index]!),
                 }"
-                :style="{
-                  fontFamily: cssFontFamilyStack([filteredSystemFonts[index]]),
-                }"
-                @click="chooseOtherFont(filteredSystemFonts[index])"
+                :style="listedFontPreviewStyle(filteredSystemFonts[index]!)"
+                @click="chooseOtherFont(filteredSystemFonts[index]!)"
               >
-                {{ filteredSystemFonts[index] }}
+                {{ filteredSystemFonts[index]!.label }}
               </button>
             </template>
           </VirtualList>
@@ -739,9 +960,52 @@ watch(
   flex-shrink: 0;
 }
 
-.fontOtherFilterInput {
+.fontOtherFilterGroup {
+  display: flex;
+  align-items: stretch;
   width: 100%;
   box-sizing: border-box;
+}
+
+.fontOtherFilterInput {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: auto;
+  box-sizing: border-box;
+  position: relative;
+  z-index: 0;
+  margin-right: -1px;
+  border-radius: 4px 0 0 4px !important;
+}
+
+.fontOtherFilterInput:focus {
+  z-index: 1;
+}
+
+.fontOtherListModeSelect {
+  flex: 0 0 auto;
+  width: auto;
+  min-width: 96px;
+  align-self: stretch;
+  display: flex;
+}
+
+.fontOtherListModeSelect :deep(.customSelectTrigger) {
+  flex: 1 1 auto;
+  width: auto;
+  max-width: none;
+  height: 100%;
+  min-height: 0;
+  padding: 6px 6px 6px 8px;
+  border-radius: 0 4px 4px 0;
+  background: var(--input-bg);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.fontOtherListModeSelect :deep(.customSelectTrigger[aria-expanded="true"]) {
+  position: relative;
+  z-index: 1;
 }
 
 .fontOtherHeader {
@@ -752,11 +1016,29 @@ watch(
   padding: 6px 6px 12px 6px;
 }
 
+.fontOtherTitleRow {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
 .fontOtherTitle {
   font-size: 12px;
   color: var(--fg);
   white-space: nowrap;
   flex-shrink: 0;
+}
+
+/* 与设置页「拉取模型」旋转节奏一致 */
+.fontOtherRefreshBtn--spinning :deep(.icon svg) {
+  animation: fontOtherRefreshSpin 0.65s linear infinite;
+}
+
+@keyframes fontOtherRefreshSpin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .fontOtherHeader .btn {

@@ -76,6 +76,7 @@ const props = withDefaults(
     draftLetterSpacingPx: number;
     draftReaderHorizontalInsetPx: number;
     draftMonacoSmoothScrolling: boolean;
+    draftDisableScrollbarTrackJump: boolean;
     draftMonacoCjkWrapOptimize: boolean;
     draftWebDisplayEnabled: boolean;
     draftMouseWheelScrollSensitivity: number;
@@ -133,6 +134,7 @@ defineEmits<{
   "update:draftLetterSpacingPx": [v: number];
   "update:draftReaderHorizontalInsetPx": [v: number];
   "update:draftMonacoSmoothScrolling": [v: boolean];
+  "update:draftDisableScrollbarTrackJump": [v: boolean];
   "update:draftMonacoCjkWrapOptimize": [v: boolean];
   "update:draftWebDisplayEnabled": [v: boolean];
   "update:draftMouseWheelScrollSensitivity": [v: number];
@@ -518,6 +520,20 @@ const selectListsEmpty: CustomSelectItem[] = [];
         <p class="settingsHint">
           开启后可通过浏览器访问 http://localhost:8888 查看当前正文的染色效果。
         </p>
+      </div>
+
+      <div class="settingsRow">
+        <div class="settingsRowMain">
+          <span class="settingsLabel">禁用滚动条轨道</span>
+          <SwitchToggle
+            :model-value="draftDisableScrollbarTrackJump"
+            aria-label="禁用滚动条轨道"
+            @update:model-value="
+              $emit('update:draftDisableScrollbarTrackJump', $event)
+            "
+          />
+        </div>
+        <p class="settingsHint">点击滚动条轨道不跳转（仍可拖动滑块）。</p>
       </div>
 
       <div class="settingsRow">

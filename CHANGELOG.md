@@ -130,13 +130,34 @@
 - 章节缓存改用全文 MD5 指纹，内容变化后刷新能正确重建章节
 - 依赖治理：`opencc` 钉回 1.3.1（1.4.x 在 Electron 35 下加载即崩溃）；`fs-web` 的 `path` 依赖改走 npm registry；新增 npm `allowScripts` 安装脚本白名单
 
+## 3.8.12
+
+改进：
+
+- 「设置 → AI 阅读助手 → 对话模型」支持手动输入模型 ID（部分服务商没有提供模型查询接口） [#100](https://github.com/ssnangua/ColorTxt/issues/100)，[#101](https://github.com/ssnangua/ColorTxt/pull/101)
+- 只读选区工具条支持数字快捷键：按钮左上角显示对应数字角标；按钮未启用时快捷键不生效 [#110](https://github.com/ssnangua/ColorTxt/issues/110)
+- 「设置 → 阅读 → 滚动」新增「禁用滚动条轨道」（默认开启）：点击滚动条轨道不跳转，避免误点导致找不到阅读位置（仍可拖动滑块） [#114](https://github.com/ssnangua/ColorTxt/issues/114)
+- 移除高亮词前增加二次确认 [#102](https://github.com/ssnangua/ColorTxt/issues/102)
+- 高亮词「AI 检索」进行中改为在列表内显示信息条，不再全屏蒙版挡操作；信息条右侧可点「停止」，并使用已检索到的词语 [#102](https://github.com/ssnangua/ColorTxt/issues/102)
+- 系统字体列表：可切换「字体族 / 区分字重」 [#93](https://github.com/ssnangua/ColorTxt/issues/93)
+
+修复：
+
+- **Edge TTS** 朗读 `403`：微软已要求 **Sec-MS-GEC v2** 握手令牌，旧版 v1 被拒绝
+- 书源分页目录可完整加载 [#103](https://github.com/ssnangua/ColorTxt/issues/103)
+- (Mac) 退出全屏模式阅读进度异常 [#99](https://github.com/ssnangua/ColorTxt/issues/99)
+- (Mac) 摸鱼模式：
+  - 鼠标移到摸鱼窗口边缘时，会显示为调整窗口大小的光标
+  - 退出摸鱼模式后，程序坞图标会重新显示
+  - 翻页/切章的默认全局快捷键改为 `Ctrl+Option+方向键`，避开系统调度中心占用的 `Ctrl+方向键`
+
 ## 3.8.11
 
 改进：
 
 - 「摸鱼模式」优化：
   - 进入时改为半透明绿色左右点按提示层（「上一页」/「下一页」），点击后关闭
-  - Windows 下可缩到单行高度（系统最小窗高用 `setShape` 绕过）
+  - (Windows) 可缩到单行高度（系统最小窗高用 `setShape` 绕过）
   - 出右键菜单时点窗口只收菜单不翻页
 - **Edge TTS** 朗读时支持按标点**插入停顿** [#90](https://github.com/ssnangua/ColorTxt/pull/90)
   - 「设置 → 语音朗读 → Edge TTS」新增「句中停顿」（`，；：、`，0～600ms）和「句末停顿」（`。！？…`，0～1200ms）配置项，`0` 为默认行为
@@ -150,7 +171,7 @@
 
 - 极简 / 全屏浮动侧栏里，「文件」分类下拉的「分类管理」现在可以正常打开 [#89](https://github.com/ssnangua/ColorTxt/issues/89)
 - 摸鱼窗口拖动移动时钉死逻辑宽高，避免在某些情况下窗体被越拖越大 [#89](https://github.com/ssnangua/ColorTxt/issues/89)
-- Windows 下，点任务栏时，系统会强行把任务栏抬到前面，导致摸鱼窗口被压到下面，现在会在指针进入任务栏区域时立刻重申置顶，并周期兜底以覆盖关窗等层级重排 [#91](https://github.com/ssnangua/ColorTxt/issues/91)
+- (Windows) 点任务栏时，系统会强行把任务栏抬到前面，导致摸鱼窗口被压到下面，现在会在指针进入任务栏区域时立刻重申置顶，并周期兜底以覆盖关窗等层级重排 [#91](https://github.com/ssnangua/ColorTxt/issues/91)
 - 电子书转 Markdown 时，段落里的行内图片（如字形图）不再拆成独占行插图，阅读器按字号显示在句中
 - 侧栏文件列表按「打开时间」排序时
   - 启动后因 meta 尚未加载而排成文件名顺序，现在可正常排序
@@ -290,7 +311,7 @@
   - PDF 插图按 XObject 抽取（JPEG 原样、JPX/JBIG2 走 wasm），同一对象只解码一次，不再逐页 `getOperatorList`；底栏显示页进度
   - PDF 抽图正确展开 Indexed 调色板（含 4bit 打包索引），不再把索引字节当成 RGB 解成黑条 / 下半截全黑
 
-### 3.6.6
+## 3.6.6
 
 「词典」功能完善：
 
@@ -434,7 +455,7 @@
     - 底栏「文件路径」菜单：上传/同步「书包」（基于当前打开文件导出的带阅读进度的书包）
   - 找书窗口：
     - 顶栏「WebDAV」菜单可分别上传/同步「书架 / 书源 / 设置」
-- 语音朗读：Windows 新增服务商「**讲述人自然语音**」（通过 Windows SAPI5 调用本机音色，需安装适配器与语音包，如 [NaturalVoiceSAPIAdapter](https://github.com/gexgd0419/NaturalVoiceSAPIAdapter)） [#36](https://github.com/ssnangua/ColorTxt/issues/36)
+- (Windows) 语音朗读：新增服务商「**讲述人自然语音**」（通过 Windows SAPI5 调用本机音色，需安装适配器与语音包，如 [NaturalVoiceSAPIAdapter](https://github.com/gexgd0419/NaturalVoiceSAPIAdapter)） [#36](https://github.com/ssnangua/ColorTxt/issues/36)
 - 「设置 → 常规 → 数据管理」：新增「**阅读数据**」面板，可管理各书阅读数据
 
 改进：
@@ -457,13 +478,13 @@
 - 找书窗口与主界面共用「配色 → 阅读器」设置（和「主题色」一样会实时同步）
 - 统一导出文件名：
 
-| 模块    | 文件名                                                   |
-| ------- | -------------------------------------------------------- |
-| 书签    | `{书名}.bookmarks.json`                                  |
+| 模块    | 文件名                                                |
+| ------- | ----------------------------------------------------- |
+| 书签    | `{书名}.bookmarks.json`                               |
 | 高亮词  | `{书名}.highlights.json` / `favorite.highlights.json` |
-| 笔记    | `{书名}.notes.{json\|md}`                                |
-| 角色卡  | `{书名}.characters.zip`                                  |
-| AI 对话 | `{书名}-{对话标题}[（带思考过程）].chat.{json\|md}`      |
+| 笔记    | `{书名}.notes.{json\|md}`                             |
+| 角色卡  | `{书名}.characters.zip`                               |
+| AI 对话 | `{书名}-{对话标题}[（带思考过程）].chat.{json\|md}`   |
 
 修复：
 
@@ -661,7 +682,7 @@
 
 修复：
 
-- macOS 现在可以正常退出应用
+- (Mac) 现在可以正常退出应用
 
 ## 2.3
 
@@ -784,9 +805,9 @@
 
 构建相关：
 
-- Windows：安装包支持自定义安装路径
-- Windows：输出便携版（Portable）
-- Linux：输出 AppImage 包
+- (Windows) 安装包支持自定义安装路径
+- (Windows) 输出便携版（Portable）
+- (Linux) 输出 AppImage 包
 
 新功能：
 

@@ -594,8 +594,32 @@ const characterPanelRef = ref<InstanceType<
 const highlightsHeaderMoreBtnRef = ref<HTMLButtonElement | null>(null);
 const highlightsAiSearchBtnRef = ref<HTMLButtonElement | null>(null);
 const HIGHLIGHTS_AI_SEARCH_MENU_W = 160;
+const highlightAiSearchSessionPath = computed(() => props.currentFilePath);
+const highlightAiSearchPhysicalPath = computed(
+  () => props.physicalReaderPath ?? props.currentFilePath,
+);
+const highlightAiSearchChapterCount = computed(() => props.chapters.length);
+
+const {
+  searching: highlightAiSearching,
+  searchBannerText: highlightAiSearchBannerText,
+  stopSearch: stopHighlightAiSearch,
+  searchPreset: highlightAiSearchPreset,
+  searchCustomSemantic,
+} = useHighlightAiSearch({
+  sessionFilePath: highlightAiSearchSessionPath,
+  physicalReaderPath: highlightAiSearchPhysicalPath,
+  chapterCount: highlightAiSearchChapterCount,
+  onTerms: (terms) => {
+    highlightPanelRef.value?.openAddModal(terms);
+  },
+});
+
 const highlightsAiSearchDisabled = computed(
-  () => !props.aiAssistantTabVisible || !props.currentFilePath?.trim(),
+  () =>
+    !props.aiAssistantTabVisible ||
+    !props.currentFilePath?.trim() ||
+    highlightAiSearching.value,
 );
 const highlightsAiSearchMenu = useAnchoredAppShellMenu({
   anchor: highlightsAiSearchBtnRef,
@@ -616,22 +640,6 @@ const {
 function bindHighlightsAiSearchPanel(el: HTMLElement | null) {
   highlightsAiSearchPanelRef.value = el;
 }
-
-const highlightAiSearchSessionPath = computed(() => props.currentFilePath);
-const highlightAiSearchPhysicalPath = computed(
-  () => props.physicalReaderPath ?? props.currentFilePath,
-);
-const highlightAiSearchChapterCount = computed(() => props.chapters.length);
-
-const { searchPreset: highlightAiSearchPreset, searchCustomSemantic } =
-  useHighlightAiSearch({
-    sessionFilePath: highlightAiSearchSessionPath,
-    physicalReaderPath: highlightAiSearchPhysicalPath,
-    chapterCount: highlightAiSearchChapterCount,
-    onTerms: (terms) => {
-      highlightPanelRef.value?.openAddModal(terms);
-    },
-  });
 
 async function onHighlightsAiSearchSelect(
   action: "person" | "place" | "custom",
@@ -1298,6 +1306,9 @@ defineExpose({
         :highlight-colors="highlightColors"
         :monaco-font-family="monacoFontFamily"
         :menu-anchor-el="highlightsHeaderMoreBtnRef"
+        :ai-searching="highlightAiSearching"
+        :ai-search-banner-text="highlightAiSearchBannerText"
+        @stop-ai-search="stopHighlightAiSearch"
         @find-highlight-term="emit('findHighlightTerm', $event)"
         @find-highlight-term-prev="emit('findHighlightTermPrev', $event)"
         @color-all-highlights="emit('colorAllHighlights', $event)"

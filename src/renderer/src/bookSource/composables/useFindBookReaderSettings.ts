@@ -363,6 +363,7 @@ function createFindBookReaderSettingsStore() {
     monacoAdvancedWrapping: fb.monacoAdvancedWrapping,
     monacoCjkWrapOptimize: fb.monacoCjkWrapOptimize,
     monacoSmoothScrolling: fb.monacoSmoothScrolling,
+    disableScrollbarTrackJump: fb.disableScrollbarTrackJump,
     mouseWheelScrollSensitivity: fb.mouseWheelScrollSensitivity,
     fastScrollSensitivity: fb.fastScrollSensitivity,
     stickyChapterTitleEnabled: fb.stickyChapterTitleEnabled,

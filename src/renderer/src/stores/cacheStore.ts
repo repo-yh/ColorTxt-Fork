@@ -27,7 +27,10 @@ import {
 } from "../services/settingsPersistMerge";
 
 export type { TxtFileItem };
-import { parseHighlightColorsArray } from "../constants/highlightColors";
+import {
+  parseHighlightColorsArray,
+  parseHighlightLastColor,
+} from "../constants/highlightColors";
 import { parseLineationColorsArray } from "../constants/lineationColors";
 import { parseLineationLastColors } from "../constants/annotationColors";
 import {
@@ -133,6 +136,8 @@ export type PersistedSettingsData = {
   monacoCjkWrapOptimize?: boolean;
   /** Monaco 阅读区平滑滚动（滚轮、程序性 setScrollTop/revealLine 等） */
   monacoSmoothScrolling?: boolean;
+  /** 禁用点击滚动条轨道跳转（仍可拖动滑块） */
+  disableScrollbarTrackJump?: boolean;
   /** Monaco 滚轮滚动倍率（`mouseWheelScrollSensitivity`） */
   mouseWheelScrollSensitivity?: number;
   /** Monaco 按住 Alt 时的滚轮加速倍率（`fastScrollSensitivity`） */
@@ -207,6 +212,8 @@ export type PersistedSettingsData = {
   highlightWordsByIndexGlobal?: HighlightWordsByIndex;
   /** 划线（马克笔/波浪/直线）各自上次选用的 5 色索引 */
   lineationLastColors?: import("../constants/annotationColors").LineationLastColorPrefs;
+  /** 选区工具条高亮词上次选用的色槽索引 */
+  highlightLastColor?: number;
   /**
    * 电子书转换输出目录：空字符串表示与源书同目录。
    * 非空时为绝对路径。若设置 JSON 中无此键，应用默认使用 `userData/ConvertedTxt`。
@@ -462,6 +469,9 @@ export function loadPersistedSettingsData(
   if (typeof obj.monacoSmoothScrolling === "boolean") {
     data.monacoSmoothScrolling = obj.monacoSmoothScrolling;
   }
+  if (typeof obj.disableScrollbarTrackJump === "boolean") {
+    data.disableScrollbarTrackJump = obj.disableScrollbarTrackJump;
+  }
   if (
     typeof obj.mouseWheelScrollSensitivity === "number" &&
     Number.isFinite(obj.mouseWheelScrollSensitivity)
@@ -624,6 +634,9 @@ export function loadPersistedSettingsData(
   }
   if (obj.lineationLastColors != null && typeof obj.lineationLastColors === "object") {
     data.lineationLastColors = parseLineationLastColors(obj.lineationLastColors);
+  }
+  if (obj.highlightLastColor != null) {
+    data.highlightLastColor = parseHighlightLastColor(obj.highlightLastColor);
   }
   const globalHl = normalizeHighlightWordsByIndex(
     obj.highlightWordsByIndexGlobal,

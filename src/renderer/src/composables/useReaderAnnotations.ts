@@ -1,7 +1,14 @@
 import { computed, nextTick, ref, shallowRef, watch, type ShallowRef } from "vue";
 import * as monaco from "monaco-editor";
-import { clampLineationColorIndex } from "../constants/annotationColors";
+import {
+  clampLineationColorIndex,
+  parseLineationColorIndexRaw,
+} from "../constants/annotationColors";
 import type { LineationLastColorPrefs } from "../constants/annotationColors";
+import {
+  clampHighlightColorIndex,
+  parseHighlightLastColor,
+} from "../constants/highlightColors";
 import {
   ANNOTATION_VIEWPORT_BUFFER_LINES,
   ANNOTATION_VIEWPORT_SYNC_MS,
@@ -58,6 +65,7 @@ export function useReaderAnnotations(opts: {
   model: { value: monaco.editor.ITextModel | null };
   readerAnnotations: () => ReaderAnnotationRecord[];
   lineationLastColors: () => LineationLastColorPrefs;
+  highlightLastColor: () => number;
   readerFilePath: () => string | null | undefined;
   readerEditMode: () => boolean;
   /**
@@ -77,6 +85,7 @@ export function useReaderAnnotations(opts: {
     type: ReaderLineationType;
     colorIndex: number;
   }) => void;
+  emitUpdateHighlightLastColor: (colorIndex: number) => void;
   emitAddHighlightTerm: (payload: { text: string; colorIndex: number }) => void;
   emitRemoveHighlightTerm: (payload: { text: string }) => void;
   emitAskAiWithQuote: (text: string) => void;
@@ -350,21 +359,24 @@ export function useReaderAnnotations(opts: {
     Boolean(activeAnnotation()?.note?.content?.trim()),
   );
 
-  const lineationPickerSelectedIndex = computed(() => {
+  /**
+   * 色盘勾选只对应当前标注色；无划线时为 null（不回退「上次颜色」）。
+   * 上次颜色仅用于新标注时自动上色，存在 prefs 内存里。
+   */
+  const lineationPickerSelectedIndex = computed((): number | null => {
     if (colorPickerMode.value !== "lineation" || !lineationPickerType.value) {
-      return 0;
+      return null;
     }
-    const count = opts.lineationColorsLength();
     const ann = activeAnnotation();
     if (
-      ann?.lineation?.type === lineationPickerType.value &&
-      ann.lineation.colorIndex != null
+      ann?.lineation?.type !== lineationPickerType.value ||
+      ann.lineation.colorIndex == null
     ) {
-      return clampLineationColorIndex(ann.lineation.colorIndex, count);
+      return null;
     }
     return clampLineationColorIndex(
-      opts.lineationLastColors()[lineationPickerType.value],
-      count,
+      ann.lineation.colorIndex,
+      opts.lineationColorsLength(),
     );
   });
 
@@ -375,6 +387,27 @@ export function useReaderAnnotations(opts: {
     opts.emitUpdateLineationColor({ type, colorIndex });
   }
 
+  function syncHighlightLastColor(colorIndex: number) {
+    opts.emitUpdateHighlightLastColor(colorIndex);
+  }
+
+  function lastHighlightColorIndex(): number {
+    return clampHighlightColorIndex(
+      parseHighlightLastColor(opts.highlightLastColor()),
+      opts.highlightColorsLength(),
+    );
+  }
+
+  function applyHighlightTerm(colorIndex: number) {
+    const t = highlightTermTextForStorage();
+    if (!t) return;
+    const n = opts.highlightColorsLength();
+    if (n <= 0) return;
+    const idx = clampHighlightColorIndex(colorIndex, n);
+    opts.emitAddHighlightTerm({ text: t, colorIndex: idx });
+    syncHighlightLastColor(idx);
+  }
+
   /** 绑定已有划线标注时同步色盘类型；openIfLineation 为 true 时一并展开标注色盘 */
   function rememberLineationColorFromAnnotation(ann: ReaderAnnotationRecord) {
     if (!ann.lineation?.type || ann.lineation.colorIndex == null) return;
@@ -383,13 +416,7 @@ export function useReaderAnnotations(opts: {
 
   function syncLineationPickerFromActiveAnnotation(openIfLineation = false) {
     const ann = activeAnnotation();
-    if (!ann?.lineation?.type) {
-      if (colorPickerMode.value === "lineation") {
-        colorPickerMode.value = null;
-        lineationPickerType.value = null;
-      }
-      return;
-    }
+    if (!ann?.lineation?.type) return;
     if (openIfLineation) {
       colorPickerMode.value = "lineation";
       lineationPickerType.value = ann.lineation.type;
@@ -409,6 +436,16 @@ export function useReaderAnnotations(opts: {
     return idx;
   }
 
+  function closeColorPicker() {
+    colorPickerMode.value = null;
+    lineationPickerType.value = null;
+  }
+
+  /**
+   * 色盘与选区状态同步。
+   * 显式取消高亮/划线时由调用方 {@link closeColorPicker}；
+   * 此处仅在 openIfPicker 的新选区同步时按状态打开/清空。
+   */
   function syncPickerFromSelection(openIfPicker = false) {
     const ann = activeAnnotation();
     const hasLineation = !!ann?.lineation?.type;
@@ -420,19 +457,16 @@ export function useReaderAnnotations(opts: {
     }
 
     if (hasHighlight) {
-      if (openIfPicker || colorPickerMode.value === "lineation") {
+      if (openIfPicker) {
         colorPickerMode.value = "highlight";
         lineationPickerType.value = null;
       }
       return;
     }
 
-    if (colorPickerMode.value === "lineation") {
+    if (openIfPicker) {
       colorPickerMode.value = null;
       lineationPickerType.value = null;
-    }
-    if (colorPickerMode.value === "highlight") {
-      colorPickerMode.value = null;
     }
   }
 
@@ -1304,9 +1338,13 @@ export function useReaderAnnotations(opts: {
     return ann;
   }
 
-  function applyLineation(type: ReaderLineationType, colorIndex: number) {
+  function applyLineation(
+    type: ReaderLineationType,
+    colorIndex: number,
+    options?: { openPicker?: boolean },
+  ) {
     const idx = clampLineationColorIndex(
-      colorIndex,
+      parseLineationColorIndexRaw(colorIndex),
       opts.lineationColorsLength(),
     );
     let ann = prepareLineationTargetAnnotation();
@@ -1319,8 +1357,232 @@ export function useReaderAnnotations(opts: {
     opts.emitUpsert(ann);
     activeAnnotationId.value = ann.id;
     syncLineationLastColor(type, idx);
-    colorPickerMode.value = "lineation";
-    lineationPickerType.value = type;
+    const openPicker = options?.openPicker !== false;
+    if (openPicker) {
+      colorPickerMode.value = "lineation";
+      lineationPickerType.value = type;
+    } else if (colorPickerMode.value === "lineation") {
+      lineationPickerType.value = type;
+    }
+  }
+
+  /** 快捷键用：优先按当前选区重绑 draft；失败则回退已有 draft / active */
+  function ensureDraftForShortcut(): boolean {
+    if (bindDraftFromSelection()) return true;
+    if (activeAnnotationId.value) {
+      const ann = activeAnnotation();
+      if (ann) {
+        bindDraftFromAnnotation(ann);
+        return Boolean(draftText.value.trim() && draftPhysicalRange.value);
+      }
+    }
+    return Boolean(draftText.value.trim() && draftPhysicalRange.value);
+  }
+
+  function lastColorIndexForType(type: ReaderLineationType): number {
+    /** 无效值 → 0；勿直接 clamp(undefined) 落到末色 */
+    return clampLineationColorIndex(
+      parseLineationColorIndexRaw(opts.lineationLastColors()[type]),
+      opts.lineationColorsLength(),
+    );
+  }
+
+  /** 快捷键取消划线；关闭色盘，工具条保持。 */
+  function removeLineationOnShortcut(ann: ReaderAnnotationRecord): void {
+    if (ann.note?.content?.trim()) {
+      opts.emitUpsert({ ...ann, lineation: undefined, updatedAt: Date.now() });
+      activeAnnotationId.value = ann.id;
+    } else {
+      opts.emitRemove(ann.id);
+      activeAnnotationId.value = null;
+    }
+    closeColorPicker();
+  }
+
+  function canUseSelectionToolbarDigitShortcut(): boolean {
+    if (opts.readerEditMode()) return false;
+    if (!canUseSelectionAnnotationTools()) return false;
+    if (toolbarVisible.value) return true;
+    const e = opts.editor.value;
+    const m = opts.model.value;
+    const sel = e?.getSelection();
+    if (sel && !sel.isEmpty() && m) {
+      if (m.getValueInRange(sel).trim()) return true;
+    }
+    if (draftText.value.trim() && draftPhysicalRange.value) return true;
+    return Boolean(activeAnnotationId.value);
+  }
+
+  function openPickerForShortcut(
+    mode: "highlight" | "lineation",
+    type?: ReaderLineationType,
+  ): void {
+    toolbarVisible.value = true;
+    colorPickerMode.value = mode;
+    lineationPickerType.value = mode === "lineation" ? (type ?? null) : null;
+  }
+
+  /** 快捷键：设置高亮词 ↔ 取消高亮词（新建用上次颜色；取消时关色盘） */
+  function toggleHighlightFromShortcut(): boolean {
+    if (!opts.monacoCustomHighlight()) return false;
+    if (!ensureDraftForShortcut()) return false;
+    const t = highlightTermTextForStorage();
+    if (!t) return false;
+    if (opts.highlightColorsLength() <= 0) return false;
+    const idx = findStoredHighlightColorIndex(t);
+    if (idx == null) {
+      applyHighlightTerm(lastHighlightColorIndex());
+      openPickerForShortcut("highlight");
+    } else {
+      opts.emitRemoveHighlightTerm({ text: t });
+      closeColorPicker();
+    }
+    return true;
+  }
+
+  /**
+   * 快捷键：同类型划线 ↔ 取消；跨类型则切换到目标类型（用该类型上次颜色）。
+   * 取消时关色盘；标注时打开对应色盘。
+   */
+  function toggleLineationFromShortcut(type: ReaderLineationType): boolean {
+    if (!ensureDraftForShortcut()) return false;
+    let ann = activeAnnotation();
+    if (!ann?.lineation?.type && draftPhysicalRange.value) {
+      const containing = findAnnotationContainingRange(
+        opts.readerAnnotations(),
+        draftPhysicalRange.value,
+      );
+      if (containing?.lineation?.type) {
+        bindDraftFromAnnotation(containing);
+        ann = containing;
+      }
+    }
+
+    const existing = ann?.lineation;
+    if (existing?.type === type) {
+      removeLineationOnShortcut(ann!);
+      return true;
+    }
+    applyLineation(type, lastColorIndexForType(type), { openPicker: true });
+    openPickerForShortcut("lineation", type);
+    return true;
+  }
+
+  function isSelectionToolbarDigitKeyBlockedTarget(
+    target: EventTarget | null,
+  ): boolean {
+    if (!(target instanceof Element)) return false;
+    if (target.closest(".find-widget")) return true;
+    /**
+     * 只读正文焦点落在 Monaco 隐藏 textarea（.inputarea）上；
+     * 不能按普通输入框拦截，否则划词后数字快捷键永远不触发。
+     * （查找栏已在上方单独拦截。）
+     */
+    const editorDom = opts.editor.value?.getDomNode();
+    if (editorDom && editorDom.contains(target) && !opts.readerEditMode()) {
+      return false;
+    }
+    if (
+      target.closest(
+        "input, textarea, select, [contenteditable=''], [contenteditable='true']",
+      )
+    ) {
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * 按钮未展示时快捷键不生效（与工具条 v-if 一致）。
+   * `1` 复制 / `2` 高亮词 / `3`–`5` 划线 / `6` 笔记 / `7` 查找 / `8` 词典 / `9` 翻译 / `0` 问 AI
+   */
+  function isSelectionToolbarDigitEnabled(
+    digit: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9,
+  ): boolean {
+    const b = opts.selectionToolbarButtons();
+    if (digit === 1) return b.copy;
+    if (digit === 2) {
+      return canUseSelectionAnnotationTools() && opts.monacoCustomHighlight();
+    }
+    if (digit === 3 || digit === 4 || digit === 5 || digit === 6) {
+      return canUseSelectionAnnotationTools();
+    }
+    if (digit === 7) return b.find;
+    if (digit === 8) return b.dictionary;
+    if (digit === 9) return b.translate;
+    return opts.aiFeaturesEnabled() && b.askAi;
+  }
+
+  function runToolbarActionFromShortcut(
+    action: "copy" | "find" | "dictionary" | "translate" | "askAi" | "note",
+  ): boolean {
+    if (!ensureDraftForShortcut()) return false;
+    if (action === "note") {
+      openNotePanelFromToolbar();
+      return true;
+    }
+    if (!draftText.value.trim()) return false;
+    onToolbarAction(action);
+    return true;
+  }
+
+  /**
+   * 只读选区工具条数字快捷键（见 {@link isSelectionToolbarDigitEnabled}）。
+   * 命中且按钮启用时 preventDefault + stopPropagation；否则返回 false。
+   */
+  function onSelectionToolbarDigitKey(ev: KeyboardEvent): boolean {
+    if (ev.defaultPrevented) return false;
+    if (ev.isComposing) return false;
+    if (ev.ctrlKey || ev.metaKey || ev.altKey || ev.shiftKey) return false;
+    if (notePanelOpen.value || dictionaryPopupOpen.value || translatePopupOpen.value) {
+      return false;
+    }
+    if (isSelectionToolbarDigitKeyBlockedTarget(ev.target)) return false;
+    if (!canUseSelectionToolbarDigitShortcut()) return false;
+
+    const code = ev.code;
+    let digit: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | null = null;
+    if (code === "Digit0" || code === "Numpad0") digit = 0;
+    else if (code === "Digit1" || code === "Numpad1") digit = 1;
+    else if (code === "Digit2" || code === "Numpad2") digit = 2;
+    else if (code === "Digit3" || code === "Numpad3") digit = 3;
+    else if (code === "Digit4" || code === "Numpad4") digit = 4;
+    else if (code === "Digit5" || code === "Numpad5") digit = 5;
+    else if (code === "Digit6" || code === "Numpad6") digit = 6;
+    else if (code === "Digit7" || code === "Numpad7") digit = 7;
+    else if (code === "Digit8" || code === "Numpad8") digit = 8;
+    else if (code === "Digit9" || code === "Numpad9") digit = 9;
+    else return false;
+
+    if (!isSelectionToolbarDigitEnabled(digit)) return false;
+
+    let handled = false;
+    if (digit === 1) {
+      handled = runToolbarActionFromShortcut("copy");
+    } else if (digit === 2) {
+      handled = toggleHighlightFromShortcut();
+    } else if (digit === 3) {
+      handled = toggleLineationFromShortcut("marker");
+    } else if (digit === 4) {
+      handled = toggleLineationFromShortcut("wavy");
+    } else if (digit === 5) {
+      handled = toggleLineationFromShortcut("straight");
+    } else if (digit === 6) {
+      handled = runToolbarActionFromShortcut("note");
+    } else if (digit === 7) {
+      handled = runToolbarActionFromShortcut("find");
+    } else if (digit === 8) {
+      handled = runToolbarActionFromShortcut("dictionary");
+    } else if (digit === 9) {
+      handled = runToolbarActionFromShortcut("translate");
+    } else {
+      handled = runToolbarActionFromShortcut("askAi");
+    }
+
+    if (!handled) return false;
+    ev.preventDefault();
+    ev.stopPropagation();
+    return true;
   }
 
   function removeActiveLineation() {
@@ -1328,12 +1590,12 @@ export function useReaderAnnotations(opts: {
     if (!ann?.lineation) return;
     if (ann.note?.content?.trim()) {
       opts.emitUpsert({ ...ann, lineation: undefined, updatedAt: Date.now() });
-      colorPickerMode.value = null;
-      lineationPickerType.value = null;
+      activeAnnotationId.value = ann.id;
     } else {
       opts.emitRemove(ann.id);
-      closeToolbarUi();
+      activeAnnotationId.value = null;
     }
+    closeColorPicker();
   }
 
   function onToolbarAction(
@@ -1398,6 +1660,13 @@ export function useReaderAnnotations(opts: {
     if (action === "highlight") {
       colorPickerMode.value = "highlight";
       lineationPickerType.value = null;
+      const existing = findStoredHighlightColorIndex(draftText.value);
+      if (existing == null) {
+        /** 与划线按钮一致：未设置时用「上次颜色」自动添加 */
+        applyHighlightTerm(lastHighlightColorIndex());
+      } else {
+        syncHighlightLastColor(existing);
+      }
       return;
     }
     const typeMap = {
@@ -1415,7 +1684,7 @@ export function useReaderAnnotations(opts: {
       }
       colorPickerMode.value = "lineation";
       lineationPickerType.value = type;
-      applyLineation(type, opts.lineationLastColors()[type]);
+      applyLineation(type, lastColorIndexForType(type));
     }
   }
 
@@ -1546,14 +1815,15 @@ export function useReaderAnnotations(opts: {
     syncToolbarOnScroll,
     onSelectionChangedDuringInteraction,
     onToolbarAction,
+    onSelectionToolbarDigitKey,
     onHighlightPickConfirm: (colorIndex: number) => {
-      const t = highlightTermTextForStorage();
-      if (!t || colorIndex < 0 || colorIndex >= opts.highlightColorsLength()) return;
-      opts.emitAddHighlightTerm({ text: t, colorIndex });
+      if (colorIndex < 0 || colorIndex >= opts.highlightColorsLength()) return;
+      applyHighlightTerm(colorIndex);
     },
     onHighlightPickRemove: () => {
       const t = highlightTermTextForStorage();
       if (t) opts.emitRemoveHighlightTerm({ text: t });
+      closeColorPicker();
     },
     onLineationPickConfirm: (colorIndex: number) => {
       const type = lineationPickerType.value;

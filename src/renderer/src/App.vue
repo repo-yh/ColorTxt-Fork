@@ -112,6 +112,7 @@ import { useAppReaderAnnotations } from "./composables/useAppReaderAnnotations";
 import { useAppReaderChrome } from "./composables/useAppReaderChrome";
 import { useAppReadingProgress } from "./composables/useAppReadingProgress";
 import { useAppReaderUiPrefs } from "./composables/useAppReaderUiPrefs";
+import { useFullscreenViewportPreserve } from "./composables/useFullscreenViewportPreserve";
 import { useReaderHudTip } from "./composables/useReaderHudTip";
 import { useAppShellThemeWatch } from "./composables/useAppShellThemeWatch";
 import { useAppSidebarSearch } from "./composables/useAppSidebarSearch";
@@ -159,6 +160,7 @@ import {
   defaultMonacoCjkWrapOptimize,
   defaultMonacoCustomHighlight,
   defaultMonacoSmoothScrolling,
+  defaultDisableScrollbarTrackJump,
   defaultMouseWheelScrollSensitivity,
   defaultFastScrollSensitivity,
   clampMouseWheelScrollSensitivity,
@@ -243,7 +245,9 @@ import type { VoiceReadProfile } from "@shared/voiceReadProfiles";
 import {
   DEFAULT_HIGHLIGHT_COLORS_DARK,
   DEFAULT_HIGHLIGHT_COLORS_LIGHT,
+  DEFAULT_HIGHLIGHT_LAST_COLOR,
   MIN_HIGHLIGHT_COLORS,
+  clampHighlightLastColorToCount,
   mergeHighlightColors,
 } from "./constants/highlightColors";
 import {
@@ -306,10 +310,16 @@ const fullscreenSidebarPopoversSuppressCollapse = computed(
     fullscreenCharacterDrawerOpen.value ||
     fullscreenCharacterPopoversOpen.value,
 );
+/** chrome 构造时 preserve 尚未创建，用槽位转发「退出全屏前采锚」 */
+const prepareFullscreenExitViewportPreserveSlot = {
+  run: () => {},
+};
 const chrome = useAppReaderChrome({
   readerRef,
   fullscreenSidebarPopoversSuppressCollapse,
   readerEditMode,
+  prepareFullscreenExitViewportPreserve: () =>
+    prepareFullscreenExitViewportPreserveSlot.run(),
 });
 const {
   readerHudTipVisible,
@@ -355,6 +365,23 @@ const {
   bumpFullscreenCursorIdle,
   recordFullscreenPointer,
 } = chrome;
+const fullscreenViewportPreserve = useFullscreenViewportPreserve({
+  readerRef,
+  isFullscreenView,
+});
+const {
+  enabled: fullscreenViewportPreserveEnabled,
+  suppressViewportProgressUpdates,
+  noteStableAnchor: noteFullscreenViewportStableAnchor,
+  prepareFullscreenExit,
+  onPossibleFullscreenTransitionResize,
+  ensureExitAnchorBeforeChromeChange,
+  restoreAfterLeave: restoreFullscreenViewportAfterLeave,
+  onFullscreenEntered,
+} = fullscreenViewportPreserve;
+if (fullscreenViewportPreserveEnabled) {
+  prepareFullscreenExitViewportPreserveSlot.run = prepareFullscreenExit;
+}
 
 function setFullscreenHeaderOverlayEl(
   el: Element | ComponentPublicInstance | null,
@@ -974,6 +1001,7 @@ const monacoAdvancedWrapping = ref(defaultMonacoAdvancedWrapping);
 const monacoCjkWrapOptimize = ref(defaultMonacoCjkWrapOptimize);
 /** Monaco 阅读区平滑滚动（设置可关） */
 const monacoSmoothScrolling = ref(defaultMonacoSmoothScrolling);
+const disableScrollbarTrackJump = ref(defaultDisableScrollbarTrackJump);
 const mouseWheelScrollSensitivity = ref(defaultMouseWheelScrollSensitivity);
 const fastScrollSensitivity = ref(defaultFastScrollSensitivity);
 /** 阅读区顶部粘性章节标题 */
@@ -1142,6 +1170,7 @@ const highlightWordsByIndexGlobal = ref<HighlightWordsByIndex | undefined>(
 const lineationLastColors = ref<LineationLastColorPrefs>({
   ...DEFAULT_LINEATION_LAST_COLORS,
 });
+const highlightLastColor = ref(DEFAULT_HIGHLIGHT_LAST_COLOR);
 
 const highlightColorsForReader = computed(() =>
   currentTheme.value === "vs"
@@ -1514,6 +1543,7 @@ const persistence = useAppPersistence({
   monacoAdvancedWrapping,
   monacoCjkWrapOptimize,
   monacoSmoothScrolling,
+  disableScrollbarTrackJump,
   mouseWheelScrollSensitivity,
   fastScrollSensitivity,
   stickyChapterTitleEnabled,
@@ -1551,6 +1581,7 @@ const persistence = useAppPersistence({
   lineationColorsDark,
   highlightWordsByIndexGlobal,
   lineationLastColors,
+  highlightLastColor,
   ebookConvertOutputDir,
   bookPackUnpackDir,
   bookPackPassword,
@@ -2512,6 +2543,7 @@ const chapterNav = useAppChapterNavigation({
   currentFileIsMarkdown,
   readerEditMode,
   readingProgressSynced,
+  suppressViewportProgressUpdates,
   stream,
   touchRecentFile,
   chapterListScrollSmooth,
@@ -3221,6 +3253,8 @@ const readerUi = useAppReaderUiPrefs({
   viewportEndLine,
   viewportVisualProgressPercent,
   viewportAtBottom,
+  suppressViewportProgressUpdates,
+  noteFullscreenViewportStableAnchor,
   isVoiceReadBlocksFind,
   showReaderHudTip,
 });
@@ -3690,6 +3724,10 @@ function onApplyColorScheme(payload: ColorSchemeApplyPayload) {
         ? payload.highlight.dark
         : undefined,
     );
+    highlightLastColor.value = clampHighlightLastColorToCount(
+      highlightLastColor.value,
+      highlightColorsForReader.value.length,
+    );
   }
   if (payload.lineation) {
     lineationColorsLight.value = mergeLineationColors(
@@ -3725,6 +3763,14 @@ function onUpdateLineationLastColor(payload: {
       [payload.type]: payload.colorIndex,
     },
     lineationColorsForReader.value.length,
+  );
+  persistSettings();
+}
+
+function onUpdateHighlightLastColor(colorIndex: number) {
+  highlightLastColor.value = clampHighlightLastColorToCount(
+    colorIndex,
+    highlightColorsForReader.value.length,
   );
   persistSettings();
 }
@@ -3834,6 +3880,7 @@ async function applySettings(payload: SettingsApplyPayload) {
   const prevChapterTitleBlankMode = chapterTitleBlankMode.value;
   const prevChapterMinCharCount = chapterMinCharCount.value;
   monacoSmoothScrolling.value = payload.monacoSmoothScrolling;
+  disableScrollbarTrackJump.value = payload.disableScrollbarTrackJump;
   monacoCjkWrapOptimize.value = payload.monacoCjkWrapOptimize;
   webDisplayEnabled.value = payload.webDisplayEnabled;
   mouseWheelScrollSensitivity.value = clampMouseWheelScrollSensitivity(
@@ -4053,6 +4100,18 @@ useAppWindowBindings({
   updateFullscreenSidebarHover,
   endSidebarResize,
   dismissFullscreenChromeForNativeExit,
+  onPossibleFullscreenTransitionResize: fullscreenViewportPreserveEnabled
+    ? onPossibleFullscreenTransitionResize
+    : undefined,
+  ensureFullscreenExitAnchorBeforeChromeChange: fullscreenViewportPreserveEnabled
+    ? ensureExitAnchorBeforeChromeChange
+    : undefined,
+  restoreFullscreenViewportAfterLeave: fullscreenViewportPreserveEnabled
+    ? restoreFullscreenViewportAfterLeave
+    : undefined,
+  onFullscreenEntered: fullscreenViewportPreserveEnabled
+    ? onFullscreenEntered
+    : undefined,
   handleReaderChromeEscape,
   bumpFullscreenCursorIdle,
   recordFullscreenPointer,
@@ -4495,6 +4554,7 @@ useAppShellThemeWatch({
           :letter-spacing-px="readerLetterSpacingPx"
           :horizontal-inset-px="readerHorizontalInsetPx"
           :monaco-smooth-scrolling="monacoSmoothScrolling"
+          :disable-scrollbar-track-jump="disableScrollbarTrackJump"
           :mouse-wheel-scroll-sensitivity="mouseWheelScrollSensitivity"
           :fast-scroll-sensitivity="fastScrollSensitivity"
           :sticky-chapter-title-enabled="stickyChapterTitleEnabled"
@@ -4522,6 +4582,7 @@ useAppShellThemeWatch({
           :highlight-words-by-index-book-only="readerDisplayHighlightWordsBookOnly"
           :reader-annotations="currentFileAnnotations"
           :lineation-last-colors="lineationLastColors"
+          :highlight-last-color="highlightLastColor"
           :reader-file-path="currentFile"
           :ebook-anchor-physical-to-display="
             stream.physicalLineToDisplayForReader
@@ -4556,6 +4617,7 @@ useAppShellThemeWatch({
           @remove-reader-annotation="onRemoveReaderAnnotation"
           @annotation-quotes-changed="bumpAnnotationDisplayEpoch"
           @update-lineation-last-color="onUpdateLineationLastColor"
+          @update-highlight-last-color="onUpdateHighlightLastColor"
           @ask-ai-with-quote="onAskAiWithQuote"
           @search-with-quote="onSearchWithQuote"
           @open-dictionary-manage="showDictionaryManagePanel = true"
@@ -4784,6 +4846,7 @@ useAppShellThemeWatch({
       :chapter-title-blank-mode="chapterTitleBlankMode"
       :compress-blank-keep-one-blank="compressBlankKeepOneBlank"
       :monaco-smooth-scrolling="monacoSmoothScrolling"
+      :disable-scrollbar-track-jump="disableScrollbarTrackJump"
       :monaco-cjk-wrap-optimize="monacoCjkWrapOptimize"
       :web-display-enabled="webDisplayEnabled"
       :mouse-wheel-scroll-sensitivity="mouseWheelScrollSensitivity"

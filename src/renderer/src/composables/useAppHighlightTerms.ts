@@ -1,7 +1,7 @@
 import { computed, ref, watch, type Ref } from "vue";
 import type ReaderMain from "../components/ReaderMain.vue";
 import { APP_DISPLAY_NAME } from "../constants/appUi";
-import { appAlert } from "../services/appDialog";
+import { appAlert, appConfirm } from "../services/appDialog";
 import { appToast } from "../services/appToast";
 import { applyTextDisplayConverts } from "../services/textConvertApply";
 import {
@@ -224,13 +224,20 @@ export function useAppHighlightTerms(deps: {
     deps.persistFileMeta();
   }
 
-  function onRemoveHighlightTerm(payload: {
+  async function onRemoveHighlightTerm(payload: {
     /** 侧栏：按整组删除 */
     storedTerms?: string[];
     /** 阅读器选区：按单词从各组中剔除 */
     text?: string;
     scope?: "global" | "book";
+    /** 编辑面板清空词组等内部路径跳过确认 */
+    skipConfirm?: boolean;
   }) {
+    if (!payload.skipConfirm) {
+      const ok = await appConfirm("是否移除该高亮词？");
+      if (!ok) return;
+    }
+
     if (payload.storedTerms?.length) {
       const group = normalizeHighlightGroup(payload.storedTerms);
       if (!group) return;
@@ -567,9 +574,10 @@ export function useAppHighlightTerms(deps: {
     // edit
     if (!group) {
       if (payload.replaceStoredTerms?.length) {
-        onRemoveHighlightTerm({
+        void onRemoveHighlightTerm({
           storedTerms: payload.replaceStoredTerms,
           scope: payload.scope,
+          skipConfirm: true,
         });
       }
       return;

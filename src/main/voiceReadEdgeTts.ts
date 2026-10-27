@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import WebSocket from "ws";
 import type { VoiceReadEdgeTtsRequest } from "@shared/voiceReadEdgeIpc";
 import {
@@ -7,31 +7,19 @@ import {
 } from "@shared/voiceReadPunctuationPauses";
 import type { VoiceReadPausePoint } from "@shared/voiceReadSynthesis";
 import { getVoiceReadEngineMeta } from "@shared/voiceReadEngines";
+import {
+  adjustClockSkewFromDateHeader,
+  EDGE_TTS_CHROMIUM_MAJOR_VERSION,
+  EDGE_TTS_SEC_MS_GEC_VERSION,
+  EDGE_TTS_TRUSTED_CLIENT_TOKEN,
+  generateSecMsGec,
+} from "./voiceReadEdgeTtsDrm";
 
 const EDGE_SPEECH_URL =
   "wss://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1";
-const EDGE_API_TOKEN = "6A5AA1D4EAFF4E9FB37E23D68491D6F4";
-const CHROMIUM_FULL_VERSION = "143.0.3650.75";
-const CHROMIUM_MAJOR_VERSION = "143";
-
-const WIN_EPOCH_OFFSET = 11644473600n;
-const S_TO_NS = 1000000000n;
 
 function sleepMs(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
-}
-
-function sha256HexUpper(input: string): string {
-  return createHash("sha256").update(input, "utf8").digest("hex").toUpperCase();
-}
-
-async function generateSecMsGec(): Promise<string> {
-  let ticks = BigInt(Math.floor(Date.now() / 1000));
-  ticks += WIN_EPOCH_OFFSET;
-  ticks -= ticks % 300n;
-  ticks *= S_TO_NS / 100n;
-  const strToHash = `${ticks.toString()}${EDGE_API_TOKEN}`;
-  return sha256HexUpper(strToHash);
 }
 
 function generateMuid(): string {
@@ -199,17 +187,17 @@ async function synthesizeEdgeTtsMp3Once(
   const pitch = Number.isFinite(req.pitch) ? req.pitch : 1;
 
   const connectId = randomHex(16);
-  const secMsGec = await generateSecMsGec();
+  const secMsGec = generateSecMsGec();
   const params = new URLSearchParams({
     ConnectionId: connectId,
-    TrustedClientToken: EDGE_API_TOKEN,
+    TrustedClientToken: EDGE_TTS_TRUSTED_CLIENT_TOKEN,
     "Sec-MS-GEC": secMsGec,
-    "Sec-MS-GEC-Version": `1-${CHROMIUM_FULL_VERSION}`,
+    "Sec-MS-GEC-Version": EDGE_TTS_SEC_MS_GEC_VERSION,
   });
   const url = `${EDGE_SPEECH_URL}?${params.toString()}`;
 
   const headers: Record<string, string> = {
-    "User-Agent": `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${CHROMIUM_MAJOR_VERSION}.0.0.0 Safari/537.36 Edg/${CHROMIUM_MAJOR_VERSION}.0.0.0`,
+    "User-Agent": `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${EDGE_TTS_CHROMIUM_MAJOR_VERSION}.0.0.0 Safari/537.36 Edg/${EDGE_TTS_CHROMIUM_MAJOR_VERSION}.0.0.0`,
     "Accept-Encoding": "gzip, deflate, br, zstd",
     "Accept-Language": "en-US,en;q=0.9",
     Pragma: "no-cache",
@@ -333,6 +321,28 @@ async function synthesizeEdgeTtsMp3Once(
       }
     });
 
+    ws.on("unexpected-response", (_req, res) => {
+      const status = res.statusCode;
+      const dateHeader = res.headers.date;
+      res.resume();
+      if (status === 403) {
+        adjustClockSkewFromDateHeader(
+          typeof dateHeader === "string" ? dateHeader : undefined,
+        );
+        settle(() =>
+          reject(new Error("Edge TTS WebSocket 错误：Unexpected server response: 403")),
+        );
+        return;
+      }
+      settle(() =>
+        reject(
+          new Error(
+            `Edge TTS WebSocket 错误：Unexpected server response: ${status ?? "unknown"}`,
+          ),
+        ),
+      );
+    });
+
     ws.on("error", (err) => {
       settle(() =>
         reject(
@@ -372,7 +382,7 @@ async function synthesizeEdgeTtsMp3Once(
 
 /**
  * 返回单段 MP3（24kHz mono），供渲染进程播放。
- * 无音频时自动重试（常见于 Sec-MS-GEC 过期或瞬时断连）。
+ * 无音频/403 时自动重试（常见于 Sec-MS-GEC 时钟偏差或瞬时断连）。
  */
 export async function synthesizeEdgeTtsMp3(
   req: VoiceReadEdgeTtsRequest,
@@ -385,7 +395,7 @@ export async function synthesizeEdgeTtsMp3(
     } catch (e) {
       lastErr = e instanceof Error ? e : new Error(String(e));
       const retryable =
-        /无音频|连接关闭且无音频|WebSocket|超时/i.test(lastErr.message) &&
+        /无音频|连接关闭且无音频|WebSocket|超时|403/i.test(lastErr.message) &&
         !/无可朗读内容/.test(lastErr.message);
       if (!retryable || attempt >= maxAttempts - 1) break;
       await sleepMs(250 * (attempt + 1));

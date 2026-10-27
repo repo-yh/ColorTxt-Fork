@@ -20,9 +20,15 @@ import {
   writeFile,
 } from "node:fs/promises";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { startWebDisplay, stopWebDisplay, isWebDisplayRunning, clearCache, setCurrentFilePath, getCurrentFilePath, type ContentResult, type FileListItem, type HighlightsResult, type ChapterTitlesResult, type ApplyChapterTitlesResult, type ChapterContentResult, type SearchResult, type SearchMatchItem } from "./webDisplay";
 import { getFonts } from "font-list";
+import {
+  familyNamesToRawFaces,
+  mergeLegacyFamilyNames,
+  type RawSystemFontFace,
+} from "@shared/systemFontFace";
+import { listRawSystemFontFaces } from "./systemFontFaces";
 import iconv from "iconv-lite";
 import { detectTextFileEncoding } from "./detectTextEncoding";
 import { EBOOK_DOT_EXTENSIONS } from "@shared/ebookExtensions";
@@ -97,7 +103,47 @@ type RegisterMainIpcHandlersOptions = {
   mainWindowFocusState: { lastId: number | null };
 };
 
-let cachedSystemFonts: string[] | null = null;
+let cachedSystemFonts: RawSystemFontFace[] | null = null;
+
+const FONT_FILE_URL_MAP_CONCURRENCY = 24;
+
+/** Electron 禁止渲染进程 file:// 加载字体，改为 colortxt-local:// */
+async function mapFontFileUrlsForRenderer(
+  faces: RawSystemFontFace[],
+): Promise<RawSystemFontFace[]> {
+  const out: RawSystemFontFace[] = new Array(faces.length);
+  let next = 0;
+
+  async function mapOne(face: RawSystemFontFace): Promise<RawSystemFontFace> {
+    const rawUrl = face.fileUrl?.trim();
+    if (!rawUrl || !/^file:/i.test(rawUrl)) return face;
+    try {
+      const absPath = fileURLToPath(rawUrl);
+      const mapped = await registerLocalFileForColortxtUrl(absPath);
+      if (mapped) {
+        return { ...face, fileUrl: mapped, filePath: absPath };
+      }
+      const { fileUrl: _drop, ...rest } = face;
+      return { ...rest, filePath: absPath };
+    } catch {
+      const { fileUrl: _drop, ...rest } = face;
+      return rest;
+    }
+  }
+
+  async function worker(): Promise<void> {
+    while (true) {
+      const i = next++;
+      if (i >= faces.length) return;
+      out[i] = await mapOne(faces[i]!);
+    }
+  }
+
+  const workers = Math.min(FONT_FILE_URL_MAP_CONCURRENCY, faces.length);
+  if (workers <= 0) return [];
+  await Promise.all(Array.from({ length: workers }, () => worker()));
+  return out;
+}
 
 /**
  * 迭代遍历子目录，避免符号链接 / 目录联接成环导致递归栈溢出；
@@ -788,24 +834,40 @@ export function registerMainIpcHandlers(
     return { dirPath, files };
   });
 
-  ipcMain.handle("fonts:listSystemFonts", async () => {
-    if (cachedSystemFonts && cachedSystemFonts.length > 0) {
-      return cachedSystemFonts;
-    }
+  ipcMain.handle(
+    "fonts:listSystemFonts",
+    async (_evt, opts?: { force?: boolean }) => {
+      if (
+        !opts?.force &&
+        cachedSystemFonts &&
+        cachedSystemFonts.length > 0
+      ) {
+        return cachedSystemFonts;
+      }
+      if (opts?.force) cachedSystemFonts = null;
 
-    try {
-      const fonts = await getFonts({ disableQuoting: true });
-      const list = Array.from(new Set(fonts)).sort((a, b) =>
-        a.localeCompare(b, "zh-Hans-CN"),
-      );
-      // 成功才缓存；失败勿缓存空数组，否则后续窗口永远「未获取到」
-      if (list.length > 0) cachedSystemFonts = list;
-      return list;
-    } catch (err) {
-      console.warn("[fonts] listSystemFonts failed", err);
-      return [];
-    }
-  });
+      try {
+        const faces = await listRawSystemFontFaces();
+        // font-list 能看到 WPF 常漏掉的 GDI 中文字体（方正 / 华康等）
+        let legacyNames: string[] = [];
+        try {
+          legacyNames = await getFonts({ disableQuoting: true });
+        } catch (err) {
+          console.warn("[fonts] getFonts fallback failed", err);
+        }
+        const merged =
+          faces.length > 0
+            ? mergeLegacyFamilyNames(faces, legacyNames)
+            : familyNamesToRawFaces(legacyNames);
+        if (merged.length === 0) return [];
+        cachedSystemFonts = await mapFontFileUrlsForRenderer(merged);
+        return cachedSystemFonts;
+      } catch (err) {
+        console.warn("[fonts] listSystemFonts failed", err);
+        return [];
+      }
+    },
+  );
 
   ipcMain.handle("fonts:getTerminalDefaultFace", async () => {
     try {
@@ -814,6 +876,26 @@ export function registerMainIpcHandlers(
       return null;
     }
   });
+
+  /** 重启后把 pin 缓存里的绝对路径重新注册为 colortxt-local URL */
+  ipcMain.handle(
+    "fonts:registerFontFilePaths",
+    async (_evt, paths: unknown) => {
+      const list = Array.isArray(paths)
+        ? paths.filter((p): p is string => typeof p === "string" && p.trim() !== "")
+        : [];
+      const out: Record<string, string> = {};
+      for (const raw of list) {
+        try {
+          const mapped = await registerLocalFileForColortxtUrl(raw.trim());
+          if (mapped) out[raw.trim()] = mapped;
+        } catch {
+          /* skip missing files */
+        }
+      }
+      return out;
+    },
+  );
 
   ipcMain.on("window:setTitle", (evt, title: string) => {
     const win = BrowserWindow.fromWebContents(evt.sender);

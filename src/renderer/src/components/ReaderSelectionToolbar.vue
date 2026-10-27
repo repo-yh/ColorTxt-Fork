@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { lineationColorAt } from "../constants/annotationColors";
 import type { SelectionToolbarButtons } from "../constants/selectionToolbar";
 import { icons } from "../icons";
@@ -33,7 +33,7 @@ const props = withDefaults(
     showHighlightRemoveRow: boolean;
     existingHighlightColorIndex: number | null;
     activeLineation?: ReaderAnnotationRecord["lineation"];
-    lineationPickerSelectedIndex: number;
+    lineationPickerSelectedIndex: number | null;
     monacoCustomHighlight: boolean;
     /**
      * 是否展示高亮词 / 划线 / 笔记按钮。
@@ -49,6 +49,86 @@ const props = withDefaults(
     showSelectionAnnotationTools: true,
   },
 );
+
+const floatRootEl = ref<HTMLElement | null>(null);
+/** 色盘相对工具条中心的水平偏移，使色盘对准对应按钮 */
+const pickerOffsetX = ref(0);
+const PICKER_EDGE_MARGIN = 8;
+
+function pickerAnchorAction(): string | null {
+  if (props.colorPickerMode === "highlight") return "highlight";
+  if (props.colorPickerMode === "lineation" && props.lineationPickerType) {
+    return props.lineationPickerType;
+  }
+  return null;
+}
+
+function updatePickerOffset() {
+  const root = floatRootEl.value;
+  const action = pickerAnchorAction();
+  if (!root || !action || !props.toolbarVisible || !props.colorPickerMode) {
+    pickerOffsetX.value = 0;
+    return;
+  }
+  const btn = root.querySelector(`[data-sel-action="${action}"]`);
+  const picker = root.querySelector(".selPicker");
+  if (!(btn instanceof HTMLElement) || !(picker instanceof HTMLElement)) {
+    pickerOffsetX.value = 0;
+    return;
+  }
+  const btnRect = btn.getBoundingClientRect();
+  const pickerRect = picker.getBoundingClientRect();
+  if (btnRect.width <= 0 || pickerRect.width <= 0) {
+    pickerOffsetX.value = 0;
+    return;
+  }
+  /**
+   * 色盘在 flex 里相对根节点水平居中；`left` 为相对该自然位置的偏移。
+   * 用「当前几何 − 已有 left」还原自然中心，避免重复叠加。
+   */
+  const pickerCenter = pickerRect.left + pickerRect.width / 2;
+  const naturalCenter = pickerCenter - pickerOffsetX.value;
+  const btnCenter = btnRect.left + btnRect.width / 2;
+  let offset = btnCenter - naturalCenter;
+  /** 钳制色盘不超出视口左右边 */
+  const half = pickerRect.width / 2;
+  const minCenter = PICKER_EDGE_MARGIN + half;
+  const maxCenter = window.innerWidth - PICKER_EDGE_MARGIN - half;
+  const desiredCenter = naturalCenter + offset;
+  const clampedCenter = Math.min(maxCenter, Math.max(minCenter, desiredCenter));
+  pickerOffsetX.value = clampedCenter - naturalCenter;
+}
+
+/** 父级 `v-if` 会整棵挂载；须 immediate，否则首次弹出不会算偏移 */
+function schedulePickerOffsetUpdate() {
+  void nextTick(() => {
+    updatePickerOffset();
+    requestAnimationFrame(() => {
+      updatePickerOffset();
+      requestAnimationFrame(() => updatePickerOffset());
+    });
+  });
+}
+
+watch(
+  () =>
+    [
+      props.colorPickerMode,
+      props.lineationPickerType,
+      props.toolbarVisible,
+      props.floatCenterX,
+      props.showHighlightRemoveRow,
+      props.hasLineation,
+      props.highlightColors.length,
+      props.lineationColors.length,
+    ] as const,
+  schedulePickerOffsetUpdate,
+  { flush: "post", immediate: true },
+);
+
+onMounted(() => {
+  schedulePickerOffsetUpdate();
+});
 
 const emit = defineEmits<{
   action: [action: ToolbarAction];
@@ -68,10 +148,11 @@ const lineationActions: Array<{
   id: "marker" | "wavy" | "straight";
   label: string;
   type: ReaderLineationType;
+  shortcut: string;
 }> = [
-  { id: "marker", label: "马克笔", type: "marker" },
-  { id: "wavy", label: "波浪线", type: "wavy" },
-  { id: "straight", label: "直线", type: "straight" },
+  { id: "marker", label: "马克笔", type: "marker", shortcut: "3" },
+  { id: "wavy", label: "波浪线", type: "wavy", shortcut: "4" },
+  { id: "straight", label: "直线", type: "straight", shortcut: "5" },
 ];
 
 const pickerVisible = computed(
@@ -124,12 +205,16 @@ function isPickerSwatchSelected(index: number): boolean {
       props.existingHighlightColorIndex < props.highlightColors.length
     );
   }
-  return props.lineationPickerSelectedIndex === index;
+  return (
+    props.lineationPickerSelectedIndex != null &&
+    props.lineationPickerSelectedIndex === index
+  );
 }
 </script>
 
 <template>
   <div
+    ref="floatRootEl"
     v-show="floatVisible"
     class="selFloatRoot"
     :class="{ selFloatRootDown: openDownward }"
@@ -138,7 +223,13 @@ function isPickerSwatchSelected(index: number): boolean {
       left: `${floatCenterX}px`,
     }"
   >
-    <div v-show="pickerVisible" class="selPicker">
+    <div
+      v-show="pickerVisible"
+      class="selPicker"
+      :style="{
+        '--picker-offset-x': `${pickerOffsetX}px`,
+      }"
+    >
       <div
         class="selPickerBody"
         :class="{ 'selPickerBody--withRemove': showPickerRemove }"
@@ -208,6 +299,7 @@ function isPickerSwatchSelected(index: number): boolean {
         aria-label="复制"
         @pointerdown.prevent="emit('action', 'copy')"
       >
+        <span class="selActionShortcut" aria-hidden="true">1</span>
         <span class="selActionIcon" aria-hidden="true" v-html="icons.copy"></span>
         <span class="selActionLabel">复制</span>
       </button>
@@ -215,10 +307,12 @@ function isPickerSwatchSelected(index: number): boolean {
         v-if="showSelectionAnnotationTools && monacoCustomHighlight"
         type="button"
         class="selAction selAction--colorIcon"
+        data-sel-action="highlight"
         :class="{ 'selAction--highlightActive': isHighlightActive() }"
         aria-label="高亮词"
         @pointerdown.prevent="emit('action', 'highlight')"
       >
+        <span class="selActionShortcut" aria-hidden="true">2</span>
         <span
           class="selActionIcon"
           aria-hidden="true"
@@ -232,6 +326,7 @@ function isPickerSwatchSelected(index: number): boolean {
           :key="item.id"
           type="button"
           class="selAction"
+          :data-sel-action="item.type"
           :class="{ 'selAction--lineationActive': isLineationActive(item.type) }"
           :style="
             isLineationActive(item.type)
@@ -244,6 +339,9 @@ function isPickerSwatchSelected(index: number): boolean {
           :aria-label="item.label"
           @pointerdown.prevent="onLineationAction(item.type)"
         >
+          <span class="selActionShortcut" aria-hidden="true">{{
+            item.shortcut
+          }}</span>
           <span
             class="selActionIcon selLineationIcon"
             :class="{
@@ -314,6 +412,7 @@ function isPickerSwatchSelected(index: number): boolean {
           aria-label="记笔记"
           @pointerdown.prevent="emit('action', 'note')"
         >
+          <span class="selActionShortcut" aria-hidden="true">6</span>
           <span
             class="selActionIcon"
             :style="noteIconAccentStyle()"
@@ -330,6 +429,7 @@ function isPickerSwatchSelected(index: number): boolean {
         aria-label="查找"
         @pointerdown.prevent="emit('action', 'find')"
       >
+        <span class="selActionShortcut" aria-hidden="true">7</span>
         <span
           class="selActionIcon"
           aria-hidden="true"
@@ -344,6 +444,7 @@ function isPickerSwatchSelected(index: number): boolean {
         aria-label="词典"
         @pointerdown.prevent="emit('action', 'dictionary')"
       >
+        <span class="selActionShortcut" aria-hidden="true">8</span>
         <span
           class="selActionIcon"
           aria-hidden="true"
@@ -358,6 +459,7 @@ function isPickerSwatchSelected(index: number): boolean {
         aria-label="翻译"
         @pointerdown.prevent="emit('action', 'translate')"
       >
+        <span class="selActionShortcut" aria-hidden="true">9</span>
         <span
           class="selActionIcon"
           aria-hidden="true"
@@ -372,6 +474,7 @@ function isPickerSwatchSelected(index: number): boolean {
         aria-label="问 AI"
         @pointerdown.prevent="emit('action', 'askAi')"
       >
+        <span class="selActionShortcut" aria-hidden="true">0</span>
         <span class="selActionIcon" aria-hidden="true" v-html="icons.aiChat"></span>
         <span class="selActionLabel">问 AI</span>
       </button>
@@ -416,6 +519,8 @@ function isPickerSwatchSelected(index: number): boolean {
 }
 
 .selPicker {
+  position: relative;
+  left: var(--picker-offset-x, 0px);
   display: flex;
   flex-direction: column;
   align-items: flex-start;
@@ -442,6 +547,7 @@ function isPickerSwatchSelected(index: number): boolean {
 }
 
 .selAction {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -453,6 +559,26 @@ function isPickerSwatchSelected(index: number): boolean {
   background: transparent;
   color: var(--fg);
   cursor: pointer;
+}
+
+.selActionShortcut {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+  background: var(--fg);
+  color: var(--bg);
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 1;
+  pointer-events: none;
+  user-select: none;
 }
 
 .selAction:hover:not(:disabled) {

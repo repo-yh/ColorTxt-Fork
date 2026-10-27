@@ -100,6 +100,17 @@ export const persistedSettingsChangedEvent = "colortxt:persisted-settings-change
 /** 「书包密码」弹框「显示密码」勾选（`"1"` / 其它） */
 export const bookPackPromptShowPasswordKey =
   "colorTxt.ui.bookPackPromptShowPassword";
+/** 系统字体列表：区分字重（`"1"`）/ 字体族（其它） */
+export const fontPickerDistinguishWeightsKey =
+  "colorTxt.ui.fontPickerDistinguishWeights";
+/** 「重置当前页」等恢复默认时派发，FontPicker 收听后回到「字体族」 */
+export const fontPickerListModeResetEvent =
+  "colortxt:font-picker-list-mode-reset";
+/**
+ * 字重别名 @font-face 的 pin 缓存（JSON：`cssFamily → { locals, filePath? }`）。
+ * 启动时只恢复缓存，避免全量枚举系统字体。
+ */
+export const systemFontFacePinsKey = "colorTxt.ui.systemFontFacePins";
 export const sessionKey = "colorTxt.session";
 export const fileListKey = "colorTxt.file.list";
 export const recentFilesKey = "colorTxt.recent.files";
@@ -250,6 +261,11 @@ export const defaultMonacoAdvancedWrapping = false;
 export const defaultMonacoCjkWrapOptimize = true;
 /** Monaco 阅读区：滚轮/跳转等是否使用平滑滚动动画 */
 export const defaultMonacoSmoothScrolling = true;
+/**
+ * 禁用点击滚动条轨道跳转（仍可拖动滑块）；仅只读阅读生效，编辑 / Diff 预览不拦截。
+ * Monaco 无官方开关，由阅读器捕获 pointerdown 拦截。
+ */
+export const defaultDisableScrollbarTrackJump = true;
 /** Monaco `mouseWheelScrollSensitivity`：滚轮 delta 倍率 */
 export const defaultMouseWheelScrollSensitivity = 1;
 export const minMouseWheelScrollSensitivity = 0.1;

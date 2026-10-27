@@ -68,6 +68,7 @@ import { loadStealthReaderSettings } from "../../utils/stealthReaderSettings";
 import type { StealthPagePayload } from "@shared/stealthReaderIpc";
 import { useAppReaderUiPrefs } from "../../composables/useAppReaderUiPrefs";
 import { useAppReaderChrome } from "../../composables/useAppReaderChrome";
+import { useFullscreenViewportPreserve } from "../../composables/useFullscreenViewportPreserve";
 import { useReaderHudTip } from "../../composables/useReaderHudTip";
 import { useAppFullscreenReaderLayout } from "../../composables/useAppFullscreenReaderLayout";
 import { useAppTimedScroll } from "../../composables/useAppTimedScroll";
@@ -236,6 +237,7 @@ const {
   monacoAdvancedWrapping,
   monacoCjkWrapOptimize,
   monacoSmoothScrolling,
+  disableScrollbarTrackJump,
   mouseWheelScrollSensitivity,
   fastScrollSensitivity,
   stickyChapterTitleEnabled,
@@ -388,10 +390,15 @@ function onOpenTextReplace() {
 
 const fullscreenSidebarPopoversSuppressCollapse = ref(false);
 const readerEditMode = ref(false);
+const prepareFullscreenExitViewportPreserveSlot = {
+  run: () => {},
+};
 const chrome = useAppReaderChrome({
   readerRef,
   fullscreenSidebarPopoversSuppressCollapse,
   readerEditMode,
+  prepareFullscreenExitViewportPreserve: () =>
+    prepareFullscreenExitViewportPreserveSlot.run(),
 });
 const {
   readerHudTipVisible,
@@ -432,6 +439,23 @@ const {
   recordFullscreenPointer,
   sidebarWidth: chromeSidebarWidth,
 } = chrome;
+const fullscreenViewportPreserve = useFullscreenViewportPreserve({
+  readerRef,
+  isFullscreenView,
+});
+const {
+  enabled: fullscreenViewportPreserveEnabled,
+  suppressViewportProgressUpdates,
+  noteStableAnchor: noteFullscreenViewportStableAnchor,
+  prepareFullscreenExit,
+  onPossibleFullscreenTransitionResize,
+  ensureExitAnchorBeforeChromeChange,
+  restoreAfterLeave: restoreFullscreenViewportAfterLeave,
+  onFullscreenEntered,
+} = fullscreenViewportPreserve;
+if (fullscreenViewportPreserveEnabled) {
+  prepareFullscreenExitViewportPreserveSlot.run = prepareFullscreenExit;
+}
 
 isMinimalistView.value = findBookSettings.isMinimalistView.value;
 
@@ -958,6 +982,8 @@ const readerUi = useAppReaderUiPrefs({
   viewportEndLine,
   viewportVisualProgressPercent,
   viewportAtBottom,
+  suppressViewportProgressUpdates,
+  noteFullscreenViewportStableAnchor,
   showReaderHudTip,
 });
 
@@ -2010,6 +2036,7 @@ watch(
       sidebarUserToggledThisOpen = false;
       if (isFullscreenView.value) {
         try {
+          if (fullscreenViewportPreserveEnabled) prepareFullscreenExit();
           await window.colorTxt.setFullscreen(false);
         } catch {
           /* ignore */
@@ -2042,8 +2069,35 @@ watch(
   },
 );
 
+function onFindBookWindowResize() {
+  if (fullscreenViewportPreserveEnabled) {
+    onPossibleFullscreenTransitionResize();
+  }
+  clampSidebarWidthToViewport();
+}
+
 onMounted(() => {
   offFullscreen = window.colorTxt.onFullscreenChanged(({ isFullscreen }) => {
+    if (fullscreenViewportPreserveEnabled) {
+      if (isFullscreen) {
+        isFullscreenView.value = true;
+        onFullscreenEntered();
+        void nextTick(() => {
+          requestAnimationFrame(() => {
+            readerRef.value?.focusEditor?.();
+          });
+        });
+        pulseChapterListCenter();
+        return;
+      }
+      ensureExitAnchorBeforeChromeChange();
+      isFullscreenView.value = false;
+      dismissFullscreenChromeForNativeExit();
+      void Promise.resolve(restoreFullscreenViewportAfterLeave()).finally(() => {
+        pulseChapterListCenter();
+      });
+      return;
+    }
     isFullscreenView.value = isFullscreen;
     if (!isFullscreen) {
       dismissFullscreenChromeForNativeExit();
@@ -2059,7 +2113,7 @@ onMounted(() => {
   clampSidebarWidthToViewport();
   window.addEventListener("mousemove", onWindowMouseMove);
   window.addEventListener("mouseup", onWindowMouseUp);
-  window.addEventListener("resize", clampSidebarWidthToViewport);
+  window.addEventListener("resize", onFindBookWindowResize);
   window.addEventListener("storage", onStorageSync);
   window.addEventListener(persistedSettingsChangedEvent, onPersistedSettingsChanged);
   window.addEventListener(findBookReplaceRulesChangedEvent, onReplaceRulesChanged);
@@ -2090,7 +2144,7 @@ onBeforeUnmount(() => {
   offStealthOwnerChapterNav = null;
   window.removeEventListener("mousemove", onWindowMouseMove);
   window.removeEventListener("mouseup", onWindowMouseUp);
-  window.removeEventListener("resize", clampSidebarWidthToViewport);
+  window.removeEventListener("resize", onFindBookWindowResize);
   window.removeEventListener("storage", onStorageSync);
   window.removeEventListener(
     persistedSettingsChangedEvent,
@@ -2492,6 +2546,7 @@ const modalRef = ref<InstanceType<typeof AppModal> | null>(null);
             :letter-spacing-px="readerLetterSpacingPx"
             :horizontal-inset-px="readerHorizontalInsetPx"
             :monaco-smooth-scrolling="monacoSmoothScrolling"
+            :disable-scrollbar-track-jump="disableScrollbarTrackJump"
             :mouse-wheel-scroll-sensitivity="mouseWheelScrollSensitivity"
             :fast-scroll-sensitivity="fastScrollSensitivity"
             :sticky-chapter-title-enabled="stickyChapterTitleEnabled"

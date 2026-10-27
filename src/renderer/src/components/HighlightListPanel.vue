@@ -13,6 +13,7 @@ import AppShellMenuTeleport from "./AppShellMenuTeleport.vue";
 import HighlightTermEditModal, {
   type HighlightTermEditCommit,
 } from "./HighlightTermEditModal.vue";
+import LoadingDotsBounce from "./LoadingDotsBounce.vue";
 
 const HIGHLIGHTS_HEADER_MORE_MENU_W = 160;
 /** 超过该词数则列表行只显示代表词 + +N */
@@ -44,6 +45,9 @@ const props = withDefaults(
     highlightColors?: readonly string[];
     monacoFontFamily: string;
     menuAnchorEl?: HTMLButtonElement | null;
+    /** 高亮词 AI 检索进行中：列表内信息条（不挡其它操作） */
+    aiSearching?: boolean;
+    aiSearchBannerText?: string;
   }>(),
   {
     currentFilePath: null,
@@ -51,6 +55,8 @@ const props = withDefaults(
     highlightPreviewBg: "var(--reader-bg, var(--bg))",
     highlightColors: () => [],
     menuAnchorEl: null,
+    aiSearching: false,
+    aiSearchBannerText: "",
   },
 );
 
@@ -99,6 +105,7 @@ const emit = defineEmits<{
   colorAllHighlights: [
     payload: { groups: { query: string; useRegex: boolean; color: string }[] },
   ];
+  stopAiSearch: [];
 }>();
 
 const moreBtnRef = ref<HTMLButtonElement | null>(null);
@@ -731,11 +738,37 @@ function onColorAllHighlights() {
 <template>
   <div class="highlightPanelWrap">
     <div class="highlightPanelBody">
-      <div v-if="highlightTerms.length === 0" class="highlightEmpty">
+      <div
+        v-if="aiSearching"
+        class="highlightAiSearchBanner"
+        role="status"
+        aria-live="polite"
+      >
+        <span class="highlightAiSearchBannerText">
+          {{ aiSearchBannerText.trim() || "正在检索" }}<LoadingDotsBounce />
+        </span>
+        <button
+          type="button"
+          class="highlightAiSearchCancelBtn"
+          title="停止"
+          aria-label="停止"
+          @click="emit('stopAiSearch')"
+        >
+          <span
+            class="highlightActionIcon"
+            aria-hidden="true"
+            v-html="icons.close"
+          ></span>
+        </button>
+      </div>
+      <div
+        v-if="highlightTerms.length === 0 && !aiSearching"
+        class="highlightEmpty"
+      >
         {{ emptyMessage }}
       </div>
       <TransitionGroup
-        v-else
+        v-else-if="highlightTerms.length > 0"
         name="highlightList"
         tag="div"
         class="highlightList"
@@ -1088,6 +1121,60 @@ function onColorAllHighlights() {
   display: flex;
   flex-direction: column;
   background: var(--bg);
+}
+
+/* 与 AiIndexProgressBanner 同风格：列表内进度信息条 */
+.highlightAiSearchBanner {
+  margin: 0 0 6px;
+  font-size: 12px;
+  padding: 6px 4px 6px 8px;
+  border-radius: 6px;
+  line-height: 1.45;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--fg);
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.highlightAiSearchBannerText {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15em;
+  white-space: pre-wrap;
+}
+
+.highlightAiSearchCancelBtn {
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--muted);
+  transition: color 0.15s ease;
+  border-radius: 4px;
+}
+
+.highlightAiSearchCancelBtn:hover {
+  color: var(--danger);
+}
+
+.highlightAiSearchCancelBtn .highlightActionIcon :deep(svg) {
+  width: 12px;
+  height: 12px;
+  display: block;
+}
+
+.highlightAiSearchCancelBtn .highlightActionIcon :deep(svg path) {
+  fill: currentColor;
 }
 
 .highlightList {

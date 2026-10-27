@@ -55,6 +55,7 @@ const UI_READER_KEYS = [
   "monacoAdvancedWrapping",
   "monacoCjkWrapOptimize",
   "monacoSmoothScrolling",
+  "disableScrollbarTrackJump",
   "mouseWheelScrollSensitivity",
   "fastScrollSensitivity",
   "stickyChapterTitleEnabled",
@@ -85,6 +86,7 @@ const UI_READER_KEYS = [
   "lineationColorsLight",
   "lineationColorsDark",
   "lineationLastColors",
+  "highlightLastColor",
   "voiceRead",
 ] as const;
 

@@ -83,7 +83,10 @@ const props = withDefaults(
     /** 在滚动区顶部显示本地下拉过滤输入框 */
     searchable?: boolean;
     searchPlaceholder?: string;
-    /** 下拉最小宽度（px），默认与触发器同宽 */
+    /**
+     * 下拉面板宽度（px）。
+     * `> 0` 时按该值；`0`（默认）时取触发器宽度，且不少于 140。
+     */
     minPanelWidth?: number;
     /** 下拉 Teleport 面板 z-index；嵌套在其它浮层内时需高于父面板 */
     panelZIndex?: number;
@@ -185,10 +188,11 @@ async function positionPanel() {
   const trig = triggerRef.value;
   if (!trig) return;
   const r = trig.getBoundingClientRect();
-  panelWidth.value = Math.max(
-    props.minPanelWidth > 0 ? props.minPanelWidth : r.width,
-    140,
-  );
+  // 显式 minPanelWidth 优先生效；未指定时跟触发器，并用 140 作下限（原 CSS min-width）
+  panelWidth.value =
+    props.minPanelWidth > 0
+      ? props.minPanelWidth
+      : Math.max(r.width, 140);
   posLeft.value = r.left;
   posTop.value = r.bottom + 4;
   await nextTick();
@@ -809,7 +813,7 @@ const triggerMainText = computed(() => {
   position: fixed;
   z-index: 7200;
   box-sizing: border-box;
-  min-width: 140px;
+  /* 宽度由 positionPanel 写入的 inline width 决定，勿再写死 min-width */
 }
 .customSelectSearch {
   display: flex;
