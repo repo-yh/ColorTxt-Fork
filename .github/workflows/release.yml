@@ -200,7 +200,7 @@ jobs:
 
       # 提取当前版本的 CHANGELOG 条目（tag 触发按 tag 版本）
       # 范围 = 当前版本 .. 上一个公开（非 draft）release 版本之间的全部条目（一次 tag 带多个 CHANGELOG 版本发布时全量覆盖）
-      # 顶部条目与版本不一致时只告警并跳过追加，不让 publish job 失败
+      # 顶部条目与版本不一致时只告警并跳过写入，不让 publish job 失败
       - name: Extract current version changelog
         id: changelog
         if: startsWith(github.ref, 'refs/tags/')
@@ -215,15 +215,16 @@ jobs:
           if node scripts/extract-changelog.mjs "$VERSION" "$PREV"; then
             echo "appended=true" >> "$GITHUB_OUTPUT"
           else
-            echo "::warning::CHANGELOG.md 顶部条目与版本 ${VERSION} 不一致，跳过 release 描述追加"
+            echo "::warning::CHANGELOG.md 顶部条目与版本 ${VERSION} 不一致，跳过 release 描述写入"
             echo "appended=false" >> "$GITHUB_OUTPUT"
           fi
 
-      # 更新 electron-builder 创建的 draft release：追加 CHANGELOG 描述
+      # 更新 electron-builder 创建的 draft release：直接用 CHANGELOG 描述覆盖（draft 本身无 body）
       # 用 gh release edit 而非 softprops——后者在 duplicate draft 处理路径下会丢 body（v3.8.16 实测）
-      - name: Append changelog to draft release
+      # gh release edit 没有 --append flag（v3.8.17 实测），直接 --notes-file 覆盖写入
+      - name: Set changelog as release notes
         if: startsWith(github.ref, 'refs/tags/') && steps.changelog.outputs.appended == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
-        run: gh release edit "${{ github.ref_name }}" --notes-file release-notes.md --append
+        run: gh release edit "${{ github.ref_name }}" --notes-file release-notes.md
