@@ -38,6 +38,7 @@ describe("buildListedSystemFonts", () => {
     assert.equal(listed[0]?.family, "Arial Black");
     assert.equal(listed[0]?.previewFamily, "Arial Black");
     assert.equal(listed[0]?.previewWeight, 400);
+    assert.equal(listed[0]?.previewItalic, false);
     assert.equal(listed[0]?.cssFamily, "Arial Black");
     assert.deepEqual(listed[0]?.locals, []);
   });
@@ -270,6 +271,10 @@ describe("buildListedSystemFonts", () => {
       listed.map((item) => item.label),
       ["Arial 常规", "Arial 粗体", "Arial 粗体 斜体"],
     );
+    assert.deepEqual(
+      listed.map((item) => item.previewItalic),
+      [false, false, true],
+    );
   });
 
   it("sorts unknown style names such as W3/W6 by numeric weight", () => {
@@ -381,15 +386,19 @@ describe("buildSystemFontFaceCss", () => {
     const css = buildSystemFontFaceCss([
       {
         label: "PingFang SC",
+        family: "PingFang SC",
         previewFamily: "PingFang SC",
         previewWeight: 400,
+        previewItalic: false,
         cssFamily: "PingFang SC",
         locals: [],
       },
       {
         label: "PingFang SC 细体",
+        family: "PingFang SC",
         previewFamily: "PingFang SC",
         previewWeight: 300,
+        previewItalic: false,
         cssFamily: "PingFang SC 细体",
         locals: ["PingFangSC-Light", 'PingFang SC "Light"'],
       },
@@ -405,8 +414,10 @@ describe("buildSystemFontFaceCss", () => {
     const css = buildSystemFontFaceCss([
       {
         label: "A-OTF Kaimin Sora Std 中等",
+        family: "A-OTF Kaimin Sora Std",
         previewFamily: "A-OTF Kaimin Sora Std",
         previewWeight: 500,
+        previewItalic: false,
         cssFamily: "A-OTF Kaimin Sora Std 中等",
         locals: ["A-OTF Kaimin Sora Std M"],
         fileUrl:
@@ -425,8 +436,10 @@ describe("buildSystemFontFaceCss", () => {
     const css = buildSystemFontFaceCss([
       {
         label: "A-OTF Jun Pro 101 细体",
+        family: "A-OTF Jun Pro 101",
         previewFamily: "A-OTF Jun Pro 101",
         previewWeight: 300,
+        previewItalic: false,
         cssFamily: "A-OTF Jun Pro 101",
         locals: [],
         fileUrl: "file:///C:/Fonts/jun101.otf",

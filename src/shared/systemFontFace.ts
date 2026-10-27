@@ -30,6 +30,8 @@ export type ListedSystemFont = {
   previewFamily: string;
   /** 列表预览用 CSS font-weight（约 100–900） */
   previewWeight: number;
+  /** 列表预览用是否斜体（CSS font-style） */
+  previewItalic: boolean;
   /**
    * 选中后写入设置的 font-family。
    * 等于 previewFamily 时直接用系统族；否则为锁字重别名，需 @font-face。
@@ -47,9 +49,7 @@ export type ListedSystemFont = {
 };
 
 type ListedInternal = ListedSystemFont & {
-  family: string;
   rank: number;
-  italic: boolean;
 };
 
 /** 是否需要为选中项注入 @font-face 别名 */
@@ -351,17 +351,18 @@ function pinnedFaceEntry(
   }
   const label = `${family} ${suffix.text}`;
   const filePath = face.filePath?.trim() || undefined;
+  const previewItalic = face.italic || /斜/.test(suffix.text);
   return {
     label,
     previewFamily: family,
     previewWeight: previewWeightFromRank(suffix.rank, face.weight),
+    previewItalic,
     cssFamily: label,
     locals,
     fileUrl,
     ...(filePath ? { filePath } : {}),
     family,
     rank: suffix.rank,
-    italic: face.italic || /斜/.test(suffix.text),
   };
 }
 
@@ -382,11 +383,11 @@ function labeledFamilyEntry(
     label: `${family} ${suffix.text}`,
     previewFamily: family,
     previewWeight: previewWeightFromRank(suffix.rank, face.weight),
+    previewItalic: face.italic || /斜/.test(suffix.text),
     cssFamily: family,
     locals: [],
     family,
     rank: suffix.rank,
-    italic: face.italic || /斜/.test(suffix.text),
   };
 }
 
@@ -449,11 +450,11 @@ function familyEntry(family: string): ListedInternal {
     label: family,
     previewFamily: family,
     previewWeight: 400,
+    previewItalic: false,
     cssFamily: family,
     locals: [],
     family,
     rank: 0,
-    italic: false,
   };
 }
 
@@ -536,7 +537,7 @@ function finalizeListed(listed: ListedInternal[]): ListedSystemFont[] {
     const byFamily = a.family.localeCompare(b.family, "zh-Hans-CN");
     if (byFamily !== 0) return byFamily;
     if (a.rank !== b.rank) return a.rank - b.rank;
-    if (a.italic !== b.italic) return a.italic ? 1 : -1;
+    if (a.previewItalic !== b.previewItalic) return a.previewItalic ? 1 : -1;
     return a.label.localeCompare(b.label, "zh-Hans-CN");
   });
 
@@ -546,6 +547,7 @@ function finalizeListed(listed: ListedInternal[]): ListedSystemFont[] {
       family,
       previewFamily,
       previewWeight,
+      previewItalic,
       cssFamily,
       locals,
       fileUrl,
@@ -555,6 +557,7 @@ function finalizeListed(listed: ListedInternal[]): ListedSystemFont[] {
       family,
       previewFamily,
       previewWeight,
+      previewItalic,
       cssFamily,
       locals,
       ...(fileUrl ? { fileUrl } : {}),

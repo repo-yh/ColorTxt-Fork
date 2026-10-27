@@ -447,6 +447,7 @@ function listedFontPreviewStyle(font: ListedSystemFont) {
   return {
     fontFamily: cssFontFamilyStack([font.previewFamily]),
     fontWeight: String(font.previewWeight),
+    fontStyle: font.previewItalic ? "italic" : "normal",
   };
 }
 

@@ -131,6 +131,7 @@ function listedFromCachedPin(
     family: cssFamily,
     previewFamily: cssFamily,
     previewWeight: 400,
+    previewItalic: false,
     cssFamily,
     locals: pin.locals,
     ...(fileUrl ? { fileUrl } : {}),
