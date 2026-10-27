@@ -1130,8 +1130,8 @@ defineExpose({
           <button
             type="button"
             class="aiReaderSidebarHeaderIconBtn aiReaderSidebarHeaderIconBtn--colorful"
-            title="一键染色"
-            aria-label="一键染色"
+            title="一键染色/取消"
+            aria-label="一键染色/取消"
             :disabled="!currentFilePath"
             @click="highlightPanelRef?.colorAllHighlights()"
           >

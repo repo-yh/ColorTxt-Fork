@@ -5,10 +5,7 @@ import {
   parseLineationColorIndexRaw,
 } from "../constants/annotationColors";
 import type { LineationLastColorPrefs } from "../constants/annotationColors";
-import {
-  clampHighlightColorIndex,
-  parseHighlightLastColor,
-} from "../constants/highlightColors";
+import { clampHighlightColorIndex } from "../constants/highlightColors";
 import {
   ANNOTATION_VIEWPORT_BUFFER_LINES,
   ANNOTATION_VIEWPORT_SYNC_MS,
@@ -391,11 +388,10 @@ export function useReaderAnnotations(opts: {
     opts.emitUpdateHighlightLastColor(colorIndex);
   }
 
-  function lastHighlightColorIndex(): number {
-    return clampHighlightColorIndex(
-      parseHighlightLastColor(opts.highlightLastColor()),
-      opts.highlightColorsLength(),
-    );
+  /** 从全部高亮颜色组中随机取一色（划词/快捷键添加高亮词的默认色） */
+  function randomHighlightColorIndex(): number {
+    const n = opts.highlightColorsLength();
+    return n > 0 ? Math.floor(Math.random() * n) : 0;
   }
 
   function applyHighlightTerm(colorIndex: number) {
@@ -1431,7 +1427,7 @@ export function useReaderAnnotations(opts: {
     if (opts.highlightColorsLength() <= 0) return false;
     const idx = findStoredHighlightColorIndex(t);
     if (idx == null) {
-      applyHighlightTerm(lastHighlightColorIndex());
+      applyHighlightTerm(randomHighlightColorIndex());
       openPickerForShortcut("highlight");
     } else {
       opts.emitRemoveHighlightTerm({ text: t });
@@ -1662,8 +1658,8 @@ export function useReaderAnnotations(opts: {
       lineationPickerType.value = null;
       const existing = findStoredHighlightColorIndex(draftText.value);
       if (existing == null) {
-        /** 与划线按钮一致：未设置时用「上次颜色」自动添加 */
-        applyHighlightTerm(lastHighlightColorIndex());
+        /** 未设置过高亮时随机取色自动添加 */
+        applyHighlightTerm(randomHighlightColorIndex());
       } else {
         syncHighlightLastColor(existing);
       }

@@ -786,6 +786,11 @@ export function useAppHighlightTerms(deps: {
     )
       return;
     if (deps.isVoiceReadNavigationBlocked.value) return;
+    // toggle：当前已有内联染色则整组清除；否则按词组染色
+    if (deps.readerRef.value?.hasInlineSearchQuery?.()) {
+      deps.readerRef.value?.clearInlineSearchState?.();
+      return;
+    }
     const groups = payload.groups.filter((g) => g.query.trim());
     if (groups.length === 0) return;
     deps.readerRef.value?.setInlineSearchGroups?.(groups);
