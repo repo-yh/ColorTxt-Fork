@@ -131,6 +131,21 @@ export function findGroupLocation(
   return null;
 }
 
+/** 按单词找到其所在组并返回整组 storedTerms（供组级整体迁移；找不到返回 null） */
+export function findGroupStoredTermsByTerm(
+  map: HighlightWordsByIndex | undefined,
+  text: string,
+): string[] | null {
+  const term = trimTerm(text);
+  if (!term || !map) return null;
+  for (const groups of Object.values(map)) {
+    for (const g of groups) {
+      if (g.some((w) => w.text === term)) return groupTexts(g);
+    }
+  }
+  return null;
+}
+
 function cloneMap(map: HighlightWordsByIndex | undefined): HighlightWordsByIndex {
   const out: HighlightWordsByIndex = {};
   if (!map) return out;

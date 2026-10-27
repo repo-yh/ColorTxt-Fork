@@ -861,6 +861,7 @@ const readerAnn = useReaderAnnotations({
   selectionToolbarButtons: () =>
     props.selectionToolbarButtons ?? defaultSelectionToolbarButtons,
   highlightWordsByIndexBookOnly: () => props.highlightWordsByIndexBookOnly,
+  highlightWordsByIndex: () => props.highlightWordsByIndex,
   highlightColorsLength: () => props.highlightColors.length,
   lineationColorsLength: () => props.lineationColors.length,
   emitUpsert: (ann) => emit("upsertReaderAnnotation", ann),

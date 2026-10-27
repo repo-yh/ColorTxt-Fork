@@ -10,6 +10,7 @@ import {
   findFileMetaRecord,
   removeHighlightGroupFromFile,
   removeHighlightTermFromFile,
+  setHighlightGroupColorForFile,
   upsertFileMetaRecord,
   upsertHighlightGroupForFile,
   type FileMetaRecord,
@@ -19,6 +20,7 @@ import {
 import {
   buildHighlightListTerms,
   findGroupLocation,
+  findGroupStoredTermsByTerm,
   groupExistsInHighlightMap,
   highlightGroupsEqual,
   mergeHighlightGroupsInMap,
@@ -26,6 +28,7 @@ import {
   normalizeHighlightGroup,
   removeHighlightGroupFromMap,
   removeHighlightTermFromMap,
+  setHighlightGroupColorInMap,
   splitTermFromHighlightGroupInMap,
   upsertHighlightGroupInMap,
   type HighlightListTerm,
@@ -211,10 +214,38 @@ export function useAppHighlightTerms(deps: {
     { deep: true, immediate: true },
   );
 
-  /** 选区添词（仅本书） */
+  /** 选区点色：整组迁移到新颜色组（不拆组）；本书与收藏都没有该词时新添单词到本书 */
   function onAddHighlightTerm(payload: { text: string; colorIndex: number }) {
     const path = deps.currentFile.value;
     if (!path) return;
+    const bookGroup = findGroupStoredTermsByTerm(
+      currentFileHighlightWords.value,
+      payload.text,
+    );
+    if (bookGroup) {
+      deps.fileMetaRecords.value = setHighlightGroupColorForFile(
+        deps.fileMetaRecords.value,
+        path,
+        bookGroup,
+        payload.colorIndex,
+      );
+      deps.persistFileMeta();
+      return;
+    }
+    const globalGroup = findGroupStoredTermsByTerm(
+      deps.highlightWordsByIndexGlobal.value,
+      payload.text,
+    );
+    if (globalGroup) {
+      // 收藏独有词在收藏层整组换色（组员不动），不写入本书
+      deps.highlightWordsByIndexGlobal.value = setHighlightGroupColorInMap(
+        deps.highlightWordsByIndexGlobal.value,
+        globalGroup,
+        payload.colorIndex,
+      );
+      deps.persistSettings();
+      return;
+    }
     deps.fileMetaRecords.value = assignHighlightTermToColorForFile(
       deps.fileMetaRecords.value,
       path,
@@ -272,12 +303,18 @@ export function useAppHighlightTerms(deps: {
     }
     const path = deps.currentFile.value;
     if (!path) return;
+    // 划词移除：本书与收藏两层直接剔除（removeHighlightTerm* 幂等，词不在的层无操作）
     deps.fileMetaRecords.value = removeHighlightTermFromFile(
       deps.fileMetaRecords.value,
       path,
       term,
     );
+    deps.highlightWordsByIndexGlobal.value = removeHighlightTermFromMap(
+      deps.highlightWordsByIndexGlobal.value,
+      term,
+    );
     deps.persistFileMeta();
+    deps.persistSettings();
   }
 
   function onFavoriteHighlightTerm(payload: {

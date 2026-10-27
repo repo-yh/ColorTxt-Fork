@@ -74,6 +74,8 @@ export function useReaderAnnotations(opts: {
   aiFeaturesEnabled: () => boolean;
   selectionToolbarButtons: () => SelectionToolbarButtons;
   highlightWordsByIndexBookOnly: () => HighlightWordsByIndex | undefined;
+  /** 合并后的高亮词（收藏 + 本书；本书同词优先）——划词「已高亮」判断含收藏词，防重复添加 */
+  highlightWordsByIndex: () => HighlightWordsByIndex | undefined;
   highlightColorsLength: () => number;
   lineationColorsLength: () => number;
   emitUpsert: (ann: ReaderAnnotationRecord) => void;
@@ -423,9 +425,10 @@ export function useReaderAnnotations(opts: {
     }
   }
 
+  /** 划词「已高亮」判断：查合并 map（收藏 + 本书），收藏词不再视为未高亮而重复添加 */
   function findStoredHighlightColorIndex(text: string): number | null {
     const idx = findHighlightColorIndexInMap(
-      opts.highlightWordsByIndexBookOnly(),
+      opts.highlightWordsByIndex(),
       text,
     );
     if (idx == null || idx >= opts.highlightColorsLength()) return null;
