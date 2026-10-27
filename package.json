@@ -61,7 +61,7 @@
     "cheerio": "^1.2.0",
     "d3-cloud": "^1.2.9",
     "d3-scale": "^4.0.2",
-    "electron": "^41.10.7",
+    "electron": "^42.11.16",
     "electron-builder": "^26.18.0",
     "electron-vite": "^3.0.0",
     "heic-convert": "^2.1.0",
