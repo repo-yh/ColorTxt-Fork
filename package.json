@@ -76,7 +76,7 @@
     "markmap-view": "^0.18.12",
     "monaco-editor": "^0.55.1",
     "pako": "^3.0.2",
-    "pdfjs-dist": "^6.2.108",
+    "pdfjs-dist": "^6.4.299",
     "socks-proxy-agent": "^10.1.0",
     "sortablejs": "^1.15.7",
     "tldts": "^7.4.18",
