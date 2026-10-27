@@ -136,7 +136,11 @@ export type PersistedSettingsData = {
   monacoCjkWrapOptimize?: boolean;
   /** Monaco 阅读区平滑滚动（滚轮、程序性 setScrollTop/revealLine 等） */
   monacoSmoothScrolling?: boolean;
-  /** 禁用点击滚动条轨道跳转（仍可拖动滑块） */
+  /** 只读滚动条轨道行为：`disabled` | `page` | `jump` */
+  scrollbarTrackBehavior?: import("../constants/appUi").ScrollbarTrackBehavior;
+  /**
+   * @deprecated 已由 `scrollbarTrackBehavior` 取代；读盘时迁移
+   */
   disableScrollbarTrackJump?: boolean;
   /** Monaco 滚轮滚动倍率（`mouseWheelScrollSensitivity`） */
   mouseWheelScrollSensitivity?: number;
@@ -469,8 +473,16 @@ export function loadPersistedSettingsData(
   if (typeof obj.monacoSmoothScrolling === "boolean") {
     data.monacoSmoothScrolling = obj.monacoSmoothScrolling;
   }
-  if (typeof obj.disableScrollbarTrackJump === "boolean") {
-    data.disableScrollbarTrackJump = obj.disableScrollbarTrackJump;
+  if (
+    obj.scrollbarTrackBehavior === "disabled" ||
+    obj.scrollbarTrackBehavior === "page" ||
+    obj.scrollbarTrackBehavior === "jump"
+  ) {
+    data.scrollbarTrackBehavior = obj.scrollbarTrackBehavior;
+  } else if (typeof obj.disableScrollbarTrackJump === "boolean") {
+    data.scrollbarTrackBehavior = obj.disableScrollbarTrackJump
+      ? "disabled"
+      : "jump";
   }
   if (
     typeof obj.mouseWheelScrollSensitivity === "number" &&

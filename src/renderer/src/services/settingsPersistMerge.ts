@@ -44,7 +44,7 @@ export const WINDOW_LOCAL_MAIN_SETTING_KEYS: ReadonlySet<string> = new Set([
   "monacoAdvancedWrapping",
   "monacoCjkWrapOptimize",
   "monacoSmoothScrolling",
-  "disableScrollbarTrackJump",
+  "scrollbarTrackBehavior",
   "mouseWheelScrollSensitivity",
   "fastScrollSensitivity",
   "stickyChapterTitleEnabled",

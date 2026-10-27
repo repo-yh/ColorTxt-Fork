@@ -262,10 +262,38 @@ export const defaultMonacoCjkWrapOptimize = true;
 /** Monaco 阅读区：滚轮/跳转等是否使用平滑滚动动画 */
 export const defaultMonacoSmoothScrolling = true;
 /**
- * 禁用点击滚动条轨道跳转（仍可拖动滑块）；仅只读阅读生效，编辑 / Diff 预览不拦截。
- * Monaco 无官方开关，由阅读器捕获 pointerdown 拦截。
+ * 只读时点击滚动条轨道的行为（编辑 / Diff 预览始终为跳转）。
+ * - `disabled`：拦截轨道点击（仍可拖滑块）
+ * - `page`：与空格 / PageUp·Down 同一套 `scrollByPageStep`（粘性条重叠完整行）
+ * - `jump`：按点击位置比例跳转（Monaco 默认）
  */
-export const defaultDisableScrollbarTrackJump = true;
+export type ScrollbarTrackBehavior = "disabled" | "page" | "jump";
+
+export const SCROLLBAR_TRACK_BEHAVIOR_OPTIONS: {
+  id: ScrollbarTrackBehavior;
+  label: string;
+}[] = [
+  { id: "disabled", label: "禁用" },
+  { id: "page", label: "翻页" },
+  { id: "jump", label: "跳转" },
+];
+
+export const defaultScrollbarTrackBehavior: ScrollbarTrackBehavior = "page";
+
+/** 解析设置值；兼容旧布尔键 `disableScrollbarTrackJump`（true→禁用，false→跳转） */
+export function parseScrollbarTrackBehavior(
+  value: unknown,
+  legacyDisableTrackJump?: unknown,
+): ScrollbarTrackBehavior {
+  if (value === "disabled" || value === "page" || value === "jump") {
+    return value;
+  }
+  if (typeof legacyDisableTrackJump === "boolean") {
+    return legacyDisableTrackJump ? "disabled" : "jump";
+  }
+  return defaultScrollbarTrackBehavior;
+}
+
 /** Monaco `mouseWheelScrollSensitivity`：滚轮 delta 倍率 */
 export const defaultMouseWheelScrollSensitivity = 1;
 export const minMouseWheelScrollSensitivity = 0.1;

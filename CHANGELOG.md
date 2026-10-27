@@ -136,7 +136,7 @@
 
 - 「设置 → AI 阅读助手 → 对话模型」支持手动输入模型 ID（部分服务商没有提供模型查询接口） [#100](https://github.com/ssnangua/ColorTxt/issues/100)，[#101](https://github.com/ssnangua/ColorTxt/pull/101)
 - 只读选区工具条支持数字快捷键：按钮左上角显示对应数字角标；按钮未启用时快捷键不生效 [#110](https://github.com/ssnangua/ColorTxt/issues/110)
-- 「设置 → 阅读 → 滚动」新增「禁用滚动条轨道」（默认开启）：点击滚动条轨道不跳转，避免误点导致找不到阅读位置（仍可拖动滑块） [#114](https://github.com/ssnangua/ColorTxt/issues/114)
+- 「设置 → 阅读 → 滚动」新增「滚动条轨道行为」：**禁用** / **翻页**（默认，与上一屏/下一屏同一套）/ **跳转**；只读时生效，编辑与 Diff 预览始终为跳转 [#114](https://github.com/ssnangua/ColorTxt/issues/114)
 - 移除高亮词前增加二次确认 [#102](https://github.com/ssnangua/ColorTxt/issues/102)
 - 高亮词「AI 检索」进行中改为在列表内显示信息条，不再全屏蒙版挡操作；信息条右侧可点「停止」，并使用已检索到的词语 [#102](https://github.com/ssnangua/ColorTxt/issues/102)
 - 系统字体列表：可切换「字体族 / 区分字重」 [#93](https://github.com/ssnangua/ColorTxt/issues/93)

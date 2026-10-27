@@ -138,7 +138,7 @@ import {
   defaultMonacoCjkWrapOptimize,
   defaultMonacoCustomHighlight,
   defaultMonacoSmoothScrolling,
-  defaultDisableScrollbarTrackJump,
+  defaultScrollbarTrackBehavior,
   defaultMouseWheelScrollSensitivity,
   defaultFastScrollSensitivity,
   defaultStickyChapterTitleEnabled,
@@ -510,8 +510,11 @@ const props = withDefaults(
     horizontalInsetPx?: number;
     /** Monaco 平滑滚动（滚轮、revealLine、setScrollTop 等） */
     monacoSmoothScrolling?: boolean;
-    /** 禁用点击滚动条轨道跳转（仍可拖动滑块）；仅只读，编辑 / Diff 预览不拦截 */
-    disableScrollbarTrackJump?: boolean;
+    /**
+     * 只读滚动条轨道行为：`disabled` | `page` | `jump`；
+     * 编辑 / Diff 预览强制为跳转。
+     */
+    scrollbarTrackBehavior?: import("../constants/appUi").ScrollbarTrackBehavior;
     /** Monaco 滚轮滚动倍率 */
     mouseWheelScrollSensitivity?: number;
     /** Monaco 按住 Alt 时的滚轮加速倍率 */
@@ -634,7 +637,7 @@ const props = withDefaults(
     letterSpacingPx: defaultLetterSpacingPx,
     horizontalInsetPx: defaultReaderHorizontalInsetPx,
     monacoSmoothScrolling: defaultMonacoSmoothScrolling,
-    disableScrollbarTrackJump: defaultDisableScrollbarTrackJump,
+    scrollbarTrackBehavior: defaultScrollbarTrackBehavior,
     mouseWheelScrollSensitivity: defaultMouseWheelScrollSensitivity,
     fastScrollSensitivity: defaultFastScrollSensitivity,
     stickyChapterTitleEnabled: defaultStickyChapterTitleEnabled,
@@ -1037,6 +1040,12 @@ function sealReaderEditBaseline() {
   if (!m) return;
   readerEditSavedSnapshot = m.getValue();
   emit("readerEditDirtyChange", false);
+}
+
+/** 编辑 / Diff 预览强制跳转；只读用设置值 */
+function effectiveScrollbarTrackBehavior(): import("../constants/appUi").ScrollbarTrackBehavior {
+  if (props.readerEditMode || smartFormatReviewActive.value) return "jump";
+  return props.scrollbarTrackBehavior ?? defaultScrollbarTrackBehavior;
 }
 
 /** 只读 / 编辑：切换 Monaco「阅读优化 chrome」与原生编辑 chrome（字体与配色仍走共享逻辑） */
@@ -5379,13 +5388,21 @@ onMounted(() => {
      * 右键在捕获阶段截断，不交给 Monaco（否则会把光标移到点击处并清空选区）；菜单改由原生 contextmenu 打开。
      */
     const editorHost = editorEl.value;
-    /** 挂在 editorHost 捕获阶段，早于 Monaco 轨道节点上的 bubble 监听；仅只读 */
+    /**
+     * 挂在 editorHost 捕获阶段：
+     * 「禁用」拦掉；「翻页」走 `scrollByPageStep`（与空格/PageUp/Down 同套）；「跳转」放行 Monaco。
+     */
     const disposeScrollbarTrackJumpGuard = bindMonacoScrollbarTrackJumpGuard(
       e,
-      () =>
-        props.disableScrollbarTrackJump !== false &&
-        !props.readerEditMode &&
-        !smartFormatReviewActive.value,
+      () => {
+        const b = effectiveScrollbarTrackBehavior();
+        if (b === "disabled") return "block";
+        if (b === "page") return "page";
+        return "none";
+      },
+      (direction) => {
+        scrollByPageStep(direction);
+      },
       editorHost,
     );
     const onReaderPointerDownCapture = (ev: PointerEvent) => {

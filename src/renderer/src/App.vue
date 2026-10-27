@@ -160,7 +160,7 @@ import {
   defaultMonacoCjkWrapOptimize,
   defaultMonacoCustomHighlight,
   defaultMonacoSmoothScrolling,
-  defaultDisableScrollbarTrackJump,
+  defaultScrollbarTrackBehavior,
   defaultMouseWheelScrollSensitivity,
   defaultFastScrollSensitivity,
   clampMouseWheelScrollSensitivity,
@@ -1001,7 +1001,7 @@ const monacoAdvancedWrapping = ref(defaultMonacoAdvancedWrapping);
 const monacoCjkWrapOptimize = ref(defaultMonacoCjkWrapOptimize);
 /** Monaco 阅读区平滑滚动（设置可关） */
 const monacoSmoothScrolling = ref(defaultMonacoSmoothScrolling);
-const disableScrollbarTrackJump = ref(defaultDisableScrollbarTrackJump);
+const scrollbarTrackBehavior = ref(defaultScrollbarTrackBehavior);
 const mouseWheelScrollSensitivity = ref(defaultMouseWheelScrollSensitivity);
 const fastScrollSensitivity = ref(defaultFastScrollSensitivity);
 /** 阅读区顶部粘性章节标题 */
@@ -1543,7 +1543,7 @@ const persistence = useAppPersistence({
   monacoAdvancedWrapping,
   monacoCjkWrapOptimize,
   monacoSmoothScrolling,
-  disableScrollbarTrackJump,
+  scrollbarTrackBehavior,
   mouseWheelScrollSensitivity,
   fastScrollSensitivity,
   stickyChapterTitleEnabled,
@@ -3880,7 +3880,7 @@ async function applySettings(payload: SettingsApplyPayload) {
   const prevChapterTitleBlankMode = chapterTitleBlankMode.value;
   const prevChapterMinCharCount = chapterMinCharCount.value;
   monacoSmoothScrolling.value = payload.monacoSmoothScrolling;
-  disableScrollbarTrackJump.value = payload.disableScrollbarTrackJump;
+  scrollbarTrackBehavior.value = payload.scrollbarTrackBehavior;
   monacoCjkWrapOptimize.value = payload.monacoCjkWrapOptimize;
   webDisplayEnabled.value = payload.webDisplayEnabled;
   mouseWheelScrollSensitivity.value = clampMouseWheelScrollSensitivity(
@@ -4554,7 +4554,7 @@ useAppShellThemeWatch({
           :letter-spacing-px="readerLetterSpacingPx"
           :horizontal-inset-px="readerHorizontalInsetPx"
           :monaco-smooth-scrolling="monacoSmoothScrolling"
-          :disable-scrollbar-track-jump="disableScrollbarTrackJump"
+          :scrollbar-track-behavior="scrollbarTrackBehavior"
           :mouse-wheel-scroll-sensitivity="mouseWheelScrollSensitivity"
           :fast-scroll-sensitivity="fastScrollSensitivity"
           :sticky-chapter-title-enabled="stickyChapterTitleEnabled"
@@ -4846,7 +4846,7 @@ useAppShellThemeWatch({
       :chapter-title-blank-mode="chapterTitleBlankMode"
       :compress-blank-keep-one-blank="compressBlankKeepOneBlank"
       :monaco-smooth-scrolling="monacoSmoothScrolling"
-      :disable-scrollbar-track-jump="disableScrollbarTrackJump"
+      :scrollbar-track-behavior="scrollbarTrackBehavior"
       :monaco-cjk-wrap-optimize="monacoCjkWrapOptimize"
       :web-display-enabled="webDisplayEnabled"
       :mouse-wheel-scroll-sensitivity="mouseWheelScrollSensitivity"

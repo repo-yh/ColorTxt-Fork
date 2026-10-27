@@ -55,7 +55,7 @@ const UI_READER_KEYS = [
   "monacoAdvancedWrapping",
   "monacoCjkWrapOptimize",
   "monacoSmoothScrolling",
-  "disableScrollbarTrackJump",
+  "scrollbarTrackBehavior",
   "mouseWheelScrollSensitivity",
   "fastScrollSensitivity",
   "stickyChapterTitleEnabled",

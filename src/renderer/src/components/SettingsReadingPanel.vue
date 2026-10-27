@@ -36,7 +36,9 @@ import {
   minMarkdownImageHeightPx,
   maxMarkdownImageHeightPx,
   markdownImageHeightPxStep,
+  SCROLLBAR_TRACK_BEHAVIOR_OPTIONS,
   type ChapterTitleBlankMode,
+  type ScrollbarTrackBehavior,
 } from "../constants/appUi";
 import {
   TIMED_SCROLL_RANGE_OPTIONS,
@@ -76,7 +78,7 @@ const props = withDefaults(
     draftLetterSpacingPx: number;
     draftReaderHorizontalInsetPx: number;
     draftMonacoSmoothScrolling: boolean;
-    draftDisableScrollbarTrackJump: boolean;
+    draftScrollbarTrackBehavior: ScrollbarTrackBehavior;
     draftMonacoCjkWrapOptimize: boolean;
     draftWebDisplayEnabled: boolean;
     draftMouseWheelScrollSensitivity: number;
@@ -134,7 +136,7 @@ defineEmits<{
   "update:draftLetterSpacingPx": [v: number];
   "update:draftReaderHorizontalInsetPx": [v: number];
   "update:draftMonacoSmoothScrolling": [v: boolean];
-  "update:draftDisableScrollbarTrackJump": [v: boolean];
+  "update:draftScrollbarTrackBehavior": [v: ScrollbarTrackBehavior];
   "update:draftMonacoCjkWrapOptimize": [v: boolean];
   "update:draftWebDisplayEnabled": [v: boolean];
   "update:draftMouseWheelScrollSensitivity": [v: number];
@@ -523,17 +525,23 @@ const selectListsEmpty: CustomSelectItem[] = [];
       </div>
 
       <div class="settingsRow">
-        <div class="settingsRowMain">
-          <span class="settingsLabel">禁用滚动条轨道</span>
-          <SwitchToggle
-            :model-value="draftDisableScrollbarTrackJump"
-            aria-label="禁用滚动条轨道"
+        <div class="settingsRowMain settingsRowMain--baseline">
+          <span class="settingsLabel">滚动条轨道行为</span>
+          <RadioGroup
+            :model-value="draftScrollbarTrackBehavior"
+            :options="SCROLLBAR_TRACK_BEHAVIOR_OPTIONS"
+            aria-label="滚动条轨道行为"
             @update:model-value="
-              $emit('update:draftDisableScrollbarTrackJump', $event)
+              $emit(
+                'update:draftScrollbarTrackBehavior',
+                $event as ScrollbarTrackBehavior,
+              )
             "
           />
         </div>
-        <p class="settingsHint">点击滚动条轨道不跳转（仍可拖动滑块）。</p>
+        <p class="settingsHint">
+          只读时点击轨道：禁用=不滚动；翻页=上一屏/下一屏；跳转=跳到点击位置。
+        </p>
       </div>
 
       <div class="settingsRow">
