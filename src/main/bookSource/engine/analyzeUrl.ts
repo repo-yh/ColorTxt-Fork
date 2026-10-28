@@ -19,6 +19,7 @@ import { evalJs, evalJsAsync } from "./rhinoRuntime";
 import { legadoJsonValueToString } from "./legadoJavaApi";
 import {
   getWebViewDelayOverrideMs,
+  isJsChallengeHtml,
   runBackstageWebView,
 } from "./backstageWebView";
 import { fetchViaChromiumNet } from "./chromiumNetFetch";
@@ -47,6 +48,8 @@ export type UrlFetchOptions = {
   webJs?: string;
   webView?: boolean;
   webViewDelayTime?: number;
+  /** 自定义扩展：本次请求超时毫秒（webView 总体/页面加载超时，默认 60s） */
+  timeoutMs?: number;
   headers?: Record<string, string>;
   /** Legado UrlOption.type：非空时响应正文改为 hex 字符串 */
   type?: string;
@@ -213,6 +216,7 @@ export function splitUrlFetchOptions(ruleUrl: string): {
     webJs: parsed.webJs ?? parsed.js,
     bodyJs: parsed.bodyJs,
     webViewDelayTime: parsed.webViewDelayTime,
+    timeoutMs: parsed.timeoutMs,
   });
   return { urlPart: ruleUrl.slice(0, m.index), options };
 }
@@ -728,6 +732,32 @@ export class AnalyzeUrl {
     const webPayload = this.buildWebViewRequestPayload();
 
     if (useWebView && (this.method === "GET" || this.method === "POST")) {
+      // 静态快通道：带 CookieJar 凭证（浏览器/验证窗关窗固化）的静态请求多数能直达真页面
+      // （实测秒级，webView 每次开窗+挑战等待 30s+）；仅空响应/挑战壳页（须 JS 跳转）才升级 webView。
+      // 有自定义 webJs 时静态结果不等价（脚本要在 webView 里执行）；POST 表单语义复杂，均维持原路。
+      if (!webJs && this.method === "GET") {
+        try {
+          const fast = await fetchStrResponse(this.url, {
+            source: this.source,
+            headers: { ...this.headerMap, ...this.urlFetchOptions.headers },
+            method: this.method,
+            charset: this.urlFetchOptions.charset,
+            host: this.host,
+            logs: this.host.logs,
+            skipRateLimit: true,
+          });
+          if (fast.body.trim() && !isJsChallengeHtml(fast.body)) {
+            const body = this.urlFetchOptions.type?.trim()
+              ? this.applyTypeHexBody(fast.body)
+              : fast.body;
+            // url 取最终响应 URL（跟随 302 后）：登录检测/loginCheckJs 靠它识别
+            // 「被重定向到登录页」——丢成原始请求 URL 会让登录窗永不弹出
+            return { url: fast.url || this.url, body, headers: fast.headers };
+          }
+        } catch {
+          /* 静态快通道失败：回落 webView（挑战/网络问题由 webView 兜底） */
+        }
+      }
       const webBody = await runBackstageWebView({
         url: this.url,
         // 无自定义 webJs 时取 outerHTML；延时由 backstageWebView 对齐 Legado：1000 + webViewDelayTime
@@ -738,6 +768,8 @@ export class AnalyzeUrl {
           getWebViewDelayOverrideMs() ??
           this.urlFetchOptions.webViewDelayTime ??
           undefined,
+        // 书源可按 URL 配置更长超时（如 Discuz 搜索页慢 + 限流排队）
+        timeoutMs: this.urlFetchOptions.timeoutMs,
         method: webPayload.method,
         postData: webPayload.postData,
         headers: webPayload.headers,
@@ -916,7 +948,10 @@ async function fetchStrResponseInner(
   }
   let requestUrl = resolveGetRequestUrl(url, urlNoQuery, fieldMap, headers, method);
   headers = augmentGorgonHeaders(headers, requestUrl);
-  if (opts.source?.enabledCookieJar) {
+  // 手动 Cookie 模式（cookie 字段非空）：以字段拼头为准（applyManualSourceCookie 已写入 jar，
+  // jar 对手动域冻结）。自动模式不在此拼 jar——静态请求与浏览 tab 共享 session 会话 Cookie，
+  // 由 fetchViaChromiumNet 统一处理（session 优先，无 session Cookie 时按 useCookieJar 兜底）
+  if (opts.source?.cookie?.trim()) {
     const ck = cookieHeaderForUrl(requestUrl);
     if (ck) headers.Cookie = headers.Cookie ? `${headers.Cookie}; ${ck}` : ck;
   }
@@ -958,7 +993,7 @@ async function fetchStrResponseInner(
       body: requestBody,
       charset,
       proxy,
-      useCookieJar: false,
+      useCookieJar: Boolean(opts.source?.enabledCookieJar),
       redirect: opts.redirect,
       timeoutMs: 15_000,
     });

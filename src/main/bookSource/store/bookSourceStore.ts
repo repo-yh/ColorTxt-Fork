@@ -215,27 +215,61 @@ export function importPreview(
   return sources.filter(isTextBookSource).map((source) => {
     const local = getBookSource(source.bookSourceUrl);
     let status: BookSourceImportPreviewItem["status"] = "new";
+    let replaceTargets: BookSourceImportPreviewItem["replaceTargets"];
     if (local) {
       const remoteTime = source.lastUpdateTime ?? 0;
       const localTime = local.lastUpdateTime ?? 0;
       status = remoteTime > localTime ? "update" : "exists";
+    } else {
+      // URL 未命中但同名：判定为换域名/换源，标记同名替换（默认不勾选，由用户确认覆盖）
+      const name = source.bookSourceName.trim();
+      if (name) {
+        const rows = getDb()
+          .prepare(
+            `SELECT book_source_url AS url, book_source_name AS name
+             FROM book_sources WHERE book_source_name = ? AND book_source_url != ?`,
+          )
+          .all(name, source.bookSourceUrl) as Array<{ url: string; name: string }>;
+        if (rows.length) {
+          status = "replace";
+          replaceTargets = rows;
+        }
+      }
     }
-    return { source, status };
+    return { source, status, replaceTargets };
   });
 }
 
 export function importCommit(payload: {
   addUrls: string[];
   updateUrls: string[];
+  replaceUrls?: string[];
   sources: BookSourceRecord[];
-}): { added: number; updated: number } {
+}): { added: number; updated: number; replaced: number } {
   const addSet = new Set(payload.addUrls);
   const updateSet = new Set(payload.updateUrls);
+  const replaceSet = new Set(payload.replaceUrls ?? []);
   let added = 0;
   let updated = 0;
+  let replaced = 0;
   for (const source of payload.sources) {
     if (!isTextBookSource(source)) continue;
-    if (addSet.has(source.bookSourceUrl)) {
+    if (replaceSet.has(source.bookSourceUrl)) {
+      // 同名替换：先删同名旧源（不同 URL），再写入新源
+      const name = source.bookSourceName.trim();
+      if (name) {
+        const olds = getDb()
+          .prepare(
+            `SELECT book_source_url FROM book_sources WHERE book_source_name = ? AND book_source_url != ?`,
+          )
+          .all(name, source.bookSourceUrl) as Array<{ book_source_url: string }>;
+        if (olds.length) {
+          replaced += deleteBookSources(olds.map((r) => r.book_source_url));
+        }
+      }
+      saveBookSource(source);
+      replaced += 1;
+    } else if (addSet.has(source.bookSourceUrl)) {
       saveBookSource(source);
       added += 1;
     } else if (updateSet.has(source.bookSourceUrl)) {
@@ -243,7 +277,7 @@ export function importCommit(payload: {
       updated += 1;
     }
   }
-  return { added, updated };
+  return { added, updated, replaced };
 }
 
 export function getLoginInfo(url: string): Record<string, string> {
@@ -401,4 +435,24 @@ export function saveCookieJar(domain: string, cookies: Record<string, string>): 
        ON CONFLICT(domain) DO UPDATE SET json = excluded.json`,
     )
     .run(domain, JSON.stringify(cookies));
+}
+
+/** 配置了手动 Cookie 的书源（cookie 字段非空），供 cookieManager 判定手动模式 */
+export function listManualCookieSources(): Array<{ url: string; cookie: string }> {
+  const rows = getDb()
+    .prepare(`SELECT json FROM book_sources`)
+    .all() as { json: string }[];
+  const out: Array<{ url: string; cookie: string }> = [];
+  for (const row of rows) {
+    try {
+      const rec = JSON.parse(row.json) as BookSourceRecord;
+      const cookie = rec.cookie?.trim();
+      if (cookie && rec.bookSourceUrl) {
+        out.push({ url: rec.bookSourceUrl, cookie });
+      }
+    } catch {
+      /* ignore invalid row */
+    }
+  }
+  return out;
 }

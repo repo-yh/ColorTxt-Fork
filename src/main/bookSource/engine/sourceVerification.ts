@@ -1,5 +1,12 @@
-import { app, BrowserView, BrowserWindow, clipboard, ipcMain, Menu, session } from "electron";
-import type { WebContents } from "electron";
+import {
+  app,
+  BrowserView,
+  BrowserWindow,
+  clipboard,
+  ipcMain,
+  Menu,
+  type WebContents,
+} from "electron";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import type { BookSourceRecord } from "@shared/bookSource/types";
@@ -17,16 +24,20 @@ import {
   resolveSourceRequestHeaders,
 } from "./sourceRequestHeaders";
 import {
+  applyManualSourceCookie,
   getDomainFromUrl,
   setCookieFromResponse,
   cookieHeaderForUrl,
+  syncSessionCookieToSource,
 } from "./cookieManager";
+import { getBookSourceBrowserSession } from "./chromiumNetFetch";
 import {
-  clearSessionDomainCookies,
-  seedSessionCookies,
+  ensureDomainSessionInit,
+  getSessionCookieHeader,
 } from "./backstageWebView";
 import {
   clearLoginSessionAck,
+  saveBookSource,
   setLoginSessionAck,
 } from "../store/bookSourceStore";
 import { WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT } from "../../windowBounds";
@@ -37,8 +48,34 @@ const FOOTER_HEIGHT = FOOTER_PADDING * 2 + 32;
 const VERIFICATION_ACTION_CHANNEL = "bookSource:verificationAction";
 /** 登录/验证底栏「更多」：主进程弹出原生菜单（避免 HTML 菜单被内容 BrowserView 盖住） */
 const VERIFICATION_TOOL_CHANNEL = "bookSource:verificationTool";
-/** 登录/验证弹窗专用内存 partition：与 defaultSession 隔离；缓存关闭——历史缓存页会伪装「已登录」 */
-const VERIFICATION_PARTITION = "colortxt-bs-verification";
+
+/**
+ * 手动 Cookie 同步：读登录/验证窗 session 里该域的全部 Cookie（含 HttpOnly）
+ * 拼成 k=v; k=v 手动格式。验证窗与内置浏览器/引擎隐藏 tab 共享 persist 分区——
+ * 登录 Cookie 落盘即全链路生效（浏览器/后台 webView 立即读到，静态链路经固化同步）。
+ */
+export async function readVerificationCookieHeader(url: string): Promise<string> {
+  try {
+    const ses = getBookSourceBrowserSession().ses;
+    return await getSessionCookieHeader(ses, url);
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * 关窗统一固化验证窗 session Cookie：合并进 CookieJar 并覆盖同域书源 cookie 字段。
+ * 验证窗与内置浏览器/引擎隐藏 tab 共享 persist 分区（磁盘持久），但 CookieJar 与
+ * 书源字段需显式固化——点「完成」路径已同步，此处幂等兜底（直接关窗/取消验证路径）。
+ */
+function persistVerificationSessionCookie(pageUrl: string): void {
+  if (!/^https?:\/\//i.test(pageUrl)) return;
+  void readVerificationCookieHeader(pageUrl)
+    .then((header) => {
+      if (header.trim()) syncSessionCookieToSource(pageUrl, header);
+    })
+    .catch(() => {});
+}
 
 type VerificationToolbarAction = (confirmed: boolean) => void;
 /** 底栏「更多」点击 → 主进程 Menu.popup */
@@ -77,6 +114,8 @@ type ActiveVerification =
       kind: "browser";
       win: BrowserWindow;
       toolbarIds: number[];
+      /** 初始页 URL：关窗固化 Cookie 用（close 钩子被移除的程序关窗路径也要能拿到） */
+      pageUrl: string;
     }
   | {
       kind: "captcha";
@@ -266,6 +305,8 @@ function closeVerificationWindow(sourceKey: string): void {
     }
     if (!existing.win.isDestroyed()) {
       existing.win.removeAllListeners("close");
+      // close 钩子已被移除，这里补固化（取消验证 / 打开新验证窗关旧窗路径）
+      persistVerificationSessionCookie(existing.pageUrl);
       existing.win.close();
     }
     return;
@@ -295,9 +336,12 @@ async function persistSessionCookies(
   const cookies = await webContents.session.cookies.get({});
   for (const c of cookies) {
     const domain = c.domain?.replace(/^\./, "") ?? getDomainFromUrl(pageUrl);
+    // host-only Cookie（domain 为空）不能拼 Domain= 属性：空值会让 tough-cookie
+    // 拒绝整条 Cookie（Domain 与主机不匹配），登录会话就此丢失
+    const domainAttr = c.domain ? `; Domain=${c.domain}` : "";
     setCookieFromResponse(
       `https://${domain}/`,
-      `${c.name}=${c.value}; Domain=${c.domain}; Path=${c.path ?? "/"}`,
+      `${c.name}=${c.value}${domainAttr}; Path=${c.path ?? "/"}`,
     );
   }
   // Chromium Cookie 异步落盘（~30s 周期）；不 flush 的话 dev 重启/崩溃会丢刚登录的会话
@@ -347,6 +391,29 @@ function syncLoginSessionAckAfterVerification(
   else clearLoginSessionAck(sourceKey);
 }
 
+/**
+ * 验证窗确认后的 Cookie 统一同步（用户拍板：两模式一致，区别仅是自动模式字段由空变非空）：
+ * 以验证窗 session 的该域最新 Cookie 覆盖书源 cookie 字段并写入 CookieJar。
+ * 自动模式确认后收敛为固定 Cookie（不再被游客态 Set-Cookie 冲掉）；
+ * 手动模式 jar 冻结由 force 写入绕过，字段与 jar 一并更新。
+ * 必须在 settlePending（resolve）之前完成——确认后脚本/调用方会立即带新 Cookie 重新请求。
+ */
+async function syncSourceCookieAfterVerification(
+  source: BookSourceRecord | undefined,
+  confirmed: boolean,
+): Promise<void> {
+  if (!confirmed || !source) return;
+  try {
+    const synced = await readVerificationCookieHeader(source.bookSourceUrl);
+    if (!synced || synced === source.cookie?.trim()) return;
+    source.cookie = synced;
+    saveBookSource(source);
+    applyManualSourceCookie(source.bookSourceUrl, synced);
+  } catch {
+    /* 同步失败不阻断验证流程 */
+  }
+}
+
 async function finishVerification(
   content: WebContents,
   sourceKey: string,
@@ -358,6 +425,7 @@ async function finishVerification(
 ): Promise<void> {
   if (content.isDestroyed()) {
     syncLoginSessionAckAfterVerification(sourceKey, confirmed);
+    await syncSourceCookieAfterVerification(source, confirmed);
     settlePending(sourceKey, "", confirmed);
     return;
   }
@@ -370,9 +438,11 @@ async function finishVerification(
       host,
     );
     syncLoginSessionAckAfterVerification(sourceKey, confirmed);
+    await syncSourceCookieAfterVerification(source, confirmed);
     settlePending(sourceKey, body, confirmed);
   } catch {
     syncLoginSessionAckAfterVerification(sourceKey, confirmed);
+    await syncSourceCookieAfterVerification(source, confirmed);
     settlePending(sourceKey, "", confirmed);
   }
 }
@@ -446,8 +516,8 @@ async function openVerificationWindowAsync(
   host?: JsExtensionHost,
 ): Promise<void> {
   ensureVerificationIpc();
-  // 先以关缓存配置注册 partition（下方 new BrowserView 的 webPreferences.partition 复用已注册实例）
-  session.fromPartition(VERIFICATION_PARTITION, { cache: false });
+  // 验证窗与内置浏览器/引擎隐藏 tab 共享 persist 分区（getBookSourceBrowserSession 创建）
+  const sesEntry = getBookSourceBrowserSession();
 
   const pageUrl = parseVerificationUrl(url);
   host?.log(`[验证] 打开浏览器: ${pageUrl}`);
@@ -485,7 +555,7 @@ async function openVerificationWindowAsync(
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
-      partition: VERIFICATION_PARTITION,
+      partition: sesEntry.partition,
     },
   });
 
@@ -571,6 +641,7 @@ async function openVerificationWindowAsync(
     kind: "browser",
     win,
     toolbarIds: [footer.webContents.id],
+    pageUrl,
   });
   openingVerifications.delete(sourceKey);
 
@@ -605,19 +676,23 @@ async function openVerificationWindowAsync(
   win.on("resize", () => layoutVerificationViews(win, footer, content));
   win.on("close", () => {
     clearToolbarHandlers();
+    // 直接关窗（未点「完成」）也固化 Cookie：凭证在导航过程中就产生了，丢失要重走挑战
+    persistVerificationSessionCookie(pageUrl);
     if (!finished) safeFinish(false);
     else activeWindows.delete(sourceKey);
   });
 
   // 弹窗以 CookieJar 为准（对齐 backstageWebView/bookSourceBrowser）：
-  // 打开前清该域残留再种 jar 登录态——否则 session 旧 Cookie/缓存页让弹窗显示与 jar 不符的登录态
+  // 进程级每（分区,域）仅首次「清域+种 jar 终态快照」，之后共享分区零 seed；
+  // 登录后 Cookie 直接落共享分区，浏览器/引擎隐藏 tab 立即读到
   if (/^https?:\/\//i.test(pageUrl)) {
     try {
-      await clearSessionDomainCookies(content.webContents, pageUrl);
-      const cookieHeader = cookieHeaderForUrl(pageUrl);
-      if (cookieHeader) {
-        await seedSessionCookies(content.webContents, pageUrl, cookieHeader);
-      }
+      await ensureDomainSessionInit(
+        sesEntry.partition,
+        content.webContents,
+        pageUrl,
+        cookieHeaderForUrl(pageUrl),
+      );
     } catch {
       /* 种入失败不阻断打开 */
     }

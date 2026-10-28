@@ -76,9 +76,12 @@ import {
   setWebViewDelayOverrideMs,
 } from "./engine/backstageWebView";
 import {
+  applyManualSourceCookie,
   getDomainFromUrl,
+  isManualCookieMode,
   removeDomainCookies,
 } from "./engine/cookieManager";
+import { readVerificationCookieHeader } from "./engine/sourceVerification";
 import {
   appendBookSourceErrorLog,
   summarizeBookSourceError,
@@ -134,10 +137,24 @@ export function registerBookSourceIpcHandlers(): void {
     });
   });
 
-  ipcMain.handle(BOOK_SOURCE_IPC.save, (_e, source: unknown) => {
+  ipcMain.handle(BOOK_SOURCE_IPC.save, async (_e, source: unknown) => {
     try {
       const s = source as BookSourceRecord;
+      // 点确定时以登录/验证窗 session 的最新登录态覆盖（用户拍板：保存自愈对所有有
+      // loginUrl 的书源生效，不再要求 cookie 字段已非空；验证窗内存 partition 未
+      // 登录过（应用重启后）则为空，保持草稿原值）
+      if (s.loginUrl?.trim()) {
+        const synced = await readVerificationCookieHeader(s.bookSourceUrl);
+        if (synced) s.cookie = synced;
+      }
       saveBookSource(s);
+      // 仅手动 Cookie 模式域需要写入/清空 CookieJar：cookie 空且原为自动模式的
+      // 书源不动 jar，否则 removeDomainCookies 会误删自动登录积累的登录态
+      if (s.cookie?.trim()) {
+        applyManualSourceCookie(s.bookSourceUrl, s.cookie);
+      } else if (isManualCookieMode(s.bookSourceUrl)) {
+        applyManualSourceCookie(s.bookSourceUrl, "");
+      }
       return { ok: true };
     } catch (e) {
       return {
@@ -170,6 +187,22 @@ export function registerBookSourceIpcHandlers(): void {
     (_e, payload: unknown) => {
       const p = payload as BookSourceImportCommitPayload;
       const r = importCommit(p);
+      // 仅对实际写入的源同步手动 Cookie（未勾选导入的不动 CookieJar）
+      const addSet = new Set(p.addUrls ?? []);
+      const updateSet = new Set(p.updateUrls ?? []);
+      const replaceSet = new Set(p.replaceUrls ?? []);
+      for (const s of p.sources ?? []) {
+        const url = s?.bookSourceUrl;
+        if (!url) continue;
+        if (addSet.has(url) || updateSet.has(url) || replaceSet.has(url)) {
+          // 与 save handler 同规则：cookie 空且原为自动模式的书源不动 jar
+          if (s.cookie?.trim()) {
+            applyManualSourceCookie(url, s.cookie);
+          } else if (isManualCookieMode(url)) {
+            applyManualSourceCookie(url, "");
+          }
+        }
+      }
       return { ok: true, ...r };
     },
   );
@@ -608,7 +641,14 @@ export function registerBookSourceIpcHandlers(): void {
             return { coverUrl, coverSourceUrl: sourceUrl, logs };
           }
         }
+        // searchUpdate 源（帖子型书源）详情页无封面图，且详情请求要过 _dsign 挑战
+        // （webView 30s+，还与检查更新共用引擎 tab 队列互相阻塞）：无直链直接放弃，
+        // 不再回落 getBookInfo 逐本拉详情页
+        const isSearchUpdateCoverSource = Boolean(
+          (source as { searchUpdate?: unknown }).searchUpdate,
+        );
         if (
+          !isSearchUpdateCoverSource &&
           typeof p.bookUrl === "string" &&
           typeof p.name === "string" &&
           typeof p.author === "string"

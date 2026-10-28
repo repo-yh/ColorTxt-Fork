@@ -14,6 +14,7 @@ import { searchBookToBook } from "@shared/bookSource/bookModel";
 import { appPrompt } from "../../services/appDialog";
 import { appLoading } from "../../services/appLoading";
 import { ipcPlain } from "../ipcPlain";
+import { healFindBookBookshelfSources } from "./useFindBookBookshelf";
 
 const NETWORK_IMPORT_MAX_RETRIES = 5;
 const NETWORK_IMPORT_RETRY_DELAY_MS = 1000;
@@ -66,11 +67,17 @@ export function useBookSourceApi() {
   }
 
   async function saveSource(source: BookSourceRecord) {
-    return api.bookSourceSave(ipcPlain(source));
+    const r = await api.bookSourceSave(ipcPlain(source));
+    // 书源编辑可能改 bookSourceUrl（换域名/换源）：触发书架按名自愈
+    void healFindBookBookshelfSources();
+    return r;
   }
 
   async function deleteSources(urls: string[]) {
-    return api.bookSourceDelete(urls);
+    const r = await api.bookSourceDelete(urls);
+    // 删除书源后书架条目 origin 可能悬空（换源场景删旧留新）：触发书架按名自愈
+    void healFindBookBookshelfSources();
+    return r;
   }
 
   async function toggleSource(url: string, enabled: boolean) {
@@ -197,9 +204,13 @@ export function useBookSourceApi() {
   async function commitImport(payload: {
     addUrls: string[];
     updateUrls: string[];
+    replaceUrls?: string[];
     sources: BookSourceRecord[];
   }) {
-    return api.bookSourceImportCommit(ipcPlain(payload));
+    const r = await api.bookSourceImportCommit(ipcPlain(payload));
+    // 导入可能替换/新增书源：触发书架按名自愈
+    void healFindBookBookshelfSources();
+    return r;
   }
 
   async function reorderSource(url: string, position: "top" | "bottom") {

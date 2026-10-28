@@ -30,6 +30,7 @@ import { appToast } from "../../services/appToast";
 import { searchBookToBook } from "@shared/bookSource/bookModel";
 import { ipcPlain } from "../ipcPlain";
 import { useFindBookBookshelf } from "../composables/useFindBookBookshelf";
+import { useBookshelfUpdate } from "../composables/useBookshelfUpdate";
 import { useFindBookSettings } from "../composables/useFindBookSettings";
 import { useChapterCacheMarks } from "../composables/useChapterCacheMarks";
 import { confirmClearBookChapterCache } from "../services/clearBookChapterCache";
@@ -556,6 +557,34 @@ async function onRefresh() {
   coverFailed.value = false;
   refreshing.value = true;
   try {
+    // searchUpdate 源：帖子页解析不出「搜索结果目录」，普通 load 必报「未解析到章节」。
+    // 书架内书籍：刷新 = 书架同款「搜索更新」（书名搜索当目录 + 发帖时间基线比对）；
+    // 未加入书架（搜索结果点开）：重拉单帖详情。
+    if (await isSearchUpdateSource(item.origin?.trim())) {
+      const shelfApi = useFindBookBookshelf();
+      const originKey = item.origin?.trim() ?? "";
+      const shelfBook = shelfApi.findBookshelfBook(
+        item.bookUrl?.trim() ?? "",
+        originKey,
+      );
+      if (!shelfBook) {
+        await loadSearchUpdatePostDetail(item);
+        return;
+      }
+      const { updateBook } = useBookshelfUpdate(shelfApi.applyBooks);
+      const ok = await updateBook(shelfBook);
+      // manual:// 书首检后 bookUrl 会被回填成真实帖子 URL，按键找不到了按 书名+书源 兜底
+      const fresh =
+        shelfApi.findBookshelfBook(shelfBook.bookUrl, shelfBook.origin) ??
+        shelfApi.books.value.find(
+          (b) => b.origin === shelfBook.origin && b.name === shelfBook.name,
+        );
+      await loadDetail(fresh ?? item);
+      if (!ok) {
+        appToast("检查更新失败，详见书架更新日志", { kind: "warning" });
+      }
+      return;
+    }
     await load(item);
   } finally {
     refreshing.value = false;

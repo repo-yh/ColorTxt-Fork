@@ -7,15 +7,15 @@ import {
   type BookSourceBrowserDownloadEvent,
 } from "@shared/bookSource/ipc";
 import type { SessionEntry } from "./chromiumNetFetch";
-import { getBookSourceNetSession } from "./chromiumNetFetch";
-import { cookieHeaderForUrl } from "./cookieManager";
+import { getBookSourceBrowserSession } from "./chromiumNetFetch";
+import {
+  ensureDomainSessionInit,
+  getSessionCookieHeader,
+  persistWebViewCookies,
+} from "./backstageWebView";
+import { cookieHeaderForUrl, syncSessionCookieToSource } from "./cookieManager";
 import { getWebViewUserAgent } from "./bookSourceUserAgent";
 import { getBookSourceDispatcher } from "./httpProxy";
-import {
-  clearSessionDomainCookies,
-  persistWebViewCookies,
-  seedSessionCookies,
-} from "./backstageWebView";
 
 let browserWin: BrowserWindow | null = null;
 let downloadHooked = false;
@@ -24,11 +24,27 @@ let lastDownloadInterceptAt = 0;
 /** 当前浏览会话的书架书籍名（打开浏览器时传入；下载事件随行，落地按书名匹配替换列表条目） */
 let currentBookName = "";
 
+/** 窗口标记：退出路径识别并真正销毁隐藏保留的浏览器窗口（隐藏窗口会让 window-all-closed 不触发） */
+const BROWSER_WINDOW_FLAG = "__colortxtBookSourceBrowser";
+
+export function isBookSourceBrowserWindow(win: BrowserWindow): boolean {
+  return (
+    (win as unknown as Record<string, unknown>)[BROWSER_WINDOW_FLAG] === true
+  );
+}
+
+/** 退出/末窗关闭时真正销毁（点 X 只是 hide 保留会话；destroy 不触发 close 事件，不误回 hide） */
+export function destroyBookSourceBrowserWindow(): void {
+  if (browserWin && !browserWin.isDestroyed()) browserWin.destroy();
+  browserWin = null;
+}
+
 /**
  * 书源浏览器窗口（应用内）：
- * - 挂书源网络分区 session（走找书代理，防直连 RST；HTTP 磁盘缓存已关闭）
- * - 打开/导航前种入 CookieJar 登录态（与引擎搜索同源 Cookie），导航/关窗时回写 CookieJar
- * - session 级 will-download 拦截附件下载（取消浏览器下载，URL 转交找书下载模块）
+ * - 挂浏览器专用网络分区 session（走找书代理，防直连 RST；启用 HTTP 磁盘缓存，慢站二次开窗免回源）
+ * - 首次建分区时清域 Cookie 并种入 CookieJar 登录态，之后每次导航仅用 jar 覆盖登录字段，
+ *   不再清空——保住窗口内产生的 _dsign 挑战凭证等非 jar Cookie，避免每次开窗重走挑战
+ * - 导航/关窗时回写 session Cookie 到 CookieJar；session 级 will-download 拦截附件下载
  * 单例窗口；再次打开时同窗口导航到新 URL。
  */
 export function openBookSourceBrowserWindow(
@@ -41,7 +57,7 @@ export function openBookSourceBrowserWindow(
     return { ok: false, message: "仅支持 http(s) 链接" };
   }
   currentBookName = bookName?.trim() ?? "";
-  const sesEntry = getBookSourceNetSession();
+  const sesEntry = getBookSourceBrowserSession();
   hookDownload(sesEntry);
 
   const existing = browserWin && !browserWin.isDestroyed() ? browserWin : null;
@@ -75,15 +91,38 @@ function createWindow(
     },
   });
   browserWin = win;
+  (win as unknown as Record<string, unknown>)[BROWSER_WINDOW_FLAG] = true;
   win.removeMenu();
   win.setMenuBarVisibility(false);
   win.webContents.setUserAgent(getWebViewUserAgent());
 
-  // 关窗/导航时把 session Cookie 回写 CookieJar（窗口内登录对引擎静态请求同样生效）
-  win.on("close", () => {
+  // F12 / Ctrl+Shift+I 切换 DevTools（排查网络请求/Cookie）
+  win.webContents.on("before-input-event", (event, input) => {
+    const isToggleDevToolsKey =
+      input.type === "keyDown" &&
+      (input.key === "F12" ||
+        ((input.control || input.meta) &&
+          input.shift &&
+          input.key.toLowerCase() === "i"));
+    if (!isToggleDevToolsKey) return;
+    event.preventDefault();
+    win.webContents.toggleDevTools();
+  });
+
+  // 点 X 不销毁：hide 保留窗口会话（连接/挑战凭证/HTTP 缓存全热），下次点链接 show 后直接导航。
+  // 隐藏前把 session Cookie 固化进 CookieJar 与同域书源 cookie 字段——凭证不随「关窗」丢失，
+  // 引擎静态请求与后台 webView 免重走 _dsign 挑战（帖子页服务端秒级响应，重挑战再卡一轮）
+  win.on("close", (e) => {
+    e.preventDefault();
+    win.hide();
     const url = win.webContents.getURL();
     if (/^https?:\/\//i.test(url)) {
       void persistWebViewCookies(win.webContents, url).catch(() => {});
+      void getSessionCookieHeader(sesEntry.ses, url)
+        .then((header) => {
+          if (header.trim()) syncSessionCookieToSource(url, header);
+        })
+        .catch(() => {});
     }
   });
   win.on("closed", () => {
@@ -125,13 +164,15 @@ async function navigate(
     /* 代理就绪失败也尝试加载 */
   }
   if (win.isDestroyed()) return;
-  // CookieJar → session：先清该域残留再种入（对齐 backstageWebView，保证登录态确定性）
+  // CookieJar → session：进程级每（分区,域）仅首次「清域+种 jar 终态快照」，
+  // 之后分区为唯一权威、零 seed——日常覆盖会把浏览器登录的活会话冲成游客态
   try {
-    await clearSessionDomainCookies(win.webContents, pageUrl);
-    const cookieHeader = cookieHeaderForUrl(pageUrl);
-    if (cookieHeader) {
-      await seedSessionCookies(win.webContents, pageUrl, cookieHeader);
-    }
+    await ensureDomainSessionInit(
+      sesEntry.partition,
+      win.webContents,
+      pageUrl,
+      cookieHeaderForUrl(pageUrl),
+    );
   } catch {
     /* 种入失败不阻断打开 */
   }

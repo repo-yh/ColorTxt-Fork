@@ -29,6 +29,11 @@ export const BOOK_SOURCE_BASIC_FIELDS: BookSourceFieldDef[] = [
   { key: "coverDecodeJs", label: "封面解密", multiline: true },
   { key: "bookUrlPattern", label: "书籍 URL 正则" },
   { key: "header", label: "请求头", multiline: true },
+  {
+    key: "cookie",
+    label: "登录 Cookie",
+    multiline: true,
+  },
   { key: "variableComment", label: "变量说明", multiline: true },
   { key: "concurrentRate", label: "并发率" },
   { key: "jsLib", label: "jsLib", multiline: true },

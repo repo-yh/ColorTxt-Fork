@@ -1,7 +1,11 @@
 import { createHash } from "node:crypto";
 import { session, type Session } from "electron";
 import { decodeHttpResponseBody } from "../../detectTextEncoding";
-import { cookieHeaderForUrl, setCookieFromResponse } from "./cookieManager";
+import {
+  cookieHeaderForUrl,
+  getCookieStoreDomain,
+  setCookieFromResponse,
+} from "./cookieManager";
 import {
   DEFAULT_BOOK_SOURCE_USER_AGENT,
   getWebViewUserAgent,
@@ -29,10 +33,21 @@ export type SessionEntry = {
 };
 
 const sessionByProxyKey = new Map<string, SessionEntry>();
+const browserSessionByProxyKey = new Map<string, SessionEntry>();
 
 export function proxyCacheKey(proxy?: string | null): string {
   const text = String(proxy ?? "").trim() || getDefaultBookSourceProxy() || "";
   return text || "__direct__";
+}
+
+/** 按代理 key 解析 Electron proxyRules；key 为 __direct__ 时直连 */
+function resolveProxyRules(
+  key: string,
+): { proxyRules: string } | { mode: "direct" } {
+  const parsed = parseLegadoProxy(key === "__direct__" ? "" : key);
+  return parsed
+    ? { proxyRules: parsed.uri }
+    : { mode: "direct" as const };
 }
 
 /**
@@ -55,15 +70,36 @@ export function getBookSourceNetSession(proxy?: string | null): SessionEntry {
     callback(0);
   });
 
-  const parsed = parseLegadoProxy(
-    key === "__direct__" ? "" : key,
-  );
-  const proxyReady = parsed
-    ? ses.setProxy({ proxyRules: parsed.uri }).then(() => undefined)
-    : ses.setProxy({ mode: "direct" }).then(() => undefined);
-
+  const proxyReady = ses.setProxy(resolveProxyRules(key)).then(() => undefined);
   const entry: SessionEntry = { ses, proxyReady, partition };
   sessionByProxyKey.set(key, entry);
+  return entry;
+}
+
+/**
+ * 书源浏览器窗口专用 session：同按代理分区，但启用 HTTP 磁盘缓存——
+ * 慢站动态主文档（PHP 生成 10s+）命中缓存后不再重复回源，css/js 同样受益；
+ * 与引擎请求 session（cache:false）分离，互不污染新鲜度语义。
+ */
+export function getBookSourceBrowserSession(
+  proxy?: string | null,
+): SessionEntry {
+  const key = proxyCacheKey(proxy);
+  const existing = browserSessionByProxyKey.get(key);
+  if (existing) return existing;
+
+  const partition = `persist:colortxt-bs-browser-v1-${createHash("md5")
+    .update(key)
+    .digest("hex")
+    .slice(0, 12)}`;
+  const ses = session.fromPartition(partition);
+  ses.setCertificateVerifyProc((_request, callback) => {
+    callback(0);
+  });
+
+  const proxyReady = ses.setProxy(resolveProxyRules(key)).then(() => undefined);
+  const entry: SessionEntry = { ses, proxyReady, partition };
+  browserSessionByProxyKey.set(key, entry);
   return entry;
 }
 
@@ -73,6 +109,27 @@ function collectResponseHeaders(res: Response): Record<string, string> {
     outHeaders[k] = v;
   });
   return outHeaders;
+}
+
+/** 读 browser-v1 session（浏览 tab/引擎 tab 共享分区）里该可注册域的全部 Cookie 拼成 k=v; k=v 头 */
+async function browserSessionCookieHeader(
+  proxy: string | null | undefined,
+  url: string,
+): Promise<string> {
+  try {
+    const { ses } = getBookSourceBrowserSession(proxy);
+    const storeDomain = getCookieStoreDomain(url);
+    const cookies = await ses.cookies.get({});
+    const pairs: string[] = [];
+    for (const c of cookies) {
+      const d = (c.domain ?? "").replace(/^\./, "");
+      if (d !== storeDomain && !d.endsWith(`.${storeDomain}`)) continue;
+      pairs.push(`${c.name}=${c.value}`);
+    }
+    return pairs.join("; ");
+  } catch {
+    return "";
+  }
 }
 
 /**
@@ -191,17 +248,24 @@ export async function fetchViaChromiumNet(opts: {
   if (!headers["User-Agent"] && !headers["user-agent"]) {
     headers["User-Agent"] = getWebViewUserAgent() || DEFAULT_BOOK_SOURCE_USER_AGENT;
   }
-  if (
-    opts.useCookieJar &&
-    !headers.Cookie?.trim() &&
-    !headers.cookie?.trim()
-  ) {
+  // 会话共享（用户拍板）：静态请求与浏览 tab/引擎 tab 共用 browser-v1 session——
+  // session 当前会话 Cookie 始终合并进请求（拼在尾部，同名以 session 新值为准），
+  // 书源自带/手动模式 Cookie 头保留在前补缺失名字；
+  // session 无该域 Cookie 时退回 CookieJar（Legado enabledCookieJar 语义兜底）
+  const sesCk = await browserSessionCookieHeader(opts.proxy, opts.url);
+  if (sesCk) {
+    headers.Cookie = headers.Cookie?.trim()
+      ? `${headers.Cookie}; ${sesCk}`
+      : sesCk;
+  } else if (opts.useCookieJar && !headers.Cookie?.trim() && !headers.cookie?.trim()) {
     const ck = cookieHeaderForUrl(opts.url);
     if (ck) headers.Cookie = ck;
   }
 
+  // Chromium session（共享会话）优先；undici 兜底（Cookie 头已拼好，会话不中断）
   try {
-    return await fetchViaUndici({
+    if (opts.signal?.aborted) throw new Error("请求已取消");
+    return await fetchViaChromiumSession({
       url: opts.url,
       method,
       headers,
@@ -212,10 +276,10 @@ export async function fetchViaChromiumNet(opts: {
       redirect: opts.redirect,
       signal: opts.signal,
     });
-  } catch (undiciErr) {
-    if (opts.signal?.aborted) throw undiciErr;
+  } catch (sessionErr) {
+    if (opts.signal?.aborted) throw sessionErr;
     try {
-      return await fetchViaChromiumSession({
+      return await fetchViaUndici({
         url: opts.url,
         method,
         headers,
@@ -227,7 +291,7 @@ export async function fetchViaChromiumNet(opts: {
         signal: opts.signal,
       });
     } catch {
-      throw undiciErr;
+      throw sessionErr;
     }
   }
 }
@@ -252,7 +316,7 @@ function combineAbortSignals(
   return ac.signal;
 }
 
-/** Electron session.fetch：浏览器 TLS；关闭磁盘缓存 */
+/** Electron session.fetch：浏览器 TLS；no-store 防旧缓存；credentials include 携带共享会话 Cookie */
 async function fetchViaChromiumSession(opts: {
   url: string;
   method: string;
@@ -274,7 +338,7 @@ async function fetchViaChromiumSession(opts: {
       opts.signal,
     ),
     referrerPolicy: "unsafe-url",
-    credentials: "omit",
+    credentials: "include",
     cache: "no-store",
   };
   if (method !== "GET" && method !== "HEAD" && opts.body != null) {
@@ -287,7 +351,8 @@ async function fetchViaChromiumSession(opts: {
     ) as BodyInit;
   }
 
-  const { ses, proxyReady } = getBookSourceNetSession(opts.proxy);
+  // 与浏览 tab/引擎 tab 同一 browser-v1 分区：登录态、_dsign 挑战凭证实时共享
+  const { ses, proxyReady } = getBookSourceBrowserSession(opts.proxy);
   await proxyReady;
   const res = await ses.fetch(opts.url, init);
   return decodeFetchResult(opts.url, res, opts.charset);

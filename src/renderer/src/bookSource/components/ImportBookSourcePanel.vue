@@ -72,7 +72,9 @@ const listEmptyText = computed(() =>
 function defaultSelectedIndices(items: BookSourceImportPreviewItem[]): Set<number> {
   return new Set(
     items
-      .map((item, i) => (item.status === "new" || item.status === "update" ? i : -1))
+      .map((item, i) =>
+        item.status === "new" || item.status === "update" ? i : -1,
+      )
       .filter((i) => i >= 0),
   );
 }
@@ -112,7 +114,29 @@ watch(
 function statusLabel(status: BookSourceImportPreviewItem["status"]) {
   if (status === "new") return "新增";
   if (status === "update") return "更新";
+  if (status === "replace") return "同名替换";
   return "已有";
+}
+
+function replaceTargetHosts(item: BookSourceImportPreviewItem): string {
+  return (
+    item.replaceTargets
+      ?.map((t) => {
+        try {
+          return new URL(t.url).host;
+        } catch {
+          return t.url;
+        }
+      })
+      .join("、") ?? ""
+  );
+}
+
+function replaceTargetTitle(item: BookSourceImportPreviewItem): string {
+  if (!item.replaceTargets?.length) return "";
+  return `将删除并替换同名旧源：\n${item.replaceTargets
+    .map((t) => `${t.name}（${t.url}）`)
+    .join("\n")}`;
 }
 
 /** 与资源管理器一致：单击单选、Ctrl 多选、Shift 连选 */
@@ -217,6 +241,15 @@ function selectUpdate() {
   applySelection(next, next.size > 0 ? Math.max(...next) : null);
 }
 
+function selectReplace() {
+  const next = new Set(
+    items.value
+      .map((item, i) => (item.status === "replace" ? i : -1))
+      .filter((i) => i >= 0),
+  );
+  applySelection(next, next.size > 0 ? Math.max(...next) : null);
+}
+
 function onEdit(idx: number) {
   editIndex.value = idx;
   showEdit.value = true;
@@ -237,6 +270,7 @@ async function onConfirm() {
   if (!indices.length) return;
   const addUrls: string[] = [];
   const updateUrls: string[] = [];
+  const replaceUrls: string[] = [];
   const sources: BookSourceImportPreviewItem["source"][] = [];
   for (const i of indices) {
     const item = items.value[i];
@@ -244,8 +278,9 @@ async function onConfirm() {
     sources.push(item.source);
     if (item.status === "new") addUrls.push(item.source.bookSourceUrl);
     else if (item.status === "update") updateUrls.push(item.source.bookSourceUrl);
+    else if (item.status === "replace") replaceUrls.push(item.source.bookSourceUrl);
   }
-  await commitImport({ addUrls, updateUrls, sources });
+  await commitImport({ addUrls, updateUrls, replaceUrls, sources });
   modelValue.value = false;
   emit("done");
 }
@@ -302,7 +337,16 @@ function onCancel() {
               :aria-label="`选择 ${entry.item.source.bookSourceName}`"
             />
             <div class="bsRowMain">
-              <div class="bsRowName">{{ entry.item.source.bookSourceName }}</div>
+              <div class="bsRowName" :title="replaceTargetTitle(entry.item)">
+                {{ entry.item.source.bookSourceName }}
+              </div>
+              <div
+                v-if="entry.item.replaceTargets?.length"
+                class="bsRowSub"
+                :title="replaceTargetTitle(entry.item)"
+              >
+                将替换同名旧源：{{ replaceTargetHosts(entry.item) }}
+              </div>
             </div>
             <div class="bsRowActions" @click.stop>
               <span class="impTag" :data-status="entry.item.status">
@@ -339,6 +383,9 @@ function onCancel() {
           </button>
           <button type="button" class="btn" size="large" @click="selectUpdate">
             选中更新
+          </button>
+          <button type="button" class="btn" size="large" @click="selectReplace">
+            选中同名替换
           </button>
           <button type="button" class="btn" size="large" @click="onCancel">
             取消
@@ -456,6 +503,13 @@ function onCancel() {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.bsRowSub {
+  font-size: 11px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .impTag {
   font-size: 11px;
   padding: 2px 8px;
@@ -471,6 +525,10 @@ function onCancel() {
 .impTag[data-status="update"] {
   background: color-mix(in srgb, #ef6c00 18%, transparent);
   color: #ef6c00;
+}
+.impTag[data-status="replace"] {
+  background: color-mix(in srgb, #c62828 18%, transparent);
+  color: #c62828;
 }
 .bsFooter {
   display: flex;

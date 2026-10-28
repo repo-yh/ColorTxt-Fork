@@ -223,6 +223,8 @@ export type BookSourceResolveCoverResult = {
 export type BookSourceImportCommitPayload = {
   addUrls: string[];
   updateUrls: string[];
+  /** 同名替换：提交前删除同名旧源（换域名导入覆盖） */
+  replaceUrls?: string[];
   sources: BookSourceRecord[];
 };
 
@@ -237,7 +239,7 @@ export type BookSourceIpcApi = {
   ) => Promise<BookSourceImportPreviewItem[]>;
   bookSourceImportCommit: (
     payload: BookSourceImportCommitPayload,
-  ) => Promise<{ ok: boolean; added: number; updated: number }>;
+  ) => Promise<{ ok: boolean; added: number; updated: number; replaced: number }>;
   bookSourceFetchUrl: (
     url: string,
     options?: { requestId?: number },

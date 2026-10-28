@@ -4,7 +4,7 @@ import {
   headersToLoadUrlExtraHeaders,
   resolveSourceRequestHeaders,
 } from "./sourceRequestHeaders";
-import { getBookSourceNetSession } from "./chromiumNetFetch";
+import { getBookSourceBrowserSession } from "./chromiumNetFetch";
 import { getWebViewUserAgent } from "./bookSourceUserAgent";
 import {
   cookieHeaderForUrl,
@@ -125,6 +125,22 @@ export async function persistWebViewCookies(
   await webContents.session.cookies.flushStore().catch(() => {});
 }
 
+/** 读 session 里该可注册域的全部 Cookie 拼成 k=v; k=v 头（含 HttpOnly；session 对象独立于窗口，窗口销毁后仍可读） */
+export async function getSessionCookieHeader(
+  ses: Electron.Session,
+  pageUrl: string,
+): Promise<string> {
+  const storeDomain = getCookieStoreDomain(pageUrl);
+  const cookies = await ses.cookies.get({});
+  const pairs: string[] = [];
+  for (const c of cookies) {
+    const d = (c.domain ?? "").replace(/^\./, "");
+    if (d !== storeDomain && !d.endsWith(`.${storeDomain}`)) continue;
+    pairs.push(`${c.name}=${c.value}`);
+  }
+  return pairs.join("; ");
+}
+
 /** 清掉 session 里该可注册域的全部 Cookie（种入 jar 前保证状态确定） */
 export async function clearSessionDomainCookies(
   webContents: Electron.WebContents,
@@ -140,7 +156,10 @@ export async function clearSessionDomainCookies(
   }
 }
 
-/** 将 Cookie 头写入 Electron session，供页面脚本/AJAX 使用 */
+/** 将 Cookie 头写入 Electron session，供页面脚本/AJAX 使用。
+ *  覆盖式写入——仅限 ensureDomainSessionInit 的进程级首次初始化调用；
+ *  日常链路对共享分区零写入（jar 快照可能旧于分区活会话，覆盖会把已登录
+ *  会话打回游客态，loginCheckJs 即误弹登录窗）。 */
 export async function seedSessionCookies(
   webContents: Electron.WebContents,
   pageUrl: string,
@@ -179,6 +198,37 @@ export async function seedSessionCookies(
   }
 }
 
+/**
+ * 「分区为唯一权威」的进程级 Cookie 初始化：每（分区, 可注册域）仅首次执行——
+ * 清域 + 覆盖种入 CookieJar 终态快照；此后分区自由演进（浏览器/验证窗/后台
+ * WebView 谁登录谁生效），引擎日常链路对分区零写入。jar 快照可能旧于分区活
+ * 会话，任何后续覆盖都会把已登录会话打回游客态（误弹登录窗 / 静态 0 条）。
+ */
+const initedSessionDomains = new Map<string, Promise<void>>();
+
+export function ensureDomainSessionInit(
+  partition: string,
+  webContents: Electron.WebContents,
+  pageUrl: string,
+  cookieHeader: string,
+): Promise<void> {
+  const key = `${partition}|${getCookieStoreDomain(pageUrl)}`;
+  const existing = initedSessionDomains.get(key);
+  if (existing) return existing;
+  const p = (async () => {
+    await clearSessionDomainCookies(webContents, pageUrl);
+    if (cookieHeader.trim()) {
+      await seedSessionCookies(webContents, pageUrl, cookieHeader);
+    }
+  })();
+  initedSessionDomains.set(key, p);
+  p.catch(() => {
+    // 初始化失败允许下次重试
+    if (initedSessionDomains.get(key) === p) initedSessionDomains.delete(key);
+  });
+  return p;
+}
+
 function isEmptyEvalResult(text: string): boolean {
   return !text || text === "null" || text === "undefined";
 }
@@ -187,11 +237,24 @@ function isEmptyEvalResult(text: string): boolean {
  * CDN/站点 JS 挑战页（如 `var buid = "fffffffffffffffffff"` + probe.js）。
  * 此时 outerHTML 非空但尚无正文；应对齐「空结果」继续等待。
  * 取 `document.cookie` 时不把挑战页当未就绪（cookie 字符串本身就可能很短）。
+ *
+ * 另识别 Discuz `_dsign` 型挑战壳页（如 sxsy 系）：服务器先回 2~5KB 混淆 JS
+ * （拼接 `'_ds'`/`'assign'`/`'href'` 等字面量 + location 跳转），脚本执行后才进真页面。
+ * 该壳页无 title/body 结构、远小于正常帖子页，据此区分避免误伤正常短页面。
  */
 export function isJsChallengeHtml(text: string): boolean {
   const head = text.slice(0, 8000);
   if (head.includes("fffffffffffffffffff")) return true;
   if (/probe\.js/i.test(head) && text.length < 4096) return true;
+  if (
+    text.length < 8192 &&
+    !/<title[\s>]|<body[\s>]|<div[\s>]|<form[\s>]/i.test(text)
+  ) {
+    if (/['"]_ds['"]/.test(text)) return true;
+    if (/['"]assign['"]/.test(head) && /location|['"]href['"]/i.test(head)) {
+      return true;
+    }
+  }
   return false;
 }
 
@@ -224,13 +287,65 @@ function registerBackstageWindow(win: BrowserWindow): void {
   });
 }
 
-function destroyBackstageWindow(win: BrowserWindow): void {
-  activeBackstageWindows.delete(win);
-  try {
-    if (!win.isDestroyed()) win.destroy();
-  } catch {
-    /* ignore */
-  }
+/**
+ * 常驻隐藏 tab 宿主：引擎 webView 请求（搜索/更新/发现）不再每次新建隐藏窗+销毁，
+ * 而是加载到这个常驻 tab——它与内置浏览器共享 persist 分区（登录态/挑战凭证/磁盘
+ * 缓存全程热），页面 JS 自己完成 _dsign 等挑战，加载完截获 outerHTML/webJs 结果
+ * 交回引擎解析、UI 渲染。串行队列复用同一 webContents（sxsy 系搜索本就限并发）。
+ */
+let engineTabHost: BrowserWindow | null = null;
+
+function getEngineTabHost(partition: string): BrowserWindow {
+  if (engineTabHost && !engineTabHost.isDestroyed()) return engineTabHost;
+  const win = new BrowserWindow({
+    // 调试期：tab 先显示出来供 F12 观察挑战/响应；验证完改回 show: false
+    show: true,
+    title: "引擎Tab（调试）",
+    width: 1280,
+    height: 800,
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true,
+      // 对齐 Legado blockNetworkImage：挡图片，减轻多余 HTTPS 握手失败噪音
+      javascript: true,
+      images: false,
+      partition,
+    },
+  });
+  // F12 / Ctrl+Shift+I 切换 DevTools（调试期观察网络请求/Cookie）
+  win.webContents.on("before-input-event", (event, input) => {
+    const isToggleDevToolsKey =
+      input.type === "keyDown" &&
+      (input.key === "F12" ||
+        ((input.control || input.meta) &&
+          input.shift &&
+          input.key.toLowerCase() === "i"));
+    if (!isToggleDevToolsKey) return;
+    event.preventDefault();
+    win.webContents.toggleDevTools();
+  });
+  // 挂 BACKSTAGE_WEBVIEW_FLAG：退出清理（destroyAllBackstageWebViews）统一销毁
+  registerBackstageWindow(win);
+  win.on("closed", () => {
+    if (engineTabHost === win) engineTabHost = null;
+  });
+  // 渲染进程崩溃：销毁重建，防止宿主坏死后所有请求持续失败
+  win.webContents.on("render-process-gone", () => {
+    if (engineTabHost === win && !win.isDestroyed()) win.destroy();
+  });
+  attachTrustAnyCertificate(win.webContents);
+  engineTabHost = win;
+  return win;
+}
+
+/** 常驻宿主只有一个 webContents：请求串行排队（前一个彻底结束后下一个才加载） */
+let engineTabChain: Promise<unknown> = Promise.resolve();
+
+function enqueueEngineTab<T>(task: () => Promise<T>): Promise<T> {
+  const p = engineTabChain.then(task, task);
+  engineTabChain = p.catch(() => {});
+  return p;
 }
 
 export async function runBackstageWebView(
@@ -268,135 +383,155 @@ export async function runBackstageWebView(
     headers["user-agent"] ??
     getWebViewUserAgent();
 
-  // 后台 WebView 与引擎 undici 对齐：走找书设置的全局代理
-  //（defaultSession 只跟系统代理，直连被墙站点会 ERR_CONNECTION_REFUSED）
-  const sesEntry = getBookSourceNetSession();
+  // 后台 WebView 与内置浏览器共享 persist 分区：挑战凭证/磁盘缓存互通，
+  // 浏览器里过完验证引擎请求直接免挑战（走找书设置的全局代理）
+  const sesEntry = getBookSourceBrowserSession();
 
-  const win = new BrowserWindow({
-    show: false,
-    width: 1280,
-    height: 800,
-    webPreferences: {
-      nodeIntegration: false,
-      contextIsolation: true,
-      sandbox: true,
-      // 对齐 Legado blockNetworkImage：挡图片，减轻多余 HTTPS 握手失败噪音
-      javascript: true,
-      images: false,
-      partition: sesEntry.partition,
-    },
-  });
-  registerBackstageWindow(win);
-
-  const run = async (): Promise<string> => {
+  return enqueueEngineTab(async () => {
+    // 常驻隐藏 tab 复用（不新建不销毁；调试期窗口显示，验证完改回隐藏）
+    const win = getEngineTabHost(sesEntry.partition);
     const wc = win.webContents;
-    await sesEntry.proxyReady;
-    wc.setUserAgent(userAgent);
-    attachTrustAnyCertificate(wc);
-    if (pageUrl.startsWith("http")) {
-      // 状态确定性 = CookieJar：先清掉 session 里该域残留（历史游客会话等），再种 jar。
-      // 否则 session 旧 Cookie 会让「已登录 jar」的 webView 以游客身份打开
-      await clearSessionDomainCookies(wc, pageUrl);
-      if (cookieHeader) {
-        await seedSessionCookies(wc, pageUrl, cookieHeader);
+    // 外层总超时置位后内部循环尽快退出；宿主常驻，超时只 stop 复位不销毁
+    let aborted = false;
+
+    // 调试 tab 被手动关闭：立即中止本次等待并让出串行队列（否则当前 task 要等满
+    // 总超时才结束，期间搜索/更新/发现的后续请求全部排队无法新建宿主）
+    let rejectHostClosed!: (err: Error) => void;
+    const onHostClosed = () => rejectHostClosed(new Error("引擎 tab 已被关闭"));
+    const hostClosed = new Promise<never>((_, reject) => {
+      rejectHostClosed = reject;
+      if (win.isDestroyed()) {
+        reject(new Error("引擎 tab 已被关闭"));
+        return;
       }
-    }
-
-    if (opts.overrideUrlRegex) {
-      const re = new RegExp(opts.overrideUrlRegex);
-      return await new Promise<string>((resolve, reject) => {
-        const timer = setTimeout(
-          () => reject(new Error("webView 跳转匹配超时")),
-          timeoutMs,
-        );
-        const onNav = (_event: Electron.Event, url: string) => {
-          if (!re.test(url)) return;
-          clearTimeout(timer);
-          cleanup();
-          resolve(url);
-        };
-        const cleanup = () => {
-          wc.removeListener("will-navigate", onNav);
-          wc.removeListener("did-navigate", onNav);
-        };
-        wc.on("will-navigate", onNav);
-        wc.on("did-navigate", onNav);
-        void loadWebViewContent(wc, pageUrl, html, headers, timeoutMs, {
-          method: opts.method,
-          postData: opts.postData,
-        }).catch((err) => {
-          clearTimeout(timer);
-          cleanup();
-          reject(err);
-        });
-      });
-    }
-
-    await loadWebViewContent(wc, pageUrl, html, headers, timeoutMs, {
-      method: opts.method,
-      postData: opts.postData,
+      win.once("closed", onHostClosed);
     });
 
-    if (delayMs > 0) {
-      await new Promise((r) => setTimeout(r, delayMs));
-    }
-
-    if (opts.injectResult != null) {
-      const json = JSON.stringify(opts.injectResult);
-      await wc.executeJavaScript(`window.result = ${json};`);
-    }
-
-    const wrappedScript = buildWebViewEvalScript(userScript);
-
-    // 对齐 Legado EvalJsRunnable：非空且非 "null" 即返回；否则最多再试 30 次（间隔 1s）。
-    // 额外：JS 挑战页（fffffffffffffffffff / 短 probe.js）对 HTML 类脚本也继续等。
-    let last = "";
-    for (let retry = 0; ; retry++) {
-      const raw = await wc.executeJavaScript(wrappedScript, true);
-      last = typeof raw === "string" ? raw : String(raw ?? "");
-      if (!shouldRetryWebViewResult(last, userScript)) break;
-      if (retry >= 30) {
-        // 先回写 session Cookie，再决定是否超时失败
-        if (pageUrl.startsWith("http")) {
-          await persistWebViewCookies(wc, pageUrl);
-        }
-        // loginCheckJs 常用 `document.cookie`：值可为空（仅 HttpOnly），不能当 JS 超时
-        if (/^\s*document\.cookie\s*$/i.test(userScript)) {
-          return last;
-        }
-        if (isEmptyEvalResult(last)) {
-          throw new Error("webView js 执行超时（空结果）");
-        }
-        // 挑战页等满仍返回最后一次 HTML，由上层决定是否可用
-        break;
+    const work = (async (): Promise<string> => {
+      await sesEntry.proxyReady;
+      wc.setUserAgent(userAgent);
+      if (pageUrl.startsWith("http")) {
+        // 进程级首次：清域+种 jar 终态快照；此后分区为唯一权威、零 seed——
+        // 覆盖会冲掉浏览器/验证窗登录的活会话，把该次请求打回游客态
+        await ensureDomainSessionInit(
+          sesEntry.partition,
+          wc,
+          pageUrl,
+          cookieHeader,
+        ).catch(() => {});
       }
-      await new Promise((r) => setTimeout(r, 1000));
-    }
 
-    if (pageUrl.startsWith("http")) {
-      await persistWebViewCookies(wc, pageUrl);
-    }
-    return last;
-  };
+      if (opts.overrideUrlRegex) {
+        const re = new RegExp(opts.overrideUrlRegex);
+        return await new Promise<string>((resolve, reject) => {
+          const timer = setTimeout(
+            () => reject(new Error("webView 跳转匹配超时")),
+            timeoutMs,
+          );
+          const onNav = (_event: Electron.Event, url: string) => {
+            if (!re.test(url)) return;
+            clearTimeout(timer);
+            cleanup();
+            resolve(url);
+          };
+          const cleanup = () => {
+            wc.removeListener("will-navigate", onNav);
+            wc.removeListener("did-navigate", onNav);
+          };
+          wc.on("will-navigate", onNav);
+          wc.on("did-navigate", onNav);
+          void loadWebViewContent(wc, pageUrl, html, headers, timeoutMs, {
+            method: opts.method,
+            postData: opts.postData,
+          }).catch((err) => {
+            clearTimeout(timer);
+            cleanup();
+            reject(err);
+          });
+        });
+      }
 
-  const work = run();
-  // 超时后仍会 destroy 窗口；吞掉后到的拒绝，避免 unhandledRejection
-  void work.catch(() => {});
-  let overallTimer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await Promise.race([
-      work,
-      new Promise<string>((_, reject) => {
-        overallTimer = setTimeout(
-          () => reject(new Error("webView 总体超时")),
-          timeoutMs,
-        );
-      }),
-    ]);
-  } finally {
-    if (overallTimer) clearTimeout(overallTimer);
-    destroyBackstageWindow(win);
-  }
+      await loadWebViewContent(wc, pageUrl, html, headers, timeoutMs, {
+        method: opts.method,
+        postData: opts.postData,
+      });
+
+      if (delayMs > 0) {
+        await new Promise((r) => setTimeout(r, delayMs));
+      }
+
+      if (opts.injectResult != null) {
+        const json = JSON.stringify(opts.injectResult);
+        await wc.executeJavaScript(`window.result = ${json};`);
+      }
+
+      const wrappedScript = buildWebViewEvalScript(userScript);
+
+      // 对齐 Legado EvalJsRunnable：非空且非 "null" 即返回；否则最多再试 30 次（间隔 1s）。
+      // 额外：JS 挑战页（fffffffffffffffffff / 短 probe.js / Discuz _dsign 壳页）对 HTML 类脚本也继续等。
+      let last = "";
+      for (let retry = 0; ; retry++) {
+        if (aborted || wc.isDestroyed()) throw new Error("webView 已超时中止");
+        try {
+          const raw = await wc.executeJavaScript(wrappedScript, true);
+          last = typeof raw === "string" ? raw : String(raw ?? "");
+        } catch {
+          // 壳页 JS 跳转（location.assign）瞬间执行会抛导航异常：视为未就绪继续等待
+          last = "";
+        }
+        if (!shouldRetryWebViewResult(last, userScript)) break;
+        if (retry >= 30) {
+          // 先回写 session Cookie，再决定是否超时失败
+          if (pageUrl.startsWith("http")) {
+            await persistWebViewCookies(wc, pageUrl);
+          }
+          // loginCheckJs 常用 `document.cookie`：值可为空（仅 HttpOnly），不能当 JS 超时
+          if (/^\s*document\.cookie\s*$/i.test(userScript)) {
+            return last;
+          }
+          if (isEmptyEvalResult(last)) {
+            throw new Error("webView js 执行超时（空结果）");
+          }
+          // 挑战页等满仍返回最后一次 HTML，由上层决定是否可用
+          break;
+        }
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+
+      if (pageUrl.startsWith("http")) {
+        await persistWebViewCookies(wc, pageUrl);
+      }
+      return last;
+    })();
+
+    // 超时后 stop 复位 tab（常驻宿主不销毁）；吞掉后到的拒绝，避免 unhandledRejection
+    void work.catch(() => {});
+    let overallTimer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        work,
+        new Promise<string>((_, reject) => {
+          overallTimer = setTimeout(() => {
+            aborted = true;
+            reject(new Error("webView 总体超时"));
+          }, timeoutMs);
+        }),
+        hostClosed,
+      ]);
+    } finally {
+      if (overallTimer) clearTimeout(overallTimer);
+      try {
+        win.removeListener("closed", onHostClosed);
+      } catch {
+        /* ignore */
+      }
+      try {
+        if (!wc.isDestroyed()) wc.stop();
+      } catch {
+        /* ignore */
+      }
+    }
+  });
 }
 
 /** Chromium net errors：-3 ABORTED；-7 TIMED_OUT 上偶发仍会随后 did-finish-load */

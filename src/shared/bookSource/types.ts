@@ -103,6 +103,8 @@ export type BookSourceRecord = {
   enabledCookieJar?: boolean;
   concurrentRate?: string;
   header?: string;
+  /** 登录 Cookie（k=v; k=v）：保存书源时从登录/验证窗 session 覆盖；非空时请求固定使用，Set-Cookie 不再回写、自动登录弹窗停用（仅失效提醒） */
+  cookie?: string;
   loginUrl?: string;
   loginUi?: string;
   loginCheckJs?: string;
@@ -253,11 +255,19 @@ export type BookSourceGetChapterContentPayload = {
   preferCache?: boolean;
 };
 
-export type BookSourceImportStatus = "new" | "update" | "exists";
+export type BookSourceImportStatus = "new" | "update" | "exists" | "replace";
+
+/** 同名替换将删除的现存书源（换域名场景：同书源名、不同 bookSourceUrl） */
+export type BookSourceImportReplaceTarget = {
+  url: string;
+  name: string;
+};
 
 export type BookSourceImportPreviewItem = {
   source: BookSourceRecord;
   status: BookSourceImportStatus;
+  /** status = "replace" 时列出将删除的同名旧源 */
+  replaceTargets?: BookSourceImportReplaceTarget[];
 };
 
 export type BookSourceListItem = {

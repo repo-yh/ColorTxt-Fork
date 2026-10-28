@@ -47,7 +47,13 @@ import {
 } from "./analyzeUrl";
 import { createJsExtensionHost } from "./jsExtensions";
 import { evalJsAsync } from "./rhinoRuntime";
-import { runLoginCheckJs, awaitLoginForSearchPage, isVerificationCancelled } from "./loginCheck";
+import {
+  runLoginCheckJs,
+  awaitLoginForSearchPage,
+  isVerificationCancelled,
+  isLikelyLoginExpired,
+} from "./loginCheck";
+import { emitBookSourceToast } from "./bookSourceToast";
 import { ensureBookSourceJsLib } from "./sharedJsScope";
 import { appendBookSourceErrorLog } from "./bookSourceErrorLog";
 import { timeFormat } from "./legadoJavaApi";
@@ -85,8 +91,35 @@ async function fetchWithLoginCheck(
   logs: string[],
 ): Promise<StrResponse> {
   let res = await analyzeUrl.getStrResponse();
+  // 统一失效检测（用户拍板：手动/自动模式都生效）——响应被重定向到登录页即提醒
+  if (isLikelyLoginExpired(source, res)) {
+    notifyLoginCookieExpired(source, logs);
+  }
+  // 登录检查两模式统一跑（用户拍板：手动模式同样弹登录窗→确认后同步 Cookie→重新请求；
+  // 手动域 jar 冻结由验证窗确认回调的 force 同步绕过，见 sourceVerification）
   if (!source.loginCheckJs?.trim()) return res;
   return runLoginCheckJs(analyzeUrl, source, res, key, logs);
+}
+
+/** 登录 Cookie 失效提醒：同一书源 5 分钟内只 toast 一次（搜索/检查更新/正文多请求并发命中时防刷屏） */
+const loginCookieToastAt = new Map<string, number>();
+const LOGIN_COOKIE_TOAST_INTERVAL_MS = 5 * 60 * 1000;
+
+function notifyLoginCookieExpired(
+  source: BookSourceRecord,
+  logs: string[],
+): void {
+  const now = Date.now();
+  const last = loginCookieToastAt.get(source.bookSourceUrl) ?? 0;
+  logs.push(
+    `检测到登录页特征，登录 Cookie 可能已过期：${source.bookSourceName}`,
+  );
+  if (now - last < LOGIN_COOKIE_TOAST_INTERVAL_MS) return;
+  loginCookieToastAt.set(source.bookSourceUrl, now);
+  emitBookSourceToast(
+    `「${source.bookSourceName}」登录 Cookie 可能已过期`,
+    true,
+  );
 }
 
 function runJsLib(
@@ -461,6 +494,11 @@ export async function searchBook(
       res = await fetchWithLoginCheck(analyzeUrl, source, key, logs);
     } else {
       res = await analyzeUrl.getStrResponse();
+      // 统一失效检测：无 loginCheckJs 的书源也走同一套提醒（弹窗逻辑仍由
+      // awaitLoginForSearchPage 按模式分流）
+      if (isLikelyLoginExpired(source, res)) {
+        notifyLoginCookieExpired(source, logs);
+      }
       res = await awaitLoginForSearchPage(source, res, analyzeUrl, logs);
     }
   } catch (e) {
@@ -583,12 +621,16 @@ export async function exploreBook(
   });
   let res: StrResponse;
   try {
-    // 对齐 Legado exploreBookAwait：仅 loginCheckJs；无检查脚本时不弹登录启发式
-    // （否则站点导航 `class="login-info"` 等会误判登录墙，如部分站点发现分类）
+    // 登录检查对齐 searchBook：loginCheckJs 交给脚本；无脚本源走统一失效检测 +
+    // awaitLoginForSearchPage 弹窗（内部按模式分流，书列表可解析时仍不误弹）
     if (source.loginCheckJs?.trim()) {
       res = await fetchWithLoginCheck(analyzeUrl, source, "", logs);
     } else {
       res = await analyzeUrl.getStrResponse();
+      if (isLikelyLoginExpired(source, res)) {
+        notifyLoginCookieExpired(source, logs);
+      }
+      res = await awaitLoginForSearchPage(source, res, analyzeUrl, logs);
     }
   } catch (e) {
     if (isVerificationCancelled(e)) {
@@ -2161,7 +2203,13 @@ export async function getChapterList(
   const tocHtmlCached = bookInput.tocHtml?.trim() ?? "";
   const bookUrlForTocCmp = String(bookInput.bookUrl || "").trim();
   const tocUrlForTocCmp = String(bookInput.tocUrl || bookInput.bookUrl || "").trim();
+  // searchUpdate 书源（帖子即章节）目录=书名搜索结果页，每次须现查：
+  // 帖子页 HTML（bookUrl 页）不含目录列表选择器，绝不能当目录缓存复用
+  const sourceIsSearchUpdate = Boolean(
+    (source as { searchUpdate?: unknown }).searchUpdate,
+  );
   const useTocHtmlCache =
+    !sourceIsSearchUpdate &&
     Boolean(tocHtmlCached) &&
     Boolean(bookUrlForTocCmp) &&
     bookUrlForTocCmp === tocUrlForTocCmp;

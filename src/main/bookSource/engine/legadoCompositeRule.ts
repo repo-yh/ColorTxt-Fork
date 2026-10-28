@@ -263,6 +263,8 @@ export type LegadoUrlFetchOptions = {
   js?: string;
   bodyJs?: string;
   webViewDelayTime?: number;
+  /** 自定义扩展：本次请求超时毫秒（webView 总体/页面加载超时，默认 60s） */
+  timeoutMs?: number;
 };
 
 function stringifyLegadoHeaderMap(obj: Record<string, unknown>): Record<string, string> {
@@ -291,6 +293,7 @@ function isLegadoFlatHeaderMap(obj: Record<string, unknown>): boolean {
     "type",
     "retry",
     "webViewDelayTime",
+    "timeoutMs",
     "serverID",
   ]);
   if (keys.some((k) => reserved.has(k))) return false;
@@ -343,6 +346,13 @@ export function parseLegadoUrlSuffixJson(raw: string): LegadoUrlFetchOptions {
         : typeof delayRaw === "string" && delayRaw.trim()
           ? Number(delayRaw)
           : undefined;
+    const timeoutRaw = parsed!.timeoutMs;
+    const timeoutMs =
+      typeof timeoutRaw === "number" && Number.isFinite(timeoutRaw)
+        ? timeoutRaw
+        : typeof timeoutRaw === "string" && timeoutRaw.trim()
+          ? Number(timeoutRaw)
+          : undefined;
     return {
       headers,
       method: typeof parsed!.method === "string" ? parsed!.method : undefined,
@@ -356,6 +366,10 @@ export function parseLegadoUrlSuffixJson(raw: string): LegadoUrlFetchOptions {
       webViewDelayTime:
         webViewDelayTime != null && Number.isFinite(webViewDelayTime)
           ? webViewDelayTime
+          : undefined,
+      timeoutMs:
+        timeoutMs != null && Number.isFinite(timeoutMs) && timeoutMs > 0
+          ? timeoutMs
           : undefined,
     };
   };

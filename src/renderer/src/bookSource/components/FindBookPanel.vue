@@ -147,7 +147,7 @@ function onBookshelfSortChange(mode: string) {
   saveBookshelfSortMode(next);
 }
 
-const { applyBooks, books: bookshelfBooks, applyCategoryCatalogEdit, refresh: refreshBookshelf } =
+const { applyBooks, books: bookshelfBooks, applyCategoryCatalogEdit, refresh: refreshBookshelf, healSources: healBookshelfSources } =
   useFindBookBookshelf();
 
 const bookshelfCategoryMenuCounts = computed(() => {
@@ -543,6 +543,8 @@ async function refreshHasEnabledSearchSources() {
 
 async function onBookSourcesChanged() {
   await refreshHasEnabledSearchSources();
+  // 书源库变更（WebDAV 下载等）：书架条目 origin 可能指向旧源，按书源名自愈
+  void healBookshelfSources();
   void discoverPanelRef.value?.refreshSources?.();
 }
 
@@ -1151,6 +1153,8 @@ function onColorSchemeChangeTheme(theme: string) {
 
 function refreshFindBookAfterWebDavDownload() {
   refreshBookshelf();
+  // WebDAV 下载覆盖书架后，同样按书源名自愈一次
+  void healBookshelfSources();
   bookshelfCategoryFilter.value = loadBookshelfCategoryFilter();
   bookshelfCategoryCatalog.value = loadBookshelfCategoryCatalog();
   bookshelfSortMode.value = loadBookshelfSortMode();
@@ -1330,6 +1334,8 @@ onMounted(() => {
   syncThemeFromStorage();
   syncWebDavEnabledFromStorage();
   void refreshHasEnabledSearchSources();
+  // 书源换域名/换源后书架条目 origin 失效：按书源名自愈（迁移 origin + URL 域名）
+  void healBookshelfSources();
   offThemeSync = listenPersistedSettingsSync(() => {
     syncThemeFromStorage();
     syncWebDavEnabledFromStorage();

@@ -15,6 +15,7 @@ import {
   destroyAllBackstageWebViews,
   isBackstageWebViewWindow,
 } from "./bookSource/engine/backstageWebView";
+import { destroyBookSourceBrowserWindow } from "./bookSource/engine/bookSourceBrowser";
 import { destroyEyedropperOverlays, isEyedropperWindow } from "./eyedropper";
 import {
   destroyStealthReaderWindow,
@@ -135,6 +136,7 @@ app.on("before-quit", () => {
 
   stopWebDisplay(getFileList);
   destroyAllBackstageWebViews();
+  destroyBookSourceBrowserWindow();
 });
 
 app.on("will-quit", () => {
@@ -145,6 +147,7 @@ app.on("window-all-closed", () => {
   destroyStealthReaderWindow();
   destroyEyedropperOverlays();
   destroyAllBackstageWebViews();
+  destroyBookSourceBrowserWindow();
   // 末窗关闭后须再次 quit；macOS 上 Cmd+Q 首次 quit 常被关窗拦截 cancel，靠此路径收尾
   markAppQuittingForClose();
   app.quit();

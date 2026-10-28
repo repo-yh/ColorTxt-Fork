@@ -136,14 +136,26 @@ export function parsePostTimeFromTag(tag: string | undefined): number {
   return Number.isFinite(t) ? t : 0;
 }
 
-/** 书源 searchUrl 模板 → 该书的目录页 URL（{{key}} = 书名 URL 编码） */
+/** 帖子标题型书名（如「[更新]《现代都市异闻录》1-368」）→ 裸书名；Discuz 搜索对
+ *  整串带 []《》 的标题匹配不出结果（实测空结果页），需提取《》内书名再搜。
+ *  手动编辑的无《》书名原样使用。 */
+export function cleanBookNameForSearch(name: string): string {
+  const raw = name.trim();
+  const m = raw.match(/《([^《》]+)》/);
+  return m ? m[1]! : raw;
+}
+
+/** 书源 searchUrl 模板 → 该书的目录页 URL（{{key}} = 清洗后书名 URL 编码） */
 export function searchUrlAsTocUrl(
   searchUrl: string,
   bookName: string,
 ): string {
   return searchUrl
     .trim()
-    .replace(/\{\{key\}\}/g, encodeURIComponent(bookName.trim()));
+    .replace(
+      /\{\{key\}\}/g,
+      encodeURIComponent(cleanBookNameForSearch(bookName)),
+    );
 }
 
 /** searchUpdate 书源「阅读」入口：内置浏览器打开该书搜索结果页（章节=单帖无翻章语义，手动看结果） */
@@ -185,7 +197,7 @@ export async function openSearchResultInBrowser(
 async function fetchSearchUpdateChapters(
   book: BookshelfBook,
   searchUrl: string,
-): Promise<{ chapters: BookChapter[]; message: string }> {
+): Promise<{ chapters: BookChapter[]; message: string; logs: string[] }> {
   const res = await window.colorTxt.bookSourceGetChapterList(
     // 书架条目可能来自 Vue 响应式代理，variable 等对象字段需剥成纯对象才能过 IPC 克隆
     ipcPlain({
@@ -199,6 +211,7 @@ async function fetchSearchUpdateChapters(
   return {
     chapters: (res.chapters ?? []).filter((ch) => !ch.isVolume),
     message: res.message?.trim() ?? "",
+    logs: res.logs ?? [],
   };
 }
 
@@ -230,10 +243,11 @@ export async function runSearchUpdateForBook(
       return false;
     }
 
-    const { chapters, message } = await fetchSearchUpdateChapters(
+    const { chapters, message, logs } = await fetchSearchUpdateChapters(
       book,
       searchUrl,
     );
+    for (const line of logs) hooks.appendLog(line);
     if (!chapters.length) {
       hooks.appendLog(
         `${formatSearchUpdateLogHead(book)}\n搜索 0 条结果（可能登录态失效，请到书源重新登录）${

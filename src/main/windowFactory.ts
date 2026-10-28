@@ -18,6 +18,10 @@ import {
   isBackstageWebViewWindow,
 } from "./bookSource/engine/backstageWebView";
 import {
+  destroyBookSourceBrowserWindow,
+  isBookSourceBrowserWindow,
+} from "./bookSource/engine/bookSourceBrowser";
+import {
   destroyEyedropperOverlays,
   isEyedropperWindow,
 } from "./eyedropper";
@@ -108,15 +112,21 @@ export function createMainWindowFactory(maps: MainWindowMaps): CreateMainWindow 
       });
     }
     win.on("closed", () => {
+      const wasFindBookWindow = findBookWindowByWindowId.has(win.id);
       shouldRestoreSessionByWindowId.delete(win.id);
       pendingOpenTxtByWindowId.delete(win.id);
       findBookWindowByWindowId.delete(win.id);
       findBookInitialTabByWindowId.delete(win.id);
-      // 后台 webView 是 show:false 的 BrowserWindow；若不拆掉，关可见窗后进程不退
+      // 书源浏览器生命周期绑定找书界面（其打开入口都在找书 UI）：
+      // 宿主窗口销毁后，隐藏保留会话的浏览器窗口一并销毁，不无常驻
+      if (wasFindBookWindow) destroyBookSourceBrowserWindow();
+      // 后台 webView 是 show:false 的 BrowserWindow；若不拆掉，关可见窗后进程不退。
+      // 书源浏览器点 X 后隐藏保留会话，同样要排除并销毁，否则 window-all-closed 不触发
       const stillUserWindows = BrowserWindow.getAllWindows().some(
         (w) =>
           !w.isDestroyed() &&
           !isBackstageWebViewWindow(w) &&
+          !isBookSourceBrowserWindow(w) &&
           !isEyedropperWindow(w) &&
           !isStealthReaderWindow(w) &&
           !isStealthSettingsWindow(w),
@@ -124,6 +134,7 @@ export function createMainWindowFactory(maps: MainWindowMaps): CreateMainWindow 
       if (!stillUserWindows) {
         destroyEyedropperOverlays();
         destroyAllBackstageWebViews();
+        destroyBookSourceBrowserWindow();
       }
     });
 

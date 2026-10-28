@@ -230,17 +230,44 @@ export function useBookshelfUpdate(onBooksChanged?: (books: BookshelfBook[]) => 
 
     clearBookshelfUpdateLogs();
 
-    let cursor = 0;
-    const workers = Array.from(
-      { length: Math.min(BOOKSHELF_UPDATE_CONCURRENCY, queue.length) },
+    // searchUpdate 书源（如 sxsy45）站点限制「请求间隔 + 不能并发」：
+    // 源内逐本串行，间隔交给书源 concurrentRate（如 21000）；
+    // 其余书源保持多 worker 并发池。分组判定每源只查一次书源库。
+    const searchUpdateOrigins = new Set<string>();
+    for (const book of queue) {
+      const origin = book.origin?.trim();
+      if (!origin || searchUpdateOrigins.has(origin)) continue;
+      if (await isSearchUpdateSource(origin)) searchUpdateOrigins.add(origin);
+    }
+    const serialGroups = new Map<string, BookshelfBook[]>();
+    const parallelQueue: BookshelfBook[] = [];
+    for (const book of queue) {
+      const origin = book.origin?.trim() ?? "";
+      if (searchUpdateOrigins.has(origin)) {
+        const group = serialGroups.get(origin);
+        if (group) group.push(book);
+        else serialGroups.set(origin, [book]);
+      } else {
+        parallelQueue.push(book);
+      }
+    }
+
+    let parallelCursor = 0;
+    const parallelWorkers = Array.from(
+      { length: Math.min(BOOKSHELF_UPDATE_CONCURRENCY, parallelQueue.length) },
       async () => {
-        while (cursor < queue.length) {
-          const book = queue[cursor++];
+        while (parallelCursor < parallelQueue.length) {
+          const book = parallelQueue[parallelCursor++];
           await updateBook(book);
         }
       },
     );
-    await Promise.all(workers);
+    const serialWorkers = [...serialGroups.values()].map(async (group) => {
+      for (const book of group) {
+        await updateBook(book);
+      }
+    });
+    await Promise.all([...parallelWorkers, ...serialWorkers]);
   }
 
   return {

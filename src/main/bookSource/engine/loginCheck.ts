@@ -149,10 +149,18 @@ export async function awaitLoginForSearchPage(
 ): Promise<StrResponse> {
   if (source.loginCheckJs?.trim()) return res;
   if (!source.loginUrl?.trim()) return res;
-  if (!isLikelyLoginPage(res.body)) return res;
+  // 登录墙判定分流（用户拍板）：普通 loginUrl 只认 URL 精确匹配（被重定向到登录页，
+  // 零误伤）；loginUrl 为脚本（@js:/<js>）无法做 URL 匹配时才退回 body 特征启发式
+  const expiredByUrl = isLikelyLoginExpired(source, res);
+  if (isPlainLoginUrl(source.loginUrl)) {
+    if (!expiredByUrl) return res;
+  } else if (!isLikelyLoginPage(res.body)) {
+    return res;
+  }
 
-  // 仅认书源级登录确认 / 登录头；域名下匿名 Cookie 不算已登录
-  if (hasLoginSession(source)) {
+  // body 特征路径保留登录会话守卫；URL 精确命中登录页即为失效实证，ack 残留不再拦截
+  // （否则 Cookie 过期后只 toast 不弹窗，登录闭环断裂）
+  if (!expiredByUrl && hasLoginSession(source)) {
     logs.push(
       `检测到登录页特征但已有登录会话，跳过弹窗：${source.bookSourceName}`,
     );
@@ -183,6 +191,40 @@ export async function awaitLoginForSearchPage(
 export function hasLoginSession(source: BookSourceRecord): boolean {
   if (getLoginHeader(source.bookSourceUrl)?.trim()) return true;
   return getLoginSessionAck(source.bookSourceUrl);
+}
+
+/** loginUrl 是可解析 URL（非 @js:/<js> 脚本）才可作 URL 特征匹配 */
+function isPlainLoginUrl(loginUrl?: string | null): loginUrl is string {
+  const raw = loginUrl?.trim();
+  if (!raw) return false;
+  return !raw.startsWith("@js:") && !raw.startsWith("<js>");
+}
+
+/** res.url 含书源 loginUrl 的路径与全部参数即命中（实际 URL 可能还带其它参数，参数值不比对） */
+function urlMatchesLoginUrl(resUrl: string, loginUrl: string): boolean {
+  try {
+    const login = new URL(loginUrl);
+    const res = new URL(resUrl);
+    if (res.pathname !== login.pathname) return false;
+    for (const k of login.searchParams.keys()) {
+      if (!res.searchParams.has(k)) return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 手动 Cookie 模式过期检测：响应最终 URL 匹配书源 loginUrl（被重定向到登录页）即判定失效。
+ * 只判断，不弹窗、不写 Cookie。
+ */
+export function isLikelyLoginExpired(
+  source: BookSourceRecord,
+  res: StrResponse,
+): boolean {
+  if (!isPlainLoginUrl(source.loginUrl)) return false;
+  return urlMatchesLoginUrl(res.url, source.loginUrl);
 }
 
 function isLikelyLoginPage(body: string): boolean {

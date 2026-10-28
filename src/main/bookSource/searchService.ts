@@ -20,7 +20,8 @@ import {
   dismissAllActiveVerifications,
 } from "./engine/sourceVerification";
 
-const SOURCE_TIMEOUT_MS = 30_000;
+// 静态快通道失败回退 webView 时（挑战壳页 + 服务端慢页）单源可达 60s；30s 会把能成功的慢搜索掐死
+const SOURCE_TIMEOUT_MS = 60_000;
 
 /** 弹出验证窗口后延长等待（用户手动登录/过验证码） */
 const SOURCE_TIMEOUT_VERIFY_MS = 600_000;
