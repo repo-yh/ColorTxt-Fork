@@ -27,18 +27,19 @@ jobs:
             prune_platform: win32
             builder_target: win
             arch: x64
-          - os: macos-latest
-            name: macOS-arm64
-            prune_platform: darwin
-            builder_target: mac
-            arch: arm64
+          # 临时关闭 mac 编译（恢复时连同下方 x64 条目一起取消注释）
+          # - os: macos-latest
+          #   name: macOS-arm64
+          #   prune_platform: darwin
+          #   builder_target: mac
+          #   arch: arm64
           # Intel 原生构建：opencc / better-sqlite3 需 electron-rebuild 产物；
           # 在 arm64 runner 上交叉打包会打入 arm64 .node，Intel Mac 打开即崩溃。
-          - os: macos-15-intel
-            name: macOS-x64
-            prune_platform: darwin
-            builder_target: mac
-            arch: x64
+          # - os: macos-15-intel
+          #   name: macOS-x64
+          #   prune_platform: darwin
+          #   builder_target: mac
+          #   arch: x64
           - os: ubuntu-24.04-arm
             name: Linux-arm64
             prune_platform: linux
