@@ -404,6 +404,8 @@ export const defaultRecentFilesHistoryLimit = 20;
 export const maxRecentFilesHistoryLimit = 1000;
 
 export const defaultWebDisplayEnabled = false;
+/** 浏览器扩展 WS 服务（插件找书通道）默认关闭 */
+export const defaultExtensionWsEnabled = false;
 /** 全屏时阅读区域宽度百分比（仅 Monaco 主体区域） */
 export const defaultFullscreenReaderWidthPercent = 50;
 export const minFullscreenReaderWidthPercent = 30;

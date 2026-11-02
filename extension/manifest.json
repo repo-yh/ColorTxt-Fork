@@ -1,0 +1,10 @@
+{
+  "manifest_version": 3,
+  "name": "Webhook Browser Controller",
+  "version": "1.0",
+  "permissions": ["tabs", "scripting", "alarms"],
+  "host_permissions": ["<all_urls>"],
+  "background": {
+    "service_worker": "background.js"
+  }
+}

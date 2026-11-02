@@ -504,6 +504,28 @@ const api = {
         ok: boolean;
       }>,
   },
+  extensionWs: {
+    start: () =>
+      ipcRenderer.invoke("extensionWs:start") as Promise<{
+        ok: boolean;
+        reason?: string;
+      }>,
+    stop: () =>
+      ipcRenderer.invoke("extensionWs:stop") as Promise<{ ok: boolean }>,
+    isRunning: () =>
+      ipcRenderer.invoke("extensionWs:isRunning") as Promise<boolean>,
+    openAndGetHtml: (url: string) =>
+      ipcRenderer.invoke("extensionWs:openAndGetHtml", url) as Promise<
+        | {
+            ok: true;
+            title: string;
+            text: string;
+            html: string;
+            finalUrl: string;
+          }
+        | { ok: false; error: string }
+      >,
+  },
   emptyDir: (dirPath: string) =>
     ipcRenderer.invoke("fs:emptyDir", dirPath) as Promise<{ ok: true }>,
   removePath: (targetPath: string) =>

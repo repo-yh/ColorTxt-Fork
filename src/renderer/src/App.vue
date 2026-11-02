@@ -196,6 +196,7 @@ import {
   defaultReaderTheme,
   defaultRecentFilesHistoryLimit,
   defaultWebDisplayEnabled,
+  defaultExtensionWsEnabled,
   mergeReaderPaletteColorEnabled,
   resolveEffectiveReaderPalette,
   defaultRestoreSessionOnStartup,
@@ -989,6 +990,27 @@ watch(webDisplayEnabled, async (enabled) => {
   }
 });
 
+const extensionWsEnabled = ref(defaultExtensionWsEnabled);
+
+watch(extensionWsEnabled, async (enabled) => {
+  if (enabled) {
+    const r = await window.colorTxt.extensionWs.start();
+    if (!r.ok) {
+      extensionWsEnabled.value = false;
+      appToast(
+        `浏览器扩展服务启动失败: ${r.reason || "未知错误"}`,
+        { kind: "danger" },
+      );
+    } else {
+      appToast("浏览器扩展服务已启动: ws://127.0.0.1:8899", {
+        kind: "success",
+      });
+    }
+  } else {
+    await window.colorTxt.extensionWs.stop();
+  }
+});
+
 watch(currentFile, (fp) => {
   if (fp) void window.colorTxt.webDisplay.setCurrentFile(fp);
 });
@@ -1539,6 +1561,7 @@ const persistence = useAppPersistence({
   restoreSessionOnStartup,
   recentFilesHistoryLimit,
   webDisplayEnabled,
+  extensionWsEnabled,
   chapterMinCharCount,
   monacoAdvancedWrapping,
   monacoCjkWrapOptimize,
@@ -3891,6 +3914,7 @@ async function applySettings(payload: SettingsApplyPayload) {
   scrollbarTrackBehavior.value = payload.scrollbarTrackBehavior;
   monacoCjkWrapOptimize.value = payload.monacoCjkWrapOptimize;
   webDisplayEnabled.value = payload.webDisplayEnabled;
+  extensionWsEnabled.value = payload.extensionWsEnabled;
   mouseWheelScrollSensitivity.value = clampMouseWheelScrollSensitivity(
     payload.mouseWheelScrollSensitivity,
   );
@@ -4857,6 +4881,7 @@ useAppShellThemeWatch({
       :scrollbar-track-behavior="scrollbarTrackBehavior"
       :monaco-cjk-wrap-optimize="monacoCjkWrapOptimize"
       :web-display-enabled="webDisplayEnabled"
+      :extension-ws-enabled="extensionWsEnabled"
       :mouse-wheel-scroll-sensitivity="mouseWheelScrollSensitivity"
       :fast-scroll-sensitivity="fastScrollSensitivity"
       :sticky-chapter-title-enabled="stickyChapterTitleEnabled"

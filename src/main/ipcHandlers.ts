@@ -22,6 +22,7 @@ import {
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { startWebDisplay, stopWebDisplay, isWebDisplayRunning, clearCache, setCurrentFilePath, getCurrentFilePath, type ContentResult, type FileListItem, type HighlightsResult, type ChapterTitlesResult, type ApplyChapterTitlesResult, type ChapterContentResult, type SearchResult, type SearchMatchItem } from "./webDisplay";
+import { startExtensionWsServer, stopExtensionWsServer, isExtensionWsRunning, openAndGetHtml } from "./extensionWs";
 import { getFonts } from "font-list";
 import {
   familyNamesToRawFaces,
@@ -1532,6 +1533,26 @@ function unknownQuoteAttributions(
   ipcMain.handle("webDisplay:isRunning", async () => {
     return isWebDisplayRunning();
   });
+
+  ipcMain.handle("extensionWs:start", async () => {
+    return startExtensionWsServer();
+  });
+
+  ipcMain.handle("extensionWs:stop", async () => {
+    stopExtensionWsServer();
+    return { ok: true as const };
+  });
+
+  ipcMain.handle("extensionWs:isRunning", async () => {
+    return isExtensionWsRunning();
+  });
+
+  ipcMain.handle(
+    "extensionWs:openAndGetHtml",
+    async (_evt, url: string) => {
+      return openAndGetHtml(url);
+    },
+  );
 
   registerAiIpcHandlers();
   registerVoiceReadIpcHandlers();

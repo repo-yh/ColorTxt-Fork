@@ -7,6 +7,7 @@ import { registerUpdaterIpc, setupAutoUpdater } from "./updater";
 import { markAppQuittingForClose } from "./windowCloseGuard";
 import { createMainWindowFactory } from "./windowFactory";
 import { stopWebDisplay, type FileListItem } from "./webDisplay";
+import { stopExtensionWsServer } from "./extensionWs";
 import {
   argvHasFindBookFlag,
   openFindBookLaunchWindow,
@@ -135,6 +136,7 @@ app.on("before-quit", () => {
   };
 
   stopWebDisplay(getFileList);
+  stopExtensionWsServer();
   destroyAllBackstageWebViews();
   destroyBookSourceBrowserWindow();
 });
