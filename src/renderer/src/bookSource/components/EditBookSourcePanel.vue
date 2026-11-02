@@ -229,6 +229,17 @@ function onMonacoConfirm(text: string) {
   monacoField.value = null;
 }
 
+/** CookieJar（静态请求带 Cookie）与 WebSocket（扩展通道抓取）互斥：开一个自动关另一个，允许同时关闭 */
+function onCookieJarToggle(v: boolean) {
+  draft.value.enabledCookieJar = v;
+  if (v) draft.value.enabledWebSocket = false;
+}
+
+function onWebSocketToggle(v: boolean) {
+  draft.value.enabledWebSocket = v;
+  if (v) draft.value.enabledCookieJar = false;
+}
+
 async function onSave() {
   saving.value = true;
   try {
@@ -555,7 +566,19 @@ async function onSetSourceVariable() {
           </label>
           <label class="editFooterCheck">
             CookieJar
-            <SwitchToggle v-model="draft.enabledCookieJar" aria-label="CookieJar" />
+            <SwitchToggle
+              :model-value="draft.enabledCookieJar"
+              aria-label="CookieJar"
+              @update:model-value="onCookieJarToggle"
+            />
+          </label>
+          <label class="editFooterCheck">
+            WebSocket
+            <SwitchToggle
+              :model-value="draft.enabledWebSocket"
+              aria-label="WebSocket"
+              @update:model-value="onWebSocketToggle"
+            />
           </label>
         </div>
         <div class="editFooterActions">

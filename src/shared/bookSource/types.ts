@@ -101,6 +101,8 @@ export type BookSourceRecord = {
   enabledExplore?: boolean;
   jsLib?: string;
   enabledCookieJar?: boolean;
+  /** 该书源请求走浏览器扩展 WebSocket 通道（extensionWs openAndGetHtml）抓取 */
+  enabledWebSocket?: boolean;
   concurrentRate?: string;
   header?: string;
   /** 登录 Cookie（k=v; k=v）：保存书源时从登录/验证窗 session 覆盖；非空时请求固定使用，Set-Cookie 不再回写、自动登录弹窗停用（仅失效提醒） */

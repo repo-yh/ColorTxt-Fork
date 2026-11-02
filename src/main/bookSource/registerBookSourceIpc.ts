@@ -43,6 +43,7 @@ import {
   downloadBookSourceBrowserFile,
   openBookSourceBrowserWindow,
 } from "./engine/bookSourceBrowser";
+import { openAndGetHtml } from "../extensionWs";
 import {
   getLoginUiRows,
   runLoginUiButton,
@@ -120,6 +121,32 @@ export function registerBookSourceIpcHandlers(): void {
         ? p.bookName.trim()
         : undefined;
     return openBookSourceBrowserWindow(url, title, bookName);
+  });
+
+  // WS 扩展通道抓取 HTML（外部浏览器登录态）→ 书源浏览器窗口快照渲染；
+  // HTML 不出主进程，渲染层只传 URL
+  ipcMain.handle(BOOK_SOURCE_IPC.wsSnapshotOpen, async (_e, payload: unknown) => {
+    const p = (payload ?? {}) as {
+      url?: unknown;
+      title?: unknown;
+      bookName?: unknown;
+    };
+    const url = typeof p.url === "string" ? p.url.trim() : "";
+    const title =
+      typeof p.title === "string" && p.title.trim() ? p.title.trim() : undefined;
+    const bookName =
+      typeof p.bookName === "string" && p.bookName.trim()
+        ? p.bookName.trim()
+        : undefined;
+    if (!/^https?:\/\//i.test(url)) {
+      return { ok: false, message: "仅支持 http(s) 链接" };
+    }
+    const res = await openAndGetHtml(url);
+    if (!res.ok) return { ok: false, message: res.error };
+    return openBookSourceBrowserWindow(url, title, bookName, {
+      html: res.html,
+      baseUrl: res.finalUrl || url,
+    });
   });
 
   ipcMain.handle(BOOK_SOURCE_IPC.browserDownload, (_e, payload: unknown) => {

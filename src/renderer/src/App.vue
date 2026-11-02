@@ -31,6 +31,7 @@ import AppDialogHost from "./components/AppDialogHost.vue";
 import AppCaptchaHost from "./components/AppCaptchaHost.vue";
 import AppToastHost from "./components/AppToastHost.vue";
 import AppBookSourceBrowserDownloadHost from "./components/AppBookSourceBrowserDownloadHost.vue";
+import AppExtensionWsDownloadHost from "./components/AppExtensionWsDownloadHost.vue";
 import AppLoadingHost from "./components/AppLoadingHost.vue";
 import AppOverlays from "./components/AppOverlays.vue";
 import ReplaceFileModal from "./components/ReplaceFileModal.vue";
@@ -4818,6 +4819,7 @@ useAppShellThemeWatch({
     <AppLoadingHost />
     <AppToastHost />
     <AppBookSourceBrowserDownloadHost @download-imported="onBrowserDownloadImported" />
+    <AppExtensionWsDownloadHost @download-imported="onBrowserDownloadImported" />
     <AiSmartFormatProgressModal
       v-model="aiSmartFormatProgressOpen"
       :current="aiSmartFormatProgressCurrent"

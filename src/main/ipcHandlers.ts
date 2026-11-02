@@ -22,7 +22,8 @@ import {
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { startWebDisplay, stopWebDisplay, isWebDisplayRunning, clearCache, setCurrentFilePath, getCurrentFilePath, type ContentResult, type FileListItem, type HighlightsResult, type ChapterTitlesResult, type ApplyChapterTitlesResult, type ChapterContentResult, type SearchResult, type SearchMatchItem } from "./webDisplay";
-import { startExtensionWsServer, stopExtensionWsServer, isExtensionWsRunning, openAndGetHtml } from "./extensionWs";
+import { startExtensionWsServer, stopExtensionWsServer, isExtensionWsRunning, openAndGetHtml, downloadBookSourceFileViaExtension } from "./extensionWs";
+import { parseChapterAttachments } from "./extensionAttachParse";
 import { getFonts } from "font-list";
 import {
   familyNamesToRawFaces,
@@ -1552,6 +1553,40 @@ function unknownQuoteAttributions(
     async (_evt, url: string) => {
       return openAndGetHtml(url);
     },
+  );
+
+  // 扩展 WS 通道：抓版本帖并解析付费附件（已购/未购两态），供「点章节下载 / 提示需购买」编排
+  ipcMain.handle("extensionWs:parseChapterAttachments", async (_evt, url: string) => {
+    const r = await openAndGetHtml(url);
+    if (!r.ok) return { ok: false as const, error: r.error };
+    return {
+      ok: true as const,
+      finalUrl: r.finalUrl,
+      ...parseChapterAttachments(r.html, r.finalUrl),
+    };
+  });
+
+  // 扩展 WS 通道下载（fire-and-forget）：落盘目录由渲染侧找书设置下发，
+  // 落盘完成/失败后主进程广播 extensionWs:downloadEvent（宿主组件按书名替换/导入）
+  ipcMain.handle(
+    "extensionWs:download",
+    async (
+      _evt,
+      payload: {
+        url: string;
+        referer?: string;
+        postUrl?: string;
+        bookName?: string;
+        downloadDir?: string;
+      },
+    ) =>
+      downloadBookSourceFileViaExtension(
+        payload.url,
+        payload.referer,
+        payload.postUrl,
+        payload.bookName,
+        payload.downloadDir,
+      ),
   );
 
   registerAiIpcHandlers();

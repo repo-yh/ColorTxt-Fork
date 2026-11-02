@@ -1,5 +1,6 @@
 import { computed, ref } from "vue";
 import type { BookChapter } from "@shared/bookSource/types";
+import { LOGIN_EXPIRED_LOG_MARK } from "@shared/bookSource/ipc";
 import {
   bookshelfBookKey,
   updateFindBookBookshelfBookInfo,
@@ -14,6 +15,14 @@ const updatingKeys = ref(new Set<string>());
 
 /** 更新目录错误日志（批量/单项共用，打开「日志」面板查看） */
 const bookshelfUpdateLogEntries = ref<string[]>([]);
+
+/** 批量更新中发现登录失效的书源（WS 源命中后终止该源剩余书的检查更新） */
+const loginExpiredOrigins = new Set<string>();
+
+/** 引擎 logs 是否含「响应 URL 命中书源登录页」标记（fetchWithLoginCheck 统一 push） */
+function hasLoginExpiredLog(logs?: string[] | null): boolean {
+  return (logs ?? []).some((l) => l.includes(LOGIN_EXPIRED_LOG_MARK));
+}
 
 /** 对齐 Legado AppConfig.threadCount 默认 16；书架更新略保守 */
 const BOOKSHELF_UPDATE_CONCURRENCY = 8;
@@ -74,6 +83,20 @@ async function withSourceUpdateLock<T>(
     if (sourceUpdateTail.get(origin) === current) {
       sourceUpdateTail.delete(origin);
     }
+  }
+}
+
+/** 书源 concurrentRate → 检查更新本间间隔 ms（纯数字=毫秒；"n/毫秒" 取毫秒段；无配置 0） */
+async function sourceUpdateIntervalMs(origin: string): Promise<number> {
+  try {
+    const rec = await window.colorTxt.bookSourceGet(origin);
+    const rate = rec?.concurrentRate?.trim();
+    if (!rate || rate === "0") return 0;
+    const idx = rate.indexOf("/");
+    const ms = Number.parseInt(idx > 0 ? rate.slice(idx + 1) : rate, 10);
+    return Number.isFinite(ms) && ms > 0 ? ms : 0;
+  } catch {
+    return 0;
   }
 }
 
@@ -142,6 +165,16 @@ export function useBookshelfUpdate(onBooksChanged?: (books: BookshelfBook[]) => 
     return withSourceUpdateLock(book.origin, () => updateBookOnce(book));
   }
 
+  /** 批量更新专用入口：该源已检测到登录失效（仅 WS 源，见 loginExpiredOrigins）直接跳过 */
+  async function updateBookBatch(book: BookshelfBook): Promise<boolean> {
+    if (loginExpiredOrigins.has(book.origin)) return false;
+    return withSourceUpdateLock(book.origin, async () => {
+      // 锁内二次检测：排队等锁期间同源其他书可能已检出登录失效
+      if (loginExpiredOrigins.has(book.origin)) return false;
+      return updateBookOnce(book);
+    });
+  }
+
   async function updateBookOnce(book: BookshelfBook): Promise<boolean> {
     const key = bookshelfBookKey(book.bookUrl, book.origin);
     if (updatingKeys.value.has(key)) return false;
@@ -172,6 +205,8 @@ export function useBookshelfUpdate(onBooksChanged?: (books: BookshelfBook[]) => 
         }),
       );
       if (!infoRes.detail) {
+        // 引擎 logs 命中登录页标记 → 记入失效集合（批量时同源剩余书提前跳过）
+        if (hasLoginExpiredLog(infoRes.logs)) loginExpiredOrigins.add(book.origin);
         appendBookshelfUpdateLog(
           formatUpdateErrorEntry(
             book,
@@ -188,6 +223,7 @@ export function useBookshelfUpdate(onBooksChanged?: (books: BookshelfBook[]) => 
         book: detail,
       });
       if (tocRes.message?.trim() && !(tocRes.chapters?.length)) {
+        if (hasLoginExpiredLog(tocRes.logs)) loginExpiredOrigins.add(book.origin);
         appendBookshelfUpdateLog(
           formatUpdateErrorEntry(
             book,
@@ -199,6 +235,7 @@ export function useBookshelfUpdate(onBooksChanged?: (books: BookshelfBook[]) => 
       }
       if (tocRes.message?.trim() && tocRes.chapters?.length) {
         // 有目录但仍有告警：记入日志，继续写入
+        if (hasLoginExpiredLog(tocRes.logs)) loginExpiredOrigins.add(book.origin);
         appendBookshelfUpdateLog(
           formatUpdateErrorEntry(book, tocRes.message.trim(), tocRes.logs),
         );
@@ -229,15 +266,26 @@ export function useBookshelfUpdate(onBooksChanged?: (books: BookshelfBook[]) => 
     if (!queue.length) return;
 
     clearBookshelfUpdateLogs();
+    loginExpiredOrigins.clear();
 
     // searchUpdate 书源（如 sxsy45）站点限制「请求间隔 + 不能并发」：
-    // 源内逐本串行，间隔交给书源 concurrentRate（如 21000）；
-    // 其余书源保持多 worker 并发池。分组判定每源只查一次书源库。
+    // 源内逐本串行，本间间隔读源 concurrentRate sleep（限流只做在检查更新代码里，
+    // 请求层——查看帖子/WS 扩展交互——不限流）；其余书源保持多 worker 并发池。
+    // 分组判定每源只查一次书源库。
     const searchUpdateOrigins = new Set<string>();
+    // WS 扩展通道书源：登录态在外部浏览器（扩展会话），本地无 Cookie 可自愈——
+    // 批量更新中检测到登录失效即提前终止该源剩余书的检查；非 WS 源保持弹窗自愈不终止
+    const wsOrigins = new Set<string>();
     for (const book of queue) {
       const origin = book.origin?.trim();
       if (!origin || searchUpdateOrigins.has(origin)) continue;
       if (await isSearchUpdateSource(origin)) searchUpdateOrigins.add(origin);
+      try {
+        const rec = await window.colorTxt.bookSourceGet(origin);
+        if (rec?.enabledWebSocket) wsOrigins.add(origin);
+      } catch {
+        /* 书源读取失败按非 WS 处理 */
+      }
     }
     const serialGroups = new Map<string, BookshelfBook[]>();
     const parallelQueue: BookshelfBook[] = [];
@@ -258,15 +306,33 @@ export function useBookshelfUpdate(onBooksChanged?: (books: BookshelfBook[]) => 
       async () => {
         while (parallelCursor < parallelQueue.length) {
           const book = parallelQueue[parallelCursor++];
-          await updateBook(book);
+          // 该源已检出登录失效（仅 WS 源）：跳过同源剩余书
+          const origin = book.origin?.trim() ?? "";
+          if (wsOrigins.has(origin) && loginExpiredOrigins.has(origin)) {
+            continue;
+          }
+          await updateBookBatch(book);
         }
       },
     );
-    const serialWorkers = [...serialGroups.values()].map(async (group) => {
-      for (const book of group) {
-        await updateBook(book);
-      }
-    });
+    const serialWorkers = [...serialGroups.entries()].map(
+      async ([origin, group]) => {
+        const intervalMs = await sourceUpdateIntervalMs(origin);
+        for (let i = 0; i < group.length; i++) {
+          // 该源已检出登录失效（仅 WS 源）：终止剩余书（本间 sleep 也一并跳过）
+          if (wsOrigins.has(origin) && loginExpiredOrigins.has(origin)) {
+            appendBookshelfUpdateLog(
+              `书源「${group[0]?.originName || origin}」登录已失效，已终止该源剩余 ${group.length - i} 本的检查更新`,
+            );
+            break;
+          }
+          await updateBookBatch(group[i]);
+          if (intervalMs > 0 && i < group.length - 1) {
+            await new Promise((r) => setTimeout(r, intervalMs));
+          }
+        }
+      },
+    );
     await Promise.all([...parallelWorkers, ...serialWorkers]);
   }
 

@@ -15,6 +15,10 @@ import type {
 } from "./types";
 import type { LoginUiRow } from "./loginUi";
 
+/** 引擎 logs 中「响应 URL 命中书源登录页（登录可能失效）」的固定标记，
+ *  主进程 push 与渲染层（批量更新提前终止等）检测共用单一来源 */
+export const LOGIN_EXPIRED_LOG_MARK = "检测到登录页特征";
+
 export const BOOK_SOURCE_IPC = {
   list: "bookSource:list",
   get: "bookSource:get",
@@ -90,6 +94,8 @@ export const BOOK_SOURCE_IPC = {
   testHttpProxy: "bookSource:testHttpProxy",
   /** 打开书源浏览器窗口（带书源 Cookie 登录态 + 找书代理，接管附件下载） */
   browserOpen: "bookSource:browserOpen",
+  /** WS 扩展通道抓取页面 HTML 后以快照模式打开书源浏览器窗口（登录态在外部浏览器会话） */
+  wsSnapshotOpen: "bookSource:wsSnapshotOpen",
   /** 主进程 → 渲染进程：书源浏览器附件下载已拦截，转交找书下载模块 */
   browserDownloadEvent: "bookSource:browserDownloadEvent",
   /** 渲染进程 → 主进程：书源浏览器拦截的下载 URL 走引擎网络栈下载到找书目录 */
@@ -181,6 +187,24 @@ export type BookSourceBrowserDownloadEvent = {
   /** 打开浏览器时携带的书架书籍名（落地按书名匹配替换列表条目） */
   bookName?: string;
 };
+
+/** 扩展 WS 通道下载事件：主进程落盘完成 / 失败后广播给应用渲染窗口（宿主组件按书名替换/导入 + toast） */
+export type ExtensionWsDownloadEvent = {
+  ok: boolean;
+  taskId: string;
+  /** ok=true：落盘文件绝对路径 */
+  filePath?: string;
+  size?: number;
+  /** Content-Disposition 解析的文件名 */
+  filename?: string;
+  /** 下发时携带的书架书籍名（原样带回，落地按书名匹配） */
+  bookName?: string;
+  /** 附件归属的帖子 URL */
+  postUrl?: string;
+  /** ok=false：失败原因 */
+  error?: string;
+};
+
 
 export type BookSourcePayActionPayload = {
   bookSourceUrl: string;
@@ -337,6 +361,13 @@ export type BookSourceIpcApi = {
     url: string;
     title?: string;
     /** 书架书籍名：窗口名展示 + 下载事件随行（落地按书名匹配） */
+    bookName?: string;
+  }) => Promise<{ ok: boolean; message?: string }>;
+  /** WS 扩展通道抓取页面 HTML（外部浏览器登录态）→ 书源浏览器窗口快照渲染；
+   *  快照为纯静态单页（禁导航），链接点击提示去外部浏览器 */
+  bookSourceWsSnapshotOpen: (payload: {
+    url: string;
+    title?: string;
     bookName?: string;
   }) => Promise<{ ok: boolean; message?: string }>;
   /** 书源浏览器下载：主进程用引擎网络栈（CookieJar+代理+Referer）下载到 outputDir */

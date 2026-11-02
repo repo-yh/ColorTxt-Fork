@@ -80,7 +80,8 @@ export type BookshelfAddOptions = {
 };
 
 export function bookshelfBookKey(bookUrl: string, origin: string): string {
-  return `${origin.trim()}\0${bookUrl.trim()}`;
+  // 剥 ,{option} 后缀：WS 源存纯 URL（新格式），旧带后缀条目/查询值同样命中
+  return `${origin.trim()}\0${stripChapterUrlOption(bookUrl).trim() || bookUrl.trim()}`;
 }
 
 function isBookshelfBook(v: unknown): v is BookshelfBook {
@@ -153,16 +154,21 @@ export function addToFindBookBookshelf(
   item: SearchBookItem,
   options?: BookshelfAddOptions,
 ): BookshelfBook[] {
-  const key = bookshelfBookKey(item.bookUrl, item.origin);
+  const book = searchBookToBook(item);
+  // 按 WS 源新格式存纯 URL（剥 ,{webView...} 等 option 后缀）
+  const bookUrl = stripChapterUrlOption(book.bookUrl) || book.bookUrl;
+  const tocUrl = stripChapterUrlOption(book.tocUrl) || book.tocUrl;
+  const key = bookshelfBookKey(bookUrl, item.origin);
   const prev = loadFindBookBookshelf().filter(
     (b) => bookshelfBookKey(b.bookUrl, b.origin) !== key,
   );
   const updateTime =
     options?.updateTime?.trim() || extractUpdateTimeFromKind(item.kind) || undefined;
-  const book = searchBookToBook(item);
   const next: BookshelfBook[] = [
     {
       ...book,
+      bookUrl,
+      tocUrl,
       id: item.id,
       origin: item.origin,
       originName: item.originName,
@@ -274,16 +280,18 @@ export function updateFindBookBookshelfBookInfo(
     if (patch.name?.trim()) merged.name = patch.name.trim();
     if (patch.author?.trim()) merged.author = patch.author.trim();
     if (patch.intro !== undefined) merged.intro = patch.intro;
-    if (patch.coverUrl?.trim()) merged.coverUrl = patch.coverUrl.trim();
-    if (patch.coverSourceUrl?.trim()) {
-      merged.coverSourceUrl = patch.coverSourceUrl.trim();
-    }
+    // URL 字段按 WS 源新格式存纯 URL（剥 ,{webView...} 等 option 后缀）
+    const cleanCoverUrl = stripChapterUrlOption(patch.coverUrl);
+    if (cleanCoverUrl) merged.coverUrl = cleanCoverUrl;
+    const cleanCoverSourceUrl = stripChapterUrlOption(patch.coverSourceUrl);
+    if (cleanCoverSourceUrl) merged.coverSourceUrl = cleanCoverSourceUrl;
     if (patch.lastChapter?.trim()) merged.lastChapter = patch.lastChapter.trim();
     if (patch.kind !== undefined) merged.kind = patch.kind;
     if (patch.wordCount !== undefined) merged.wordCount = patch.wordCount;
     if (patch.updateTime?.trim()) merged.updateTime = patch.updateTime.trim();
-    if (patch.bookUrl?.trim() && patch.bookUrl.trim() !== b.bookUrl) {
-      merged.bookUrl = patch.bookUrl.trim();
+    const cleanBookUrl = stripChapterUrlOption(patch.bookUrl);
+    if (cleanBookUrl && cleanBookUrl !== b.bookUrl) {
+      merged.bookUrl = cleanBookUrl;
       // 指向新帖后旧目录缓存作废（新帖会重新拉取）
       delete merged.chapters;
     }
@@ -295,7 +303,8 @@ export function updateFindBookBookshelfBookInfo(
       // 置有更新时附件已变，目录缓存一并作废
       if (patch.hasUpdate) delete merged.chapters;
     }
-    if (patch.tocUrl?.trim()) merged.tocUrl = patch.tocUrl.trim();
+    const cleanTocUrl = stripChapterUrlOption(patch.tocUrl);
+    if (cleanTocUrl) merged.tocUrl = cleanTocUrl;
     if (patch.variable && typeof patch.variable === "object") {
       const prev =
         merged.variable &&
@@ -310,7 +319,10 @@ export function updateFindBookBookshelfBookInfo(
       if (Object.keys(next).length) merged.variable = next;
     }
     if (patch.chapters?.length) {
-      merged.chapters = patch.chapters;
+      merged.chapters = patch.chapters.map((ch) => {
+        const url = stripChapterUrlOption(ch.url) || ch.url;
+        return url === ch.url ? ch : { ...ch, url };
+      });
       // 对齐 Legado BookChapterList：有目录后用最新章标题覆盖 lastChapter
       const tocLatest = resolveLatestChapterTitleFromToc(patch.chapters);
       if (tocLatest) merged.lastChapter = tocLatest;

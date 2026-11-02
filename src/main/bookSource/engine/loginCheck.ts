@@ -106,6 +106,9 @@ export async function runLoginCheckJs(
   key: string,
   logs: string[],
 ): Promise<StrResponse> {
+  // WS 扩展通道书源（用户拍板：ws 不需要自愈）登录态在外部浏览器，内置弹窗
+  // 登录后 cookie 不同步到扩展会话，自愈无效——直接跳过 loginCheckJs
+  if (source.enabledWebSocket) return res;
   const raw = source.loginCheckJs?.trim();
   if (!raw) return res;
 
@@ -147,6 +150,8 @@ export async function awaitLoginForSearchPage(
   analyzeUrl: AnalyzeUrl,
   logs: string[],
 ): Promise<StrResponse> {
+  // WS 扩展通道书源不做登录自愈弹窗（登录态在外部浏览器，内置窗无效）
+  if (source.enabledWebSocket) return res;
   if (source.loginCheckJs?.trim()) return res;
   if (!source.loginUrl?.trim()) return res;
   // 登录墙判定分流（用户拍板）：普通 loginUrl 只认 URL 精确匹配（被重定向到登录页，

@@ -121,8 +121,230 @@ function sendTaskResult(taskId, tabId, ok, extra) {
   }));
 }
 
+/**
+ * 下载结果主动推送（download_result，非 task_result 应答）：
+ * 服务端下发即返回不等待（避免大附件/慢站长时间占用 WS 等待），
+ * fetch 成功或失败后扩展均主动推送（带帖子 URL），服务端落盘/记日志保证失败有感知；
+ * WS 断连直接丢弃（扩展不暂存），由用户重新触发。
+ */
+function sendDownloadResult(taskId, tabId, ok, extra) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    console.warn(`[SW] WS未连接，丢弃下载结果 taskId=${taskId}`);
+    return;
+  }
+  ws.send(JSON.stringify({
+    type: "download_result",
+    taskId,
+    tabId,
+    ok,
+    ...extra
+  }));
+}
+
+/**
+ * 下载开始推送（download_start）：fetch 响应头到手、body 拉取前上报，
+ * 携带文件元数据（meta.filename/contentType/size）与帖子 URL——服务器立刻
+ * 感知哪本书的哪个附件开始下载（大附件下载期间不再是黑盒）；WS 非 OPEN 丢弃。
+ */
+function sendDownloadStart(taskId, tabId, ok, extra) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    console.warn(`[SW] WS未连接，丢弃下载开始推送 taskId=${taskId}`);
+    return;
+  }
+  ws.send(JSON.stringify({
+    type: "download_start",
+    taskId,
+    tabId,
+    ok,
+    ...extra
+  }));
+}
+
+// ===== 下载任务(附件 blob 回传)=====
+
+/**
+ * 下载第一段：fetch 附件并读响应头（不读 body），Response 存页面全局供第二段取回。
+ * 同源 tab 内 fetch 自动携带登录 Cookie / Referer / CF 会话;
+ * 登录失效时 Discuz 返回 200+HTML 登录页,必须校验 content-type;
+ * 返回文件元数据（filename/contentType/size）供服务器立即感知下载开始。
+ * size 取 Content-Length（服务器未声明时为 0，仅提示；实际大小以第二段 body 为准）。
+ */
+async function fetchAttachmentMeta(url) {
+  try {
+    const r = await fetch(url, { credentials: "include" });
+    window.__ctDlResp = r;
+    const ct = r.headers.get("content-type") || "";
+    if (!r.ok) return { ok: false, error: `HTTP ${r.status}` };
+    if (ct.includes("text/html")) {
+      return { ok: false, error: "返回 HTML(登录态可能已失效)" };
+    }
+    let filename = "";
+    const cd = r.headers.get("content-disposition") || "";
+    const mStar = cd.match(/filename\*=(?:UTF-8|utf-8)''([^;]+)/);
+    const mPlain = cd.match(/filename="?([^";]+)"?/);
+    if (mStar) {
+      try {
+        filename = decodeURIComponent(mStar[1]);
+      } catch {
+        filename = mStar[1];
+      }
+    } else if (mPlain) {
+      try {
+        filename = decodeURIComponent(mPlain[1]);
+      } catch {
+        filename = mPlain[1];
+      }
+    } else {
+      try {
+        filename = decodeURIComponent(new URL(url).pathname.split("/").pop() || "attachment");
+      } catch {
+        filename = "attachment";
+      }
+    }
+    return {
+      ok: true,
+      contentType: ct,
+      filename,
+      size: Number(r.headers.get("content-length")) || 0
+    };
+  } catch (e) {
+    return { ok: false, error: String((e && e.message) || e) };
+  }
+}
+
+/**
+ * 下载第二段：取回第一段存的 Response 读 body 转 base64。
+ * ArrayBuffer 经 executeScript 返回值序列化会变 {},必须分块转 base64(0x8000/块防 apply 爆栈)。
+ */
+async function fetchAttachmentBody() {
+  const r = window.__ctDlResp;
+  if (!r) return { ok: false, error: "下载会话丢失(tab 可能已被关闭或页面已跳转)" };
+  try {
+    const bytes = new Uint8Array(await r.arrayBuffer());
+    let binary = "";
+    const CHUNK = 0x8000;
+    for (let i = 0; i < bytes.length; i += CHUNK) {
+      binary += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
+    }
+    return { ok: true, data: btoa(binary), size: bytes.length };
+  } catch (e) {
+    return { ok: false, error: String((e && e.message) || e) };
+  }
+}
+
+/** 找一个与目标 URL 同源的 tab 执行 fetch(附件请求的 Cookie/Referer/CF 会话都依赖发起页面) */
+async function ensureSameOriginTab(serverTabId, initUrl) {
+  let origin = "";
+  try {
+    origin = new URL(initUrl).origin;
+  } catch {
+    // 非法 URL 交给下方直接报错
+  }
+  if (!origin) throw new Error(`非法 URL: ${initUrl}`);
+
+  // 1. 服务端指定的 tab(上次抓页用的帖子页)同源则直接复用,不跳转不打断
+  if (serverTabId && (await isTabValid(serverTabId))) {
+    try {
+      const tab = await chrome.tabs.get(serverTabId);
+      if (tab.url && new URL(tab.url).origin === origin) {
+        console.log(`[SW] 复用同源tab ${serverTabId} (${tab.url.slice(0, 80)})`);
+        return serverTabId;
+      }
+    } catch {
+      // url 取不到等异常,继续找
+    }
+  }
+
+  // 2. 任意已打开的同源 tab
+  const tabs = await chrome.tabs.query({});
+  for (const t of tabs) {
+    if (t.id && t.url && new URL(t.url).origin === origin) {
+      console.log(`[SW] 使用已打开同源tab ${t.id} (${t.url.slice(0, 80)})`);
+      return t.id;
+    }
+  }
+
+  // 3. 没有同源 tab:新建 tab 打开 initUrl(referer 页)等待加载完成
+  console.log(`[SW] 无同源tab,新建tab打开 ${initUrl.slice(0, 80)}`);
+  const tabId = await createWorkerTab(initUrl);
+  await waitTabComplete(tabId);
+  return tabId;
+}
+
+async function handleDownloadTask(job) {
+  const { url, taskId, tabId: serverTabId, referer, postUrl, bookName } = job;
+  let targetTabId = null;
+  // meta 响应头到手后记住文件名：body 阶段失败也带 name 推送，服务器有归属感知
+  let knownName = "";
+  try {
+    targetTabId = await ensureSameOriginTab(serverTabId, referer || url);
+
+    // 第一段：fetch + 响应头校验，拿文件元数据
+    const startResults = await chrome.scripting.executeScript({
+      target: { tabId: targetTabId },
+      args: [url],
+      func: fetchAttachmentMeta
+    });
+    const meta = startResults[0] && startResults[0].result;
+    if (!meta || meta.ok !== true) {
+      throw new Error((meta && meta.error) || "页面内 fetch 无返回");
+    }
+    knownName = meta.filename;
+
+    // 下载开始即推元数据（body 拉取前）：带书籍 name 与文件元数据，
+    // 服务器立刻感知哪本书的哪个附件开始下载并做归属保存
+    console.log(`[SW] 下载开始 ${taskId} file=${meta.filename} size=${meta.size} type=${meta.contentType}`);
+    sendDownloadStart(taskId, targetTabId, true, {
+      url,
+      postUrl: postUrl || "",
+      bookName: bookName || "",
+      meta: {
+        contentType: meta.contentType,
+        filename: meta.filename,
+        size: meta.size
+      }
+    });
+
+    // 第二段：读 body 转 base64
+    const bodyResults = await chrome.scripting.executeScript({
+      target: { tabId: targetTabId },
+      func: fetchAttachmentBody
+    });
+    const body = bodyResults[0] && bodyResults[0].result;
+    if (!body || body.ok !== true) {
+      throw new Error((body && body.error) || "下载 body 读取无返回");
+    }
+    console.log(`[SW] 下载完成 ${taskId} size=${body.size} file=${meta.filename}`);
+    sendDownloadResult(taskId, targetTabId, true, {
+      url,
+      postUrl: postUrl || "",
+      bookName: bookName || "",
+      name: meta.filename,
+      blob: {
+        data: body.data,
+        contentType: meta.contentType,
+        filename: meta.filename,
+        size: body.size
+      }
+    });
+  } catch (err) {
+    console.error("[SW] 下载失败", err.message);
+    sendDownloadResult(taskId, targetTabId, false, {
+      url,
+      postUrl: postUrl || "",
+      bookName: bookName || "",
+      name: knownName,
+      error: err.message
+    });
+  }
+}
+
 async function handleTask(job) {
   const { url, taskId, tabId: serverTabId } = job;
+  if (job.kind === "download") {
+    await handleDownloadTask(job);
+    return;
+  }
   let targetTabId = null;
 
   try {
@@ -211,7 +433,7 @@ function connect() {
     failCount += 1;
     ensureReconnectAlarm();
     if (failCount <= FAST_RETRY_COUNT) {
-      console.log(`[SW] WS关闭，${retryDelay / 1000}ms后重试连接`);
+      console.log(`[SW] WS关闭，${retryDelay}ms后重试连接`);
       setTimeout(connect, retryDelay);
       retryDelay = Math.min(retryDelay * 2, MAX_RETRY_DELAY);
     } else {

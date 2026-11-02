@@ -333,3 +333,76 @@ export async function runSearchUpdateForBook(
     hooks.setUpdating(key, false);
   }
 }
+
+/** 点章节走扩展 WS 通道下载附件的编排结果 */
+export type ChapterDownloadViaExtensionResult =
+  | { status: "downloaded"; count: number }
+  | { status: "needBuy"; names: string[] }
+  | { status: "noAttachment" }
+  | { status: "failed"; error: string };
+
+/**
+ * searchUpdate 书源点章节：扩展 WS 通道抓帖子页解析附件两态——
+ * 已购附件逐个下发扩展下载（fire-and-forget，落盘目录用找书设置），成功后清「有更新」角标；
+ * 未购附件返回需购买名单；无附件/失败交调用方兜底（如回退内置浏览器打开）。
+ */
+export async function downloadChapterViaExtension(
+  chapterUrl: string | undefined,
+  bookName: string,
+  bookUrl: string | undefined,
+  origin: string | undefined,
+  downloadDir: string,
+): Promise<ChapterDownloadViaExtensionResult> {
+  // 剥 ,{"webView": ...} option（同浏览器打开路径），扩展抓取只要纯帖子 URL
+  const url = stripChapterUrlOption(chapterUrl).trim();
+  const name = bookName.trim();
+  const sourceUrl = origin?.trim();
+  if (!url || !sourceUrl) {
+    return { status: "failed", error: "章节 URL 无效" };
+  }
+  try {
+    const parsed = await window.colorTxt.extensionWs.parseChapterAttachments(
+      url,
+    );
+    if (!parsed.ok) {
+      return { status: "failed", error: parsed.error };
+    }
+    if (parsed.purchased.length > 0) {
+      const dir = downloadDir.trim();
+      let sent = 0;
+      for (const a of parsed.purchased) {
+        try {
+          const res = await window.colorTxt.extensionWs.download({
+            url: a.url,
+            referer: url,
+            postUrl: url,
+            bookName: name,
+            downloadDir: dir,
+          });
+          if (res?.ok) sent += 1;
+        } catch {
+          /* 单个下发失败继续其余附件 */
+        }
+      }
+      if (sent > 0) {
+        const key = bookUrl?.trim();
+        if (key) setFindBookBookshelfHasUpdate(key, sourceUrl, false);
+        return { status: "downloaded", count: sent };
+      }
+      return {
+        status: "failed",
+        error: "插件未连接（请确认浏览器扩展已加载、服务开关已打开）",
+      };
+    }
+    if (parsed.unpaid.length > 0) {
+      return {
+        status: "needBuy",
+        names: parsed.unpaid.map((a) => a.name).filter(Boolean),
+      };
+    }
+    return { status: "noAttachment" };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return { status: "failed", error: msg };
+  }
+}
