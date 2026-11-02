@@ -1901,6 +1901,11 @@ async function replaceFileInList(
       prevMeta = fallbackCandidates[0];
     }
   }
+  // 旧 ≥100% 进度会让打开新文件时误判「已读完」滚到底、盖过锚点定位；
+  // 清掉进度（meta 与侧栏缓存同步），保留锚点，下次打开按锚点定位旧行，
+  // 打开后实时进度按新文件行数自动重算落盘（侧栏进度允许短暂闪动）
+  const clearedLegacyProgress =
+    typeof prevMeta?.progress === "number" && prevMeta.progress >= 100;
   if (prevMeta) {
     const prevMetaKey = fileHistoryKey(prevMeta.path);
     const migrated: FileMetaRecord = {
@@ -1912,6 +1917,7 @@ async function replaceFileInList(
       sourceMtimeMsAtConvert: undefined,
       // 旧文件标注行号对新文件无意义
       readerAnnotations: undefined,
+      ...(clearedLegacyProgress ? { progress: undefined } : {}),
       updatedAt: Date.now(),
     };
     fileMetaRecords.value = [
@@ -1936,12 +1942,14 @@ async function replaceFileInList(
     const v = m.get(oldKey);
     m.delete(oldKey);
     m.delete(nextKey);
-    if (typeof v === "number") m.set(nextKey, v);
+    if (typeof v === "number" && !clearedLegacyProgress) m.set(nextKey, v);
     metaProgressByPathKey.value = m;
   } else if (metaProgressByPathKey.value.has(nextKey) && prevMeta) {
     // 已用旧 meta 覆盖新路径时，清掉仅属于新路径旧进度的映射（进度在 meta 内）
     const m = new Map(metaProgressByPathKey.value);
-    if (typeof prevMeta.progress === "number") {
+    if (clearedLegacyProgress) {
+      m.delete(nextKey);
+    } else if (typeof prevMeta.progress === "number") {
       m.set(nextKey, prevMeta.progress);
     }
     metaProgressByPathKey.value = m;
