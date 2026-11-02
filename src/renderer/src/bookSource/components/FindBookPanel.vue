@@ -869,15 +869,15 @@ function onOpenBook(item: SearchBookItem) {
 }
 
 async function onReadBookshelfBook(item: SearchBookItem) {
-  // searchUpdate 书源：帖子即章节，正文/附件在网页 → 内置浏览器打开，不进阅读器
+  // searchUpdate 书源：帖子即章节，WS 抓正文快照渲染（离线 body），不进阅读器
   if (await isSearchUpdateSource(item.origin?.trim())) {
-    const ok = await openChapterPostInBrowser(
+    const res = await openChapterPostInBrowser(
       item.origin?.trim(),
       item.bookUrl,
       item.bookUrl,
       item.name?.trim(),
     );
-    if (!ok) appToast("打开浏览器失败", { kind: "warning" });
+    if (!res.ok) appToast(res.message || "快照打开失败", { kind: "warning" });
     return;
   }
   const prev = selectedBook.value;

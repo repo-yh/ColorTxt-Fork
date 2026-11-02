@@ -45,6 +45,12 @@ type PendingTask = {
   /** 上次尝试使用的标签页；重试时带上，扩展校验失效自动新建并回报新 tabId */
   tabId: number | null;
   retries: number;
+  /** 表单 POST 任务（kind=form_post）：下发 body 与 referer */
+  kind?: "form_post";
+  body?: string;
+  referer?: string;
+  /** 表单 POST 非幂等（重复提交可能重复扣金钱）：超时/断线不重推，直接判失败 */
+  noRetry?: boolean;
 };
 
 let wss: WebSocketServer | null = null;
@@ -130,7 +136,15 @@ function dispatchTask(taskId: string): void {
   if (!client || client.readyState !== WebSocket.OPEN) return;
 
   client.send(
-    JSON.stringify({ type: "task", taskId, url: task.url, tabId: task.tabId }),
+    JSON.stringify({
+      type: "task",
+      taskId,
+      url: task.url,
+      tabId: task.tabId,
+      ...(task.kind ? { kind: task.kind } : {}),
+      ...(task.body !== undefined ? { body: task.body } : {}),
+      ...(task.referer ? { referer: task.referer } : {}),
+    }),
   );
   console.log(
     `[extensionWs] 任务下发（第 ${task.retries + 1} 次） taskId=${taskId} url=${task.url} tabId=${task.tabId ?? "无"}`,
@@ -138,14 +152,20 @@ function dispatchTask(taskId: string): void {
 
   clearTimeout(task.timer);
   task.timer = setTimeout(() => {
-    if (task.retries + 1 >= TASK_MAX_RETRIES) {
+    if (task.noRetry || task.retries + 1 >= TASK_MAX_RETRIES) {
       pendingTasks.delete(taskId);
       console.warn(
-        `[extensionWs] 任务超时（已重推 ${task.retries} 次，放弃） taskId=${taskId} url=${task.url}`,
+        `[extensionWs] 任务超时（${
+          task.noRetry
+            ? "表单 POST 非幂等，不重推"
+            : `已重推 ${task.retries} 次，放弃`
+        }） taskId=${taskId} url=${task.url}`,
       );
       task.resolve({
         ok: false,
-        error: `任务超时（${TASK_MAX_RETRIES} 次尝试均未收到结果）`,
+        error: task.noRetry
+          ? "表单提交超时（结果未知，可能已提交成功，请重新检查购买状态）"
+          : `任务超时（${TASK_MAX_RETRIES} 次尝试均未收到结果）`,
       });
       return;
     }
@@ -409,12 +429,23 @@ export function startExtensionWsServer(): Promise<{
         clientAlive = true;
       });
 
-      // WS 断开期间的 pending 任务视为待重试，插件重连后重新下发（readme 服务端规则 4）
+      // WS 断开期间的 pending 任务视为待重试，插件重连后重新下发（readme 服务端规则 4）；
+      // 表单 POST（非幂等）例外：断线不重推直接判失败，防止重复扣金钱
       if (pendingTasks.size > 0) {
-        console.log(
-          `[extensionWs] 重连后重推 ${pendingTasks.size} 条未完成任务`,
-        );
         for (const taskId of [...pendingTasks.keys()]) {
+          const task = pendingTasks.get(taskId);
+          if (task?.noRetry) {
+            pendingTasks.delete(taskId);
+            console.warn(
+              `[extensionWs] 断线期间表单 POST 任务不重推，判失败 taskId=${taskId} url=${task.url}`,
+            );
+            task.resolve({
+              ok: false,
+              error:
+                "扩展连接断开，表单提交结果未知（可能已提交成功，请重新检查购买状态）",
+            });
+            continue;
+          }
           dispatchTask(taskId);
         }
       }
@@ -519,6 +550,44 @@ export function downloadBookSourceFileViaExtension(
     `[extensionWs] 下载任务下发 taskId=${taskId} book=${bookName || "(无书名)"} url=${url} tabId=${clientTabId ?? "无"}`,
   );
   return { ok: true };
+}
+
+/**
+ * 指挥扩展在页面上下文发起表单 POST（如 Discuz 附件购买 attachpay）。
+ * 同源 tab 内 fetch POST（credentials:include 自动带登录 Cookie/CF 会话），
+ * pending 等 task_result（HTTP 2xx 即成功，pageData.html 为响应文本）。
+ * 表单 POST 非幂等（重复提交可能重复扣金钱）：超时/断线不重推直接判失败，
+ * 结果是否真实生效由调用方重抓帖子验证（可能实际已购买成功）。
+ */
+export function formPostViaExtension(
+  url: string,
+  body: string,
+  referer?: string,
+): Promise<OpenAndGetHtmlResult> {
+  if (!client || client.readyState !== WebSocket.OPEN) {
+    return Promise.resolve({
+      ok: false,
+      error: "插件未连接（请确认浏览器扩展已加载、服务开关已打开）",
+    });
+  }
+
+  taskIdSeq += 1;
+  const taskId = `fp-${Date.now()}-${taskIdSeq}`;
+
+  return new Promise((resolve) => {
+    pendingTasks.set(taskId, {
+      url,
+      timer: setTimeout(() => {}, 0),
+      resolve,
+      tabId: clientTabId,
+      retries: 0,
+      kind: "form_post",
+      body,
+      referer,
+      noRetry: true,
+    });
+    dispatchTask(taskId);
+  });
 }
 
 /** 本机调试端点端口（仅 loopback），随 WS 服务同启停；8901 被系统服务占用，避开 */

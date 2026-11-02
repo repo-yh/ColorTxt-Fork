@@ -92,6 +92,24 @@
 - `postUrl`：附件归属的帖子 URL，扩展推送时原样带回（找书接线用于归属书）
 - `bookName`：触发下载的书架书籍名，扩展在 download_start / download_result 推送时原样带回（服务端按此找到需要替换的书籍）
 
+### 4.1 服务下发表单 POST 任务（kind=form_post，如 Discuz 附件购买 attachpay）
+
+```
+{
+  "type":"task",
+  "taskId":"fp-1699-1",
+  "url":"https://sxsy33.com/forum.php?mod=misc&action=attachpay&tid=433664",
+  "tabId":1234,
+  "kind":"form_post",
+  "body":"formhash=ae5edb84&aid=682820&referer=https%3A%2F%2Fsxsy33.com%2F.%2F&paysubmit=true",
+  "referer":"https://sxsy33.com/forum.php?mod=viewthread&tid=433664"
+}
+```
+
+- 扩展在**同源 tab** 内 `executeScript` 执行 `fetch(url, {method:"POST", credentials:"include", body})`——自动携带登录 Cookie / Referer / CF 会话
+- 结果以 **task_result** 应答回传（成功 `ok:true` + `pageData.html`=响应文本截断 20000 字符；失败 `ok:false` + `error`=HTTP 状态或 fetch 异常），服务端 pending 等待
+- **非幂等**：重复提交可能重复扣金钱——服务端**超时不重推**（连接断开同样不重推，直接判失败），失败由用户重新触发；重试前先重抓帖子验证真实购买状态（可能实际已购买成功）
+
 ### 5. 扩展主动推送下载开始（fetch 响应头到手、body 拉取前）
 
 ```

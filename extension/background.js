@@ -339,10 +339,56 @@ async function handleDownloadTask(job) {
   }
 }
 
+/**
+ * 表单 POST 任务（kind=form_post，如 Discuz 附件购买 attachpay）：
+ * 同源 tab 内 fetch POST（credentials:include 自动带登录 Cookie/Referer/CF 会话），
+ * 结果以 task_result 应答回传（服务端 pending 等待，与抓页任务同通道）。
+ * 表单 POST 非幂等（重复提交可能重复扣金钱）：服务端约定超时不重推。
+ */
+async function handleFormPostTask(job) {
+  const { url, taskId, tabId: serverTabId, referer, body } = job;
+  let targetTabId = null;
+  try {
+    targetTabId = await ensureSameOriginTab(serverTabId, referer || url);
+    const results = await chrome.scripting.executeScript({
+      target: { tabId: targetTabId },
+      args: [url, body],
+      func: async (postUrl, postBody) => {
+        try {
+          const r = await fetch(postUrl, {
+            method: "POST",
+            credentials: "include",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: postBody
+          });
+          const text = (await r.text()).slice(0, 20000);
+          return { ok: r.ok, status: r.status, text };
+        } catch (e) {
+          return { ok: false, status: 0, error: String((e && e.message) || e) };
+        }
+      }
+    });
+    const res = results[0] && results[0].result;
+    if (!res) throw new Error("页面内 fetch 无返回");
+    if (!res.ok) throw new Error(res.error || `HTTP ${res.status}`);
+    console.log(`[SW] form_post 完成 ${taskId} status=${res.status} 长度=${res.text.length}`);
+    sendTaskResult(taskId, targetTabId, true, {
+      pageData: { title: "", text: res.text, html: res.text, href: url }
+    });
+  } catch (err) {
+    console.error("[SW] form_post 失败", err.message);
+    sendTaskResult(taskId, targetTabId, false, { error: err.message });
+  }
+}
+
 async function handleTask(job) {
   const { url, taskId, tabId: serverTabId } = job;
   if (job.kind === "download") {
     await handleDownloadTask(job);
+    return;
+  }
+  if (job.kind === "form_post") {
+    await handleFormPostTask(job);
     return;
   }
   let targetTabId = null;

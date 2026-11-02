@@ -12,6 +12,7 @@ import {
   resolveSourceRequestHeaders,
 } from "./sourceRequestHeaders";
 import { appendBookSourceErrorLog } from "./bookSourceErrorLog";
+import { emitBookSourceToast } from "./bookSourceToast";
 import { toLegadoStrResponse } from "./legadoStrResponse";
 import { cookieHeaderForUrl } from "./cookieManager";
 import { DEFAULT_BOOK_SOURCE_USER_AGENT } from "./bookSourceUserAgent";
@@ -131,6 +132,26 @@ function encodeLegadoQueryString(params: string, charset?: string): string {
       .join("");
   }
   return out;
+}
+
+/** 扩展通道失败弹窗节流：同一书源 5 分钟内只 toast 一次（批量检查更新逐书失败防刷屏） */
+const extensionFailToastAt = new Map<string, number>();
+const EXTENSION_FAIL_TOAST_INTERVAL_MS = 5 * 60 * 1000;
+
+function notifyExtensionChannelFailure(
+  source: BookSourceRecord | undefined,
+  error: string,
+): void {
+  const key = source?.bookSourceUrl ?? "";
+  const now = Date.now();
+  if (now - (extensionFailToastAt.get(key) ?? 0) < EXTENSION_FAIL_TOAST_INTERVAL_MS) {
+    return;
+  }
+  extensionFailToastAt.set(key, now);
+  emitBookSourceToast(
+    `「${source?.bookSourceName || "书源"}」扩展通道抓取失败：${error}`,
+    true,
+  );
 }
 
 function augmentGorgonHeaders(
@@ -743,7 +764,18 @@ export class AnalyzeUrl {
       !webJs
     ) {
       const r = await openAndGetHtml(this.url);
-      if (!r.ok) throw new Error(`扩展通道抓取失败: ${r.error}`);
+      if (!r.ok) {
+        // 用户拍板：扩展任务失败（page load timeout 等）不能只留在扩展控制台，
+        // 服务器要弹窗提醒并记入引擎日志（日志按钮面板经现有 logs 透传可见）
+        appendBookSourceErrorLog(this.host.logs, new Error(r.error), {
+          phase: "扩展通道抓取",
+          sourceName: this.source?.bookSourceName,
+          sourceUrl: this.source?.bookSourceUrl,
+          url: this.url,
+        });
+        notifyExtensionChannelFailure(this.source, r.error);
+        throw new Error(`扩展通道抓取失败: ${r.error}`);
+      }
       const body = this.urlFetchOptions.type?.trim()
         ? this.applyTypeHexBody(r.html)
         : r.html;

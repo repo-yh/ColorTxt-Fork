@@ -25,7 +25,7 @@ import type {
   BookSourceRecord,
   SearchBookItem,
 } from "@shared/bookSource/types";
-import { appLog, appPrompt } from "../../services/appDialog";
+import { appConfirm, appLog, appPrompt } from "../../services/appDialog";
 import { appToast } from "../../services/appToast";
 import { searchBookToBook } from "@shared/bookSource/bookModel";
 import { ipcPlain } from "../ipcPlain";
@@ -62,12 +62,15 @@ import {
 import {
   cleanBookNameForSearch,
   downloadChapterViaExtension,
+  downloadLatestPostViaExtension,
   isSearchUpdateSource,
   openChapterPostInBrowser,
   openSearchResultInBrowser,
   searchUrlAsTocUrl,
   setFindBookBookshelfHasUpdate,
+  type AttachmentPurchasePlan,
 } from "../searchUpdateService";
+import { escapeHtml } from "../highlightBookSourceCode";
 
 /** 与 .bookDetailChapterItem 固定行高一致（外层滚动虚拟列表） */
 const CHAPTER_ROW_STRIDE = 40;
@@ -992,15 +995,15 @@ async function onReadChapter(displayIndex: number) {
       );
       return;
     }
-    // noAttachment / failed：兜底回退内置浏览器打开帖子
-    const ok = await openChapterPostInBrowser(
+    // noAttachment / failed：兜底 WS 抓正文快照渲染（离线 body）
+    const res = await openChapterPostInBrowser(
       item?.origin?.trim(),
       ch.url,
       bookUrl,
       bookName,
     );
-    if (!ok) {
-      appToast("打开浏览器失败", { kind: "warning" });
+    if (!res.ok) {
+      appToast(res.message || "快照打开失败", { kind: "warning" });
       return;
     }
     // 对齐阅读器打开章节：同步书架「最后阅读」到点击的帖子
@@ -1109,6 +1112,49 @@ async function onDownloadOrStop() {
   const item = props.item;
   const dir = props.downloadDir.trim();
   if (!item || !dir) return;
+  // searchUpdate 书源：主下载 = 最新章节帖附件（扩展 WS 通道，不用 item.bookUrl 旧帖）；
+  // 未购附件弹窗确认（剩余余额/需要金币）后提交购买，成功重抓帖子过滤直链触发下载
+  if (await isSearchUpdateSource(item.origin?.trim())) {
+    const latest = contentChapterList.value[0];
+    if (!latest?.url?.trim()) {
+      appToast("无章节可下载", { kind: "warning" });
+      return;
+    }
+    const bookName = detail.value?.name?.trim() || item.name?.trim() || "";
+    const bookUrl = item.bookUrl?.trim() || detail.value?.bookUrl?.trim();
+    const dl = await downloadLatestPostViaExtension(
+      latest.url,
+      bookName,
+      bookUrl,
+      item.origin?.trim(),
+      dir,
+      {
+        confirmPurchase: async (plan: AttachmentPurchasePlan) => {
+          const lines = plan.attachments
+            .map((a) => `· ${escapeHtml(a.name || "附件")}（${a.price} 金钱）`)
+            .join("<br>");
+          const short = plan.balanceShort
+            ? '<br><span style="color:#e05252">余额不足，购买将失败</span>'
+            : "";
+          return appConfirm(
+            `${lines}<br><br>剩余余额：${plan.balanceAfter}<br>需要金币：${plan.totalCost}${short}`,
+            "购买附件",
+            { dangerouslyUseHTMLString: true },
+          );
+        },
+      },
+    );
+    if (dl.status === "downloaded") {
+      appToast(`已开始下载 ${dl.count} 个附件`, { kind: "success" });
+    } else if (dl.status === "needBuy") {
+      appToast("已取消购买", { kind: "info" });
+    } else if (dl.status === "failed") {
+      appToast(dl.error, { kind: "warning" });
+    } else {
+      appToast("该帖无附件", { kind: "warning" });
+    }
+    return;
+  }
   const path = await download(item, dir, props.cacheDir.trim() || undefined);
   if (path) {
     const st = await window.colorTxt.stat(path);

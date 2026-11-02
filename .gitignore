@@ -4,6 +4,10 @@ dist
 release
 .token.txt
 
+# 浏览器扩展打包产物与签名私钥（不入库）
+/extension.crx
+/extension.pem
+
 # 本地排查/估算用的临时目录（非 electron-builder 产物）
 .asar-*/
 .tmp-bundle-est/

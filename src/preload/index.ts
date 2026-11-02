@@ -535,6 +535,31 @@ const api = {
           }
         | { ok: false; error: string }
       >,
+    parseAttachpay: (url: string) =>
+      ipcRenderer.invoke("extensionWs:parseAttachpay", url) as Promise<
+        | {
+            ok: true;
+            action: string;
+            formhash: string;
+            aid: string;
+            tid: string;
+            referer: string;
+            price: number;
+            balanceAfter: number;
+          }
+        | { ok: false; error: string }
+      >,
+    formPost: (payload: { url: string; body: string; referer?: string }) =>
+      ipcRenderer.invoke("extensionWs:formPost", payload) as Promise<
+        | {
+            ok: true;
+            title: string;
+            text: string;
+            html: string;
+            finalUrl: string;
+          }
+        | { ok: false; error: string }
+      >,
     download: (payload: {
       url: string;
       referer?: string;
