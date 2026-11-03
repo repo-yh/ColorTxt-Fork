@@ -162,22 +162,38 @@ export function useBookshelfUpdate(onBooksChanged?: (books: BookshelfBook[]) => 
 
   async function updateBook(book: BookshelfBook): Promise<boolean> {
     if (book.canUpdate === false) return false;
-    return withSourceUpdateLock(book.origin, () => updateBookOnce(book));
+    const key = bookshelfBookKey(book.bookUrl, book.origin);
+    if (updatingKeys.value.has(key)) return false;
+    setUpdating(key, true);
+    try {
+      return await withSourceUpdateLock(
+        book.origin,
+        () => updateBookOnce(book),
+      );
+    } finally {
+      setUpdating(key, false);
+    }
   }
 
   /** 批量更新专用入口：该源已检测到登录失效（仅 WS 源，见 loginExpiredOrigins）直接跳过 */
   async function updateBookBatch(book: BookshelfBook): Promise<boolean> {
     if (loginExpiredOrigins.has(book.origin)) return false;
-    return withSourceUpdateLock(book.origin, async () => {
-      // 锁内二次检测：排队等锁期间同源其他书可能已检出登录失效
-      if (loginExpiredOrigins.has(book.origin)) return false;
-      return updateBookOnce(book);
-    });
+    const key = bookshelfBookKey(book.bookUrl, book.origin);
+    if (updatingKeys.value.has(key)) return false;
+    setUpdating(key, true);
+    try {
+      return await withSourceUpdateLock(book.origin, async () => {
+        // 锁内二次检测：排队等锁期间同源其他书可能已检出登录失效
+        if (loginExpiredOrigins.has(book.origin)) return false;
+        return updateBookOnce(book);
+      });
+    } finally {
+      setUpdating(key, false);
+    }
   }
 
   async function updateBookOnce(book: BookshelfBook): Promise<boolean> {
     const key = bookshelfBookKey(book.bookUrl, book.origin);
-    if (updatingKeys.value.has(key)) return false;
 
     // searchUpdate 书源：检查更新走「书名模糊搜索 + 标题完结/章节数比对」（假目录站检测不到更新）
     if (await isSearchUpdateSource(book.origin)) {
@@ -328,9 +344,20 @@ export function useBookshelfUpdate(onBooksChanged?: (books: BookshelfBook[]) => 
             );
             break;
           }
-          await updateBookBatch(group[i]);
-          if (intervalMs > 0 && i < group.length - 1) {
-            await new Promise((r) => setTimeout(r, intervalMs));
+          // 转圈覆盖「检查 + 本间等待」全程：旧版间隔由请求层限流承担（转圈期间
+          // 一直在 sleep），限流撤层后间隔挪到本书检查前、仍在置位窗口内——
+          // 避免 20s+ 本间间隔期书架完全静止、转圈只剩检查瞬间一闪
+          const book = group[i];
+          const key = bookshelfBookKey(book.bookUrl, book.origin);
+          if (updatingKeys.value.has(key)) continue;
+          setUpdating(key, true);
+          try {
+            if (i > 0 && intervalMs > 0) {
+              await new Promise((r) => setTimeout(r, intervalMs));
+            }
+            await withSourceUpdateLock(origin, () => updateBookOnce(book));
+          } finally {
+            setUpdating(key, false);
           }
         }
       },
