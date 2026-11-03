@@ -81,6 +81,7 @@ const props = withDefaults(
     draftScrollbarTrackBehavior: ScrollbarTrackBehavior;
     draftMonacoCjkWrapOptimize: boolean;
     draftWebDisplayEnabled: boolean;
+    draftExtensionWsEnabled?: boolean;
     draftMouseWheelScrollSensitivity: number;
     draftFastScrollSensitivity: number;
     draftStickyChapterTitleEnabled: boolean;
@@ -107,6 +108,8 @@ const props = withDefaults(
     draftReadingRulerTransitionEnabled: boolean;
     /** 主界面显示「查找」应用目标；找书窗口无全文搜索侧栏，不展示该项 */
     showFindTargetOption?: boolean;
+    /** 主界面显示「油猴脚本服务」开关；找书窗口不展示 */
+    showExtensionWsOption?: boolean;
     /**
      * 工具条预览是否展示高亮词 / 划线 / 记笔记。
      * 找书窗口为 false。
@@ -119,6 +122,7 @@ const props = withDefaults(
   }>(),
   {
     showFindTargetOption: true,
+    showExtensionWsOption: true,
     showAnnotationTools: true,
     showAskAi: true,
     draftFindBookChapterAdvanceEnabled: true,
@@ -139,6 +143,7 @@ defineEmits<{
   "update:draftScrollbarTrackBehavior": [v: ScrollbarTrackBehavior];
   "update:draftMonacoCjkWrapOptimize": [v: boolean];
   "update:draftWebDisplayEnabled": [v: boolean];
+  "update:draftExtensionWsEnabled": [v: boolean];
   "update:draftMouseWheelScrollSensitivity": [v: number];
   "update:draftFastScrollSensitivity": [v: number];
   "update:draftStickyChapterTitleEnabled": [v: boolean];
@@ -521,6 +526,22 @@ const selectListsEmpty: CustomSelectItem[] = [];
         </div>
         <p class="settingsHint">
           开启后可通过浏览器访问 http://localhost:8888 查看当前正文的染色效果。
+        </p>
+      </div>
+
+      <div v-if="showExtensionWsOption" class="settingsRow">
+        <div class="settingsRowMain">
+          <span class="settingsLabel">启用油猴脚本服务（端口 8899）</span>
+          <SwitchToggle
+            :model-value="draftExtensionWsEnabled"
+            aria-label="启用油猴脚本服务"
+            @update:model-value="
+              $emit('update:draftExtensionWsEnabled', $event)
+            "
+          />
+        </div>
+        <p class="settingsHint">
+          开启后本机油猴脚本通过 ws://127.0.0.1:8899 连接，用日常浏览器抓取书源页面（跳过内置浏览器的 CF 验证）。
         </p>
       </div>
 

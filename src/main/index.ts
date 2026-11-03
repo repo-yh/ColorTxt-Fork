@@ -7,6 +7,7 @@ import { registerUpdaterIpc, setupAutoUpdater } from "./updater";
 import { markAppQuittingForClose } from "./windowCloseGuard";
 import { createMainWindowFactory } from "./windowFactory";
 import { stopWebDisplay, type FileListItem } from "./webDisplay";
+import { stopExtensionWsServer } from "./extensionWs";
 import {
   argvHasFindBookFlag,
   openFindBookLaunchWindow,
@@ -22,6 +23,8 @@ import {
   isStealthReaderWindow,
 } from "./stealthReader";
 import { isStealthSettingsWindow } from "./stealthSettingsWindow";
+// 受管浏览器通道：import 即注册 will-quit 自动销毁（浏览器懒启动，无其他副作用）
+import "./managedBrowser";
 
 // 开发态 DevTools 会对「无 CSP / 含 unsafe-eval」的渲染进程刷安全警告；
 // 主界面 CSP 需 unsafe-eval（文本替换 @js:），登录验证窗还会加载第三方页——无法也不应强行收紧。
@@ -135,6 +138,7 @@ app.on("before-quit", () => {
   };
 
   stopWebDisplay(getFileList);
+  stopExtensionWsServer();
   destroyAllBackstageWebViews();
   destroyBookSourceBrowserWindow();
 });

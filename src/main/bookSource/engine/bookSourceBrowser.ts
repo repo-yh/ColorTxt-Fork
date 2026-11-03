@@ -27,6 +27,47 @@ let currentBookName = "";
 /** 窗口标记：退出路径识别并真正销毁隐藏保留的浏览器窗口（隐藏窗口会让 window-all-closed 不触发） */
 const BROWSER_WINDOW_FLAG = "__colortxtBookSourceBrowser";
 
+/** 快照窗口标记：WS 油猴通道抓取的静态 HTML 快照模式（禁导航，链接点击提示去外部浏览器） */
+const SNAPSHOT_WINDOW_FLAG = "__colortxtBookSourceSnapshot";
+
+function isSnapshotWindow(win: BrowserWindow): boolean {
+  return (
+    (win as unknown as Record<string, unknown>)[SNAPSHOT_WINDOW_FLAG] === true
+  );
+}
+
+/** 快照 HTML 预处理：剥脚本（纯静态快照，避免 about:blank 里跑站点脚本）+ 插 <base> 修正相对资源路径 */
+function buildSnapshotHtml(html: string, baseUrl: string): string {
+  const stripped = html
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi, "")
+    .replace(/<script\b[^>]*\/>/gi, "");
+  const base = `<base href="${baseUrl.replace(/"/g, "&quot;")}">`;
+  if (/<head\b[^>]*>/i.test(stripped)) {
+    return stripped.replace(/<head\b[^>]*>/i, (m) => `${m}\n${base}`);
+  }
+  return `${base}\n${stripped}`;
+}
+
+/** 快照渲染：about:blank 上 document.write 注入预处理的 HTML（不走真实请求，登录态内容直接呈现） */
+async function navigateSnapshot(
+  win: BrowserWindow,
+  snapshot: { html: string; baseUrl: string },
+  title?: string,
+): Promise<void> {
+  if (title && !win.isDestroyed()) win.setTitle(title);
+  try {
+    await win.loadURL("about:blank");
+    if (win.isDestroyed()) return;
+    const html = buildSnapshotHtml(snapshot.html, snapshot.baseUrl);
+    await win.webContents.executeJavaScript(
+      `document.open(); document.write(${JSON.stringify(html)}); document.close();`,
+    );
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    new Notification({ title: "书源快照打开失败", body: msg }).show();
+  }
+}
+
 export function isBookSourceBrowserWindow(win: BrowserWindow): boolean {
   return (
     (win as unknown as Record<string, unknown>)[BROWSER_WINDOW_FLAG] === true
@@ -51,6 +92,7 @@ export function openBookSourceBrowserWindow(
   pageUrl: string,
   title?: string,
   bookName?: string,
+  snapshot?: { html: string; baseUrl: string },
 ): { ok: boolean; message?: string } {
   const target = pageUrl.trim();
   if (!/^https?:\/\//i.test(target)) {
@@ -64,10 +106,19 @@ export function openBookSourceBrowserWindow(
   if (existing) {
     existing.show();
     existing.focus();
-    void navigate(existing, sesEntry, target, title || currentBookName);
+    if (snapshot) {
+      (existing as unknown as Record<string, unknown>)[SNAPSHOT_WINDOW_FLAG] =
+        true;
+      void navigateSnapshot(existing, snapshot, title || currentBookName);
+    } else {
+      delete (existing as unknown as Record<string, unknown>)[
+        SNAPSHOT_WINDOW_FLAG
+      ];
+      void navigate(existing, sesEntry, target, title || currentBookName);
+    }
     return { ok: true };
   }
-  createWindow(sesEntry, target, title || currentBookName);
+  createWindow(sesEntry, target, title || currentBookName, snapshot);
   return { ok: true };
 }
 
@@ -75,6 +126,7 @@ function createWindow(
   sesEntry: SessionEntry,
   pageUrl: string,
   title?: string,
+  snapshot?: { html: string; baseUrl: string },
 ): void {
   const win = new BrowserWindow({
     title: title || "书源浏览",
@@ -92,6 +144,9 @@ function createWindow(
   });
   browserWin = win;
   (win as unknown as Record<string, unknown>)[BROWSER_WINDOW_FLAG] = true;
+  if (snapshot) {
+    (win as unknown as Record<string, unknown>)[SNAPSHOT_WINDOW_FLAG] = true;
+  }
   win.removeMenu();
   win.setMenuBarVisibility(false);
   win.webContents.setUserAgent(getWebViewUserAgent());
@@ -135,10 +190,22 @@ function createWindow(
     cb(true);
   });
 
-  // 站内新开链接在当前窗口导航，不弹新 Electron 窗口（下载走 will-download 不受影响）
+  // 站内新开链接在当前窗口导航，不弹新 Electron 窗口（下载走 will-download 不受影响）；
+  // 快照模式：不开新链接（纯单页快照），提示去外部浏览器
   win.webContents.setWindowOpenHandler(({ url: target }) => {
+    if (isSnapshotWindow(win)) {
+      showBrowserWindowToast("快照页不支持打开新链接，请到外部浏览器查看", 3000);
+      return { action: "deny" };
+    }
     void navigate(win, sesEntry, target, undefined, { silent: true });
     return { action: "deny" };
+  });
+
+  // 快照模式禁导航：页面内链接点击不跳转（真实导航会退回游客态，登录态只在外部浏览器会话）
+  win.webContents.on("will-navigate", (e) => {
+    if (!isSnapshotWindow(win)) return;
+    e.preventDefault();
+    showBrowserWindowToast("快照页不支持跳转，请到外部浏览器打开链接", 3000);
   });
 
   win.webContents.on("did-navigate", (_e, url) => {
@@ -147,7 +214,11 @@ function createWindow(
     }
   });
 
-  void navigate(win, sesEntry, pageUrl, title);
+  if (snapshot) {
+    void navigateSnapshot(win, snapshot, title);
+  } else {
+    void navigate(win, sesEntry, pageUrl, title);
+  }
 }
 
 async function navigate(

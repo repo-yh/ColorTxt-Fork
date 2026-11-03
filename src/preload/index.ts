@@ -504,6 +504,86 @@ const api = {
         ok: boolean;
       }>,
   },
+  extensionWs: {
+    start: () =>
+      ipcRenderer.invoke("extensionWs:start") as Promise<{
+        ok: boolean;
+        reason?: string;
+      }>,
+    stop: () =>
+      ipcRenderer.invoke("extensionWs:stop") as Promise<{ ok: boolean }>,
+    isRunning: () =>
+      ipcRenderer.invoke("extensionWs:isRunning") as Promise<boolean>,
+    openAndGetHtml: (url: string) =>
+      ipcRenderer.invoke("extensionWs:openAndGetHtml", url) as Promise<
+        | {
+            ok: true;
+            title: string;
+            text: string;
+            html: string;
+            finalUrl: string;
+          }
+        | { ok: false; error: string }
+      >,
+    parseChapterAttachments: (url: string) =>
+      ipcRenderer.invoke("extensionWs:parseChapterAttachments", url) as Promise<
+        | {
+            ok: true;
+            finalUrl: string;
+            purchased: { url: string; name: string }[];
+            unpaid: { url: string; name: string }[];
+          }
+        | { ok: false; error: string }
+      >,
+    parseAttachpay: (url: string) =>
+      ipcRenderer.invoke("extensionWs:parseAttachpay", url) as Promise<
+        | {
+            ok: true;
+            action: string;
+            formhash: string;
+            aid: string;
+            tid: string;
+            referer: string;
+            price: number;
+            balanceAfter: number;
+          }
+        | { ok: false; error: string }
+      >,
+    formPost: (payload: { url: string; body: string; referer?: string }) =>
+      ipcRenderer.invoke("extensionWs:formPost", payload) as Promise<
+        | {
+            ok: true;
+            title: string;
+            text: string;
+            html: string;
+            finalUrl: string;
+          }
+        | { ok: false; error: string }
+      >,
+    download: (payload: {
+      url: string;
+      referer?: string;
+      postUrl?: string;
+      bookName?: string;
+      downloadDir?: string;
+    }) =>
+      ipcRenderer.invoke("extensionWs:download", payload) as Promise<{
+        ok: boolean;
+        error?: string;
+      }>,
+    onDownloadEvent: (
+      cb: (
+        ev: import("@shared/bookSource/ipc").ExtensionWsDownloadEvent,
+      ) => void,
+    ) => {
+      const fn = (
+        _: unknown,
+        payload: import("@shared/bookSource/ipc").ExtensionWsDownloadEvent,
+      ) => cb(payload);
+      ipcRenderer.on("extensionWs:downloadEvent", fn);
+      return () => ipcRenderer.off("extensionWs:downloadEvent", fn);
+    },
+  },
   emptyDir: (dirPath: string) =>
     ipcRenderer.invoke("fs:emptyDir", dirPath) as Promise<{ ok: true }>,
   removePath: (targetPath: string) =>
@@ -1314,6 +1394,13 @@ const api = {
       BOOK_SOURCE_IPC.browserOpen,
       payload,
     ) as ReturnType<BookSourceIpcApi["bookSourceBrowserOpen"]>,
+  bookSourceWsSnapshotOpen: (
+    payload: Parameters<BookSourceIpcApi["bookSourceWsSnapshotOpen"]>[0],
+  ) =>
+    ipcRenderer.invoke(
+      BOOK_SOURCE_IPC.wsSnapshotOpen,
+      payload,
+    ) as ReturnType<BookSourceIpcApi["bookSourceWsSnapshotOpen"]>,
   bookSourceBrowserDownload: (
     payload: Parameters<BookSourceIpcApi["bookSourceBrowserDownload"]>[0],
   ) =>

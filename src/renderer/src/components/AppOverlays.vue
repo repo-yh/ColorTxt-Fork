@@ -58,6 +58,7 @@ const props = defineProps<{
   scrollbarTrackBehavior: import("../constants/appUi").ScrollbarTrackBehavior;
   monacoCjkWrapOptimize: boolean;
   webDisplayEnabled: boolean;
+  extensionWsEnabled: boolean;
   mouseWheelScrollSensitivity: number;
   fastScrollSensitivity: number;
   stickyChapterTitleEnabled: boolean;
@@ -300,6 +301,7 @@ const busyOverlayText = computed(() => {
     :scrollbar-track-behavior="scrollbarTrackBehavior"
     :monaco-cjk-wrap-optimize="monacoCjkWrapOptimize"
     :web-display-enabled="webDisplayEnabled"
+    :extension-ws-enabled="extensionWsEnabled"
     :mouse-wheel-scroll-sensitivity="mouseWheelScrollSensitivity"
     :fast-scroll-sensitivity="fastScrollSensitivity"
     :sticky-chapter-title-enabled="stickyChapterTitleEnabled"

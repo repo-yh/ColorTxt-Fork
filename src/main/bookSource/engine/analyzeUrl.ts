@@ -12,6 +12,7 @@ import {
   resolveSourceRequestHeaders,
 } from "./sourceRequestHeaders";
 import { appendBookSourceErrorLog } from "./bookSourceErrorLog";
+import { emitBookSourceToast } from "./bookSourceToast";
 import { toLegadoStrResponse } from "./legadoStrResponse";
 import { cookieHeaderForUrl } from "./cookieManager";
 import { DEFAULT_BOOK_SOURCE_USER_AGENT } from "./bookSourceUserAgent";
@@ -23,6 +24,7 @@ import {
   runBackstageWebView,
 } from "./backstageWebView";
 import { fetchViaChromiumNet } from "./chromiumNetFetch";
+import { openAndGetHtml } from "../../extensionWs";
 import { splitAtJsRule } from "./legadoRuleSplit";
 import {
   isLegadoEmbeddedRuleExpr,
@@ -130,6 +132,26 @@ function encodeLegadoQueryString(params: string, charset?: string): string {
       .join("");
   }
   return out;
+}
+
+/** 油猴通道失败弹窗节流：同一书源 5 分钟内只 toast 一次（批量检查更新逐书失败防刷屏） */
+const extensionFailToastAt = new Map<string, number>();
+const EXTENSION_FAIL_TOAST_INTERVAL_MS = 5 * 60 * 1000;
+
+function notifyExtensionChannelFailure(
+  source: BookSourceRecord | undefined,
+  error: string,
+): void {
+  const key = source?.bookSourceUrl ?? "";
+  const now = Date.now();
+  if (now - (extensionFailToastAt.get(key) ?? 0) < EXTENSION_FAIL_TOAST_INTERVAL_MS) {
+    return;
+  }
+  extensionFailToastAt.set(key, now);
+  emitBookSourceToast(
+    `「${source?.bookSourceName || "书源"}」油猴通道抓取失败：${error}`,
+    true,
+  );
 }
 
 function augmentGorgonHeaders(
@@ -730,6 +752,37 @@ export class AnalyzeUrl {
       undefined;
     const useWebView = this.urlFetchOptions.webView === true;
     const webPayload = this.buildWebViewRequestPayload();
+
+    // WebSocket 通道（enabledWebSocket）：登录态在外部浏览器（油猴脚本会话），本地无 CookieJar，
+    // GET 页面请求一律交油猴脚本 openAndGetHtml 抓取（40s 超时/重推在 extensionWs 内），
+    // 不依赖 URL option 的 webView 后缀；WS 源本地静态请求没有登录态，不设静态快通道，
+    // 失败也不回落 webView——内置窗抓到的同样是未登录页。
+    // 有 webJs（须在页面内执行脚本）或 POST 时油猴脚本语义不等价，维持原路。
+    if (
+      this.source?.enabledWebSocket === true &&
+      this.method === "GET" &&
+      !webJs
+    ) {
+      const r = await openAndGetHtml(this.url);
+      if (!r.ok) {
+        // 用户拍板：油猴任务失败（page load timeout 等）不能只留在脚本控制台，
+        // 服务器要弹窗提醒并记入引擎日志（日志按钮面板经现有 logs 透传可见）
+        appendBookSourceErrorLog(this.host.logs, new Error(r.error), {
+          phase: "油猴通道抓取",
+          sourceName: this.source?.bookSourceName,
+          sourceUrl: this.source?.bookSourceUrl,
+          url: this.url,
+        });
+        notifyExtensionChannelFailure(this.source, r.error);
+        throw new Error(`油猴通道抓取失败: ${r.error}`);
+      }
+      const body = this.urlFetchOptions.type?.trim()
+        ? this.applyTypeHexBody(r.html)
+        : r.html;
+      // url 取 finalUrl（跳转后的最终页 URL）：对齐静态快通道语义，
+      // 登录检测/loginCheckJs 靠它识别「被重定向到登录页」
+      return { url: r.finalUrl || this.url, body, headers: {} };
+    }
 
     if (useWebView && (this.method === "GET" || this.method === "POST")) {
       // 静态快通道：带 CookieJar 凭证（浏览器/验证窗关窗固化）的静态请求多数能直达真页面

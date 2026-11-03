@@ -25,7 +25,7 @@ import type {
   BookSourceRecord,
   SearchBookItem,
 } from "@shared/bookSource/types";
-import { appLog, appPrompt } from "../../services/appDialog";
+import { appConfirm, appLog, appPrompt } from "../../services/appDialog";
 import { appToast } from "../../services/appToast";
 import { searchBookToBook } from "@shared/bookSource/bookModel";
 import { ipcPlain } from "../ipcPlain";
@@ -60,11 +60,17 @@ import {
   type DetailAttachment,
 } from "../bookDetailAttachments";
 import {
+  cleanBookNameForSearch,
+  downloadChapterViaExtension,
+  downloadLatestPostViaExtension,
   isSearchUpdateSource,
   openChapterPostInBrowser,
   openSearchResultInBrowser,
+  searchUrlAsTocUrl,
   setFindBookBookshelfHasUpdate,
+  type AttachmentPurchasePlan,
 } from "../searchUpdateService";
+import { escapeHtml } from "../highlightBookSourceCode";
 
 /** 与 .bookDetailChapterItem 固定行高一致（外层滚动虚拟列表） */
 const CHAPTER_ROW_STRIDE = 40;
@@ -265,7 +271,7 @@ watch(
 );
 
 const displayItem = computed(() => props.item);
-const displayName = computed(() => detail.value?.name ?? props.item?.name ?? "");
+const displayName = computed(() => detail.value?.name || props.item?.name || "");
 const displayAuthor = computed(
   () => detail.value?.author ?? props.item?.author ?? "",
 );
@@ -491,7 +497,8 @@ function buildShelfItem(): SearchBookItem | null {
   };
   return {
     ...item,
-    name: displayName.value,
+    // 书架保存名：《》内书名优先，失败回退帖子名（对齐作者字段的兜底模式）
+    name: cleanBookNameForSearch(displayName.value),
     author: displayAuthor.value,
     intro: detail.value?.intro ?? item.intro,
     coverUrl: displayCover.value || item.coverUrl,
@@ -600,6 +607,12 @@ async function onLogin() {
   const source = await window.colorTxt.bookSourceGet(origin);
   if (!source?.loginUrl?.trim()) {
     appToast("此书源未配置登录", { kind: "warning" });
+    return;
+  }
+  // WebSocket 通道：登录态在外部浏览器会话，跳系统默认浏览器打开登录页
+  if (source.enabledWebSocket) {
+    await window.colorTxt.openExternal(source.loginUrl.trim());
+    appToast("已在外部浏览器打开登录页", { kind: "info" });
     return;
   }
   // 对齐 Legado SourceLoginActivity：无 loginUi → WebView；有 loginUi → 弹层
@@ -943,20 +956,57 @@ async function onReadChapter(displayIndex: number) {
   if (loading.value || !detail.value || !chapters.value.length) return;
   const ch = displayChapters.value[displayIndex];
   if (!ch) return;
-  // searchUpdate 书源：章节=版本帖，阅读窗口纯文本丢附件 → 浏览器打开帖子，不进阅读器
+  // searchUpdate 书源：章节=版本帖，阅读窗口纯文本丢附件 → 先走 WS 油猴通道
+  // 下载附件（已购下发脚本下载/未购提示购买），无附件或失败兜底内置浏览器打开帖子
   if (await isSearchUpdateSource(props.item?.origin?.trim())) {
-    const ok = await openChapterPostInBrowser(
-      props.item?.origin?.trim(),
+    const item = props.item;
+    const bookUrl = item?.bookUrl?.trim() || detail.value.bookUrl?.trim();
+    const bookName = detail.value.name?.trim() || item?.name?.trim() || "";
+    const dl = await downloadChapterViaExtension(
       ch.url,
-      props.item?.bookUrl?.trim() || detail.value.bookUrl?.trim(),
-      detail.value.name?.trim() || props.item?.name?.trim(),
+      bookName,
+      bookUrl,
+      item?.origin?.trim(),
+      props.downloadDir.trim(),
     );
-    if (!ok) {
-      appToast("打开浏览器失败", { kind: "warning" });
+    if (dl.status === "downloaded") {
+      appToast(`已开始下载 ${dl.count} 个附件`, { kind: "success" });
+      // 对齐阅读器打开章节：同步书架「最后阅读」到点击的帖子
+      if (item && inBookshelf.value) {
+        const contentIndex = contentChapterList.value.findIndex(
+          (c) => c.url === ch.url,
+        );
+        if (contentIndex >= 0) {
+          updateReadProgress(
+            item.bookUrl,
+            item.origin,
+            contentIndex,
+            ch.title?.trim(),
+            ch.url,
+          );
+        }
+      }
+      return;
+    }
+    if (dl.status === "needBuy") {
+      appToast(
+        dl.names.length ? `附件需购买：${dl.names.join("、")}` : "附件需购买",
+        { kind: "warning" },
+      );
+      return;
+    }
+    // noAttachment / failed：兜底 WS 抓正文快照渲染（离线 body）
+    const res = await openChapterPostInBrowser(
+      item?.origin?.trim(),
+      ch.url,
+      bookUrl,
+      bookName,
+    );
+    if (!res.ok) {
+      appToast(res.message || "快照打开失败", { kind: "warning" });
       return;
     }
     // 对齐阅读器打开章节：同步书架「最后阅读」到点击的帖子
-    const item = props.item;
     if (item && inBookshelf.value) {
       const contentIndex = contentChapterList.value.findIndex(
         (c) => c.url === ch.url,
@@ -995,14 +1045,50 @@ function resolveStartContentIndex(): number {
 async function onStartOrContinueReading() {
   if (loading.value || !detail.value || !contentChapterList.value.length) return;
   const item = props.item;
-  // searchUpdate 书源：章节=单个帖子、无翻章语义 → 「阅读」改开该书搜索结果页，手动看结果
+  // searchUpdate 书源：继续阅读/阅读 = 展示书的搜索结果页（版本帖目录），
+  // 走 WS 油猴通道抓 HTML（登录态在外部浏览器会话）以快照模式渲染；
+  // searchUrl 缺失/构造失败时回退原内置浏览器打开（游客态）
   if (await isSearchUpdateSource(item?.origin?.trim())) {
-    const ok = await openSearchResultInBrowser(
-      item?.origin?.trim(),
-      detail.value?.name ?? item?.name ?? "",
-      item?.bookUrl?.trim() || detail.value?.bookUrl?.trim(),
-    );
-    if (!ok) appToast("打开浏览器失败", { kind: "warning" });
+    const bookName = detail.value?.name ?? item?.name ?? "";
+    let searchPageUrl = "";
+    try {
+      const source = await window.colorTxt.bookSourceGet(
+        item?.origin?.trim() ?? "",
+      );
+      const searchUrl = source?.searchUrl?.trim();
+      if (searchUrl) {
+        const raw = searchUrlAsTocUrl(stripChapterUrlOption(searchUrl), bookName);
+        let full = raw;
+        try {
+          full = new URL(
+            raw,
+            item?.bookUrl?.trim() ||
+              detail.value?.bookUrl?.trim() ||
+              item?.origin?.trim() ||
+              "",
+          ).toString();
+        } catch {
+          /* base 无效则原样使用 */
+        }
+        searchPageUrl = full.trim();
+      }
+    } catch {
+      /* bookSourceGet 异常走回退 */
+    }
+    if (!searchPageUrl) {
+      const ok = await openSearchResultInBrowser(
+        item?.origin?.trim(),
+        bookName,
+        item?.bookUrl?.trim() || detail.value?.bookUrl?.trim(),
+      );
+      if (!ok) appToast("打开浏览器失败", { kind: "warning" });
+      return;
+    }
+    const res = await window.colorTxt.bookSourceWsSnapshotOpen({
+      url: searchPageUrl,
+      bookName,
+    });
+    if (!res.ok) appToast(res.message ?? "快照打开失败", { kind: "warning" });
     return;
   }
   const idx = resolveStartContentIndex();
@@ -1026,6 +1112,49 @@ async function onDownloadOrStop() {
   const item = props.item;
   const dir = props.downloadDir.trim();
   if (!item || !dir) return;
+  // searchUpdate 书源：主下载 = 最新章节帖附件（WS 油猴通道，不用 item.bookUrl 旧帖）；
+  // 未购附件弹窗确认（剩余余额/需要金币）后提交购买，成功重抓帖子过滤直链触发下载
+  if (await isSearchUpdateSource(item.origin?.trim())) {
+    const latest = contentChapterList.value[0];
+    if (!latest?.url?.trim()) {
+      appToast("无章节可下载", { kind: "warning" });
+      return;
+    }
+    const bookName = detail.value?.name?.trim() || item.name?.trim() || "";
+    const bookUrl = item.bookUrl?.trim() || detail.value?.bookUrl?.trim();
+    const dl = await downloadLatestPostViaExtension(
+      latest.url,
+      bookName,
+      bookUrl,
+      item.origin?.trim(),
+      dir,
+      {
+        confirmPurchase: async (plan: AttachmentPurchasePlan) => {
+          const lines = plan.attachments
+            .map((a) => `· ${escapeHtml(a.name || "附件")}（${a.price} 金钱）`)
+            .join("<br>");
+          const short = plan.balanceShort
+            ? '<br><span style="color:#e05252">余额不足，购买将失败</span>'
+            : "";
+          return appConfirm(
+            `${lines}<br><br>剩余余额：${plan.balanceAfter}<br>需要金币：${plan.totalCost}${short}`,
+            "购买附件",
+            { dangerouslyUseHTMLString: true },
+          );
+        },
+      },
+    );
+    if (dl.status === "downloaded") {
+      appToast(`已开始下载 ${dl.count} 个附件`, { kind: "success" });
+    } else if (dl.status === "needBuy") {
+      appToast("已取消购买", { kind: "info" });
+    } else if (dl.status === "failed") {
+      appToast(dl.error, { kind: "warning" });
+    } else {
+      appToast("该帖无附件", { kind: "warning" });
+    }
+    return;
+  }
   const path = await download(item, dir, props.cacheDir.trim() || undefined);
   if (path) {
     const st = await window.colorTxt.stat(path);

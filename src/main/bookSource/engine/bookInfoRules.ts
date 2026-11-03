@@ -342,7 +342,10 @@ export function stripEmbeddedAuthorFromDetailName(
 
   for (const suffix of suffixes) {
     if (n.endsWith(suffix)) {
-      return n.slice(0, n.length - suffix.length).trim();
+      // 剥空保护：书源 name/author 正则未命中时都原样返回整串（无《》且无「作者：」的标题），
+      // name===author，直接剥会把书名剥成空串——此时保留原 name（回退帖子名）
+      const stripped = n.slice(0, n.length - suffix.length).trim();
+      if (stripped) return stripped;
     }
   }
 

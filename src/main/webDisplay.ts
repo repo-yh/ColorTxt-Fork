@@ -253,6 +253,17 @@ export function startWebDisplay(
       return;
     }
 
+    if (url.pathname === "/background.user.js") {
+      // 油猴脚本下发（Tampermonkey 安装源 + 检查更新）：URL 以 .user.js 结尾，
+      // 浏览器直接访问即弹 TM 安装；与 front 前端文件同目录随包分发（front/**）
+      serveFile(
+        res,
+        join(frontDir, "background.user.js"),
+        "text/javascript; charset=utf-8",
+      );
+      return;
+    }
+
     if (url.pathname === "/api/files") {
       try {
         const files = await getFileList();

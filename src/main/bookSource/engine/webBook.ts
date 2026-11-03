@@ -15,6 +15,7 @@ import {
 import { normalizeBookSourceBaseUrl, normalizeHttpUrlPath, resolveAbsoluteUrl } from "@shared/bookSource/url";
 import { wordCountFormat } from "@shared/bookSource/wordCountFormat";
 import { formatLegadoBookAuthor, formatLegadoBookName } from "@shared/bookSource/formatBookAuthor";
+import { LOGIN_EXPIRED_LOG_MARK } from "@shared/bookSource/ipc";
 import {
   splitUrlAndRuleVariables,
   extractUrlFetchOptionsSuffix,
@@ -96,7 +97,8 @@ async function fetchWithLoginCheck(
     notifyLoginCookieExpired(source, logs);
   }
   // 登录检查两模式统一跑（用户拍板：手动模式同样弹登录窗→确认后同步 Cookie→重新请求；
-  // 手动域 jar 冻结由验证窗确认回调的 force 同步绕过，见 sourceVerification）
+  // 手动域 jar 冻结由验证窗确认回调的 force 同步绕过，见 sourceVerification）。
+  // WS 油猴通道书源（用户拍板：ws 不自愈）在 runLoginCheckJs 入口被屏蔽，只提醒不弹窗
   if (!source.loginCheckJs?.trim()) return res;
   return runLoginCheckJs(analyzeUrl, source, res, key, logs);
 }
@@ -112,12 +114,16 @@ function notifyLoginCookieExpired(
   const now = Date.now();
   const last = loginCookieToastAt.get(source.bookSourceUrl) ?? 0;
   logs.push(
-    `检测到登录页特征，登录 Cookie 可能已过期：${source.bookSourceName}`,
+    `${LOGIN_EXPIRED_LOG_MARK}，登录 Cookie 可能已过期：${source.bookSourceName}`,
   );
   if (now - last < LOGIN_COOKIE_TOAST_INTERVAL_MS) return;
   loginCookieToastAt.set(source.bookSourceUrl, now);
+  // WS 油猴通道书源登录态在外部浏览器：本地无 Cookie，「Cookie 过期」表述误导，
+  // 提醒去网页登录（不弹内置登录窗，自愈弹窗由 loginCheck.ts 入口统一屏蔽）
   emitBookSourceToast(
-    `「${source.bookSourceName}」登录 Cookie 可能已过期`,
+    source.enabledWebSocket
+      ? `「${source.bookSourceName}」登录已失效，请到浏览器打开书源站点重新登录`
+      : `「${source.bookSourceName}」登录 Cookie 可能已过期`,
     true,
   );
 }
@@ -495,7 +501,7 @@ export async function searchBook(
     } else {
       res = await analyzeUrl.getStrResponse();
       // 统一失效检测：无 loginCheckJs 的书源也走同一套提醒（弹窗逻辑仍由
-      // awaitLoginForSearchPage 按模式分流）
+      // awaitLoginForSearchPage 按模式分流；WS 书源在其入口被屏蔽只提醒）
       if (isLikelyLoginExpired(source, res)) {
         notifyLoginCookieExpired(source, logs);
       }
@@ -1318,10 +1324,19 @@ function bookInfoLooksEmpty(body: string): boolean {
   }
 }
 
+/** HTML 错误页判定：只认 <title> 内特征。正文/简介里的「404」「error」字样不代表错误页
+ *（实测 sxsy33 正常详情页简介含 QQ 号 2219924404，前 800 字符全文扫描会误报） */
+function htmlTitleLooksError(t: string): boolean {
+  const m = t.match(/<title[^>]*>([\s\S]{0,300}?)<\/title>/i);
+  const title = m?.[1]?.trim();
+  if (!title) return false;
+  return /404|not\s*found|error/i.test(title);
+}
+
 function bookInfoInitFailed(body: string, initRule?: string | null): boolean {
   const t = body.trim();
   if (!t) return true;
-  if (t.startsWith("<") && /404|not\s*found|error/i.test(t.slice(0, 800))) return true;
+  if (t.startsWith("<") && htmlTitleLooksError(t)) return true;
   const init = initRule?.trim() ?? "";
   if (!init) return false;
   // JS init（如 `<js>…</js>`）由 init 规则处理，不能按 JSONPath 校验
@@ -1332,7 +1347,7 @@ function bookInfoInitFailed(body: string, initRule?: string | null): boolean {
     // init 常只用 java.get('bid') 拼 tocUrl，不依赖正文 → 勿当失败
     if (!t.startsWith("{") && !t.startsWith("[")) {
       if (!t) return true;
-      if (t.startsWith("<") && /404|not\s*found|error/i.test(t.slice(0, 800))) {
+      if (t.startsWith("<") && htmlTitleLooksError(t)) {
         return true;
       }
       return false;

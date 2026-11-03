@@ -22,6 +22,8 @@ import {
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { startWebDisplay, stopWebDisplay, isWebDisplayRunning, clearCache, setCurrentFilePath, getCurrentFilePath, type ContentResult, type FileListItem, type HighlightsResult, type ChapterTitlesResult, type ApplyChapterTitlesResult, type ChapterContentResult, type SearchResult, type SearchMatchItem } from "./webDisplay";
+import { startExtensionWsServer, stopExtensionWsServer, isExtensionWsRunning, openAndGetHtml, downloadBookSourceFileViaExtension, formPostViaExtension } from "./extensionWs";
+import { parseChapterAttachments, parseAttachpayPage } from "./extensionAttachParse";
 import { getFonts } from "font-list";
 import {
   familyNamesToRawFaces,
@@ -1532,6 +1534,84 @@ function unknownQuoteAttributions(
   ipcMain.handle("webDisplay:isRunning", async () => {
     return isWebDisplayRunning();
   });
+
+  ipcMain.handle("extensionWs:start", async () => {
+    return startExtensionWsServer();
+  });
+
+  ipcMain.handle("extensionWs:stop", async () => {
+    stopExtensionWsServer();
+    return { ok: true as const };
+  });
+
+  ipcMain.handle("extensionWs:isRunning", async () => {
+    return isExtensionWsRunning();
+  });
+
+  ipcMain.handle(
+    "extensionWs:openAndGetHtml",
+    async (_evt, url: string) => {
+      return openAndGetHtml(url);
+    },
+  );
+
+  // WS 油猴通道：抓版本帖并解析付费附件（已购/未购两态），供「点章节下载 / 提示需购买」编排
+  ipcMain.handle("extensionWs:parseChapterAttachments", async (_evt, url: string) => {
+    const r = await openAndGetHtml(url);
+    if (!r.ok) return { ok: false as const, error: r.error };
+    return {
+      ok: true as const,
+      finalUrl: r.finalUrl,
+      ...parseChapterAttachments(r.html, r.finalUrl),
+    };
+  });
+
+  // WS 油猴通道：抓 attachpay 购买页并解析表单（action/hidden/售价/购买后余额），供购买确认编排
+  ipcMain.handle("extensionWs:parseAttachpay", async (_evt, url: string) => {
+    const r = await openAndGetHtml(url);
+    if (!r.ok) return { ok: false as const, error: r.error };
+    const form = parseAttachpayPage(r.html, r.finalUrl);
+    if (!form) {
+      return {
+        ok: false as const,
+        error: "购买页解析失败（页面结构与预期不符，可能未登录或附件状态已变化）",
+      };
+    }
+    return { ok: true as const, ...form };
+  });
+
+  // WS 油猴通道表单 POST（如附件购买）：非幂等，超时/断线不重推；
+  // HTTP 2xx 即成功，真实购买状态由调用方重抓帖子验证
+  ipcMain.handle(
+    "extensionWs:formPost",
+    async (
+      _evt,
+      payload: { url: string; body: string; referer?: string },
+    ) => formPostViaExtension(payload.url, payload.body, payload.referer),
+  );
+
+  // WS 油猴通道下载（fire-and-forget）：落盘目录由渲染侧找书设置下发，
+  // 落盘完成/失败后主进程广播 extensionWs:downloadEvent（宿主组件按书名替换/导入）
+  ipcMain.handle(
+    "extensionWs:download",
+    async (
+      _evt,
+      payload: {
+        url: string;
+        referer?: string;
+        postUrl?: string;
+        bookName?: string;
+        downloadDir?: string;
+      },
+    ) =>
+      downloadBookSourceFileViaExtension(
+        payload.url,
+        payload.referer,
+        payload.postUrl,
+        payload.bookName,
+        payload.downloadDir,
+      ),
+  );
 
   registerAiIpcHandlers();
   registerVoiceReadIpcHandlers();

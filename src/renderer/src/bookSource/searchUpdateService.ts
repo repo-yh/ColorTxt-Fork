@@ -1,4 +1,5 @@
 import type { BookChapter, BookSourceRecord } from "@shared/bookSource/types";
+import { LOGIN_EXPIRED_LOG_MARK } from "@shared/bookSource/ipc";
 import { ipcPlain } from "./ipcPlain";
 import {
   bookshelfAsBook,
@@ -75,30 +76,35 @@ export function setFindBookBookshelfHasUpdate(
   return next;
 }
 
-/** searchUpdate 书源章节（版本帖）用应用内书源浏览器打开；成功后清除书架「有更新」角标 */
+/**
+ * searchUpdate 书源章节（版本帖）：WS 油猴通道抓正文（外部浏览器登录态），
+ * 书源浏览器窗口快照渲染离线 body（禁导航纯单页，不实时回源）；成功后清除
+ * 书架「有更新」角标。书架条目单击（最后阅读）、阅读器/详情目录章节点击共用。
+ */
 export async function openChapterPostInBrowser(
   origin: string | undefined,
   chapterUrl: string | undefined,
   bookUrl: string | undefined,
   bookName?: string,
-): Promise<boolean> {
-  // 剥 ,{"webView": ...} option，浏览器只要纯帖子 URL
+): Promise<{ ok: boolean; message?: string }> {
+  // 剥 ,{"webView": ...} option，WS 抓页只要纯帖子 URL
   const url = stripChapterUrlOption(chapterUrl);
-  if (!origin?.trim() || !url) return false;
-  let opened = false;
+  if (!origin?.trim() || !url) return { ok: false, message: "章节 URL 无效" };
   try {
-    const res = await window.colorTxt.bookSourceBrowserOpen({
+    const res = await window.colorTxt.bookSourceWsSnapshotOpen({
       url,
       bookName: bookName?.trim() || undefined,
     });
-    opened = Boolean(res?.ok);
-  } catch {
-    opened = false;
+    if (!res?.ok) return { ok: false, message: res?.message || "快照打开失败" };
+  } catch (e) {
+    return {
+      ok: false,
+      message: e instanceof Error ? e.message : String(e),
+    };
   }
-  if (!opened) return false;
   const key = bookUrl?.trim();
   if (key) setFindBookBookshelfHasUpdate(key, origin.trim(), false);
-  return true;
+  return { ok: true };
 }
 
 function formatSearchUpdateLogHead(book: BookshelfBook): string {
@@ -219,6 +225,8 @@ export type SearchUpdateHooks = {
   setUpdating: (key: string, active: boolean) => void;
   appendLog: (entry: string) => void;
   onBooksChanged?: (books: BookshelfBook[]) => void;
+  /** 引擎 logs 命中登录失效标记时回调（批量更新据此终止该源剩余书的检查） */
+  onLoginExpired?: () => void;
 };
 
 /**
@@ -248,6 +256,15 @@ export async function runSearchUpdateForBook(
       searchUrl,
     );
     for (const line of logs) hooks.appendLog(line);
+    // 引擎 logs 命中登录失效标记（被重定向到登录页）→ 回调终止检查；
+    // 批量更新据此跳过本书源剩余书籍（对齐详情/目录链路的提前终止机制）
+    if (logs.some((line) => line.includes(LOGIN_EXPIRED_LOG_MARK))) {
+      hooks.onLoginExpired?.();
+      hooks.appendLog(
+        `${formatSearchUpdateLogHead(book)}\n登录已失效（被重定向到登录页），终止本书源剩余书籍的检查更新，请到浏览器重新登录`,
+      );
+      return false;
+    }
     if (!chapters.length) {
       hooks.appendLog(
         `${formatSearchUpdateLogHead(book)}\n搜索 0 条结果（可能登录态失效，请到书源重新登录）${
@@ -331,5 +348,249 @@ export async function runSearchUpdateForBook(
     return false;
   } finally {
     hooks.setUpdating(key, false);
+  }
+}
+
+/** 点章节走 WS 油猴通道下载附件的编排结果 */
+export type ChapterDownloadViaExtensionResult =
+  | { status: "downloaded"; count: number }
+  | { status: "needBuy"; names: string[] }
+  | { status: "noAttachment" }
+  | { status: "failed"; error: string };
+
+/**
+ * 已购附件逐个下发脚本下载（fire-and-forget，落盘目录用找书设置），成功后清书架
+ * 「有更新」角标。章节下载与主下载按钮购买后重取直链共用此同一下发路径。
+ */
+async function downloadPurchasedAttachments(
+  attachments: { url: string; name: string }[],
+  refererUrl: string,
+  bookName: string,
+  bookUrl: string | undefined,
+  sourceUrl: string,
+  downloadDir: string,
+): Promise<ChapterDownloadViaExtensionResult> {
+  const dir = downloadDir.trim();
+  let sent = 0;
+  for (const a of attachments) {
+    try {
+      const res = await window.colorTxt.extensionWs.download({
+        url: a.url,
+        referer: refererUrl,
+        postUrl: refererUrl,
+        bookName,
+        downloadDir: dir,
+      });
+      if (res?.ok) sent += 1;
+    } catch {
+      /* 单个下发失败继续其余附件 */
+    }
+  }
+  if (sent > 0) {
+    const key = bookUrl?.trim();
+    if (key) setFindBookBookshelfHasUpdate(key, sourceUrl, false);
+    return { status: "downloaded", count: sent };
+  }
+  return {
+    status: "failed",
+    error: "脚本未连接（请确认油猴脚本已启用、服务开关已打开）",
+  };
+}
+
+/**
+ * searchUpdate 书源点章节：WS 油猴通道抓帖子页解析附件两态——
+ * 已购附件逐个下发脚本下载（fire-and-forget，落盘目录用找书设置），成功后清「有更新」角标；
+ * 未购附件返回需购买名单；无附件/失败交调用方兜底（如回退内置浏览器打开）。
+ */
+export async function downloadChapterViaExtension(
+  chapterUrl: string | undefined,
+  bookName: string,
+  bookUrl: string | undefined,
+  origin: string | undefined,
+  downloadDir: string,
+): Promise<ChapterDownloadViaExtensionResult> {
+  // 剥 ,{"webView": ...} option（同浏览器打开路径），油猴抓取只要纯帖子 URL
+  const url = stripChapterUrlOption(chapterUrl).trim();
+  const name = bookName.trim();
+  const sourceUrl = origin?.trim();
+  if (!url || !sourceUrl) {
+    return { status: "failed", error: "章节 URL 无效" };
+  }
+  try {
+    const parsed = await window.colorTxt.extensionWs.parseChapterAttachments(
+      url,
+    );
+    if (!parsed.ok) {
+      return { status: "failed", error: parsed.error };
+    }
+    if (parsed.purchased.length > 0) {
+      return await downloadPurchasedAttachments(
+        parsed.purchased,
+        url,
+        name,
+        bookUrl,
+        sourceUrl,
+        downloadDir,
+      );
+    }
+    if (parsed.unpaid.length > 0) {
+      return {
+        status: "needBuy",
+        names: parsed.unpaid.map((a) => a.name).filter(Boolean),
+      };
+    }
+    return { status: "noAttachment" };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return { status: "failed", error: msg };
+  }
+}
+
+/** 附件购买确认计划（主下载按钮：未购附件弹窗展示用） */
+export type AttachmentPurchasePlan = {
+  /** 待购买附件（名称 + 售价） */
+  attachments: { name: string; price: number }[];
+  /** 表单展示的「购买后余额」（金钱；首个购买页原值，与表单一致） */
+  balanceAfter: number;
+  /** 本次购买合计需要（金钱） */
+  totalCost: number;
+  /** 余额不足预判（仅供弹窗标红提示，确认购买仍照常提交） */
+  balanceShort: boolean;
+};
+
+/**
+ * searchUpdate 书源主下载按钮：始终用最新章节帖（调用方传 contentChapterList[0]），
+ * WS 油猴通道抓帖解析附件两态——已购逐个下发脚本下载；
+ * 未购逐个 GET attachpay 购买页组计划 → hooks.confirmPurchase 弹窗确认 →
+ * 逐个 form_post 提交购买（HTTP 200 即成功，不解析响应内容）→
+ * 重新发起抓帖请求过滤附件下载链接（购买已生效，不做额外等待）→ 触发下载。
+ * 章节链路 downloadChapterViaExtension 不走此流程（章节入口无购买编排）。
+ */
+export async function downloadLatestPostViaExtension(
+  chapterUrl: string | undefined,
+  bookName: string,
+  bookUrl: string | undefined,
+  origin: string | undefined,
+  downloadDir: string,
+  hooks: {
+    confirmPurchase: (plan: AttachmentPurchasePlan) => Promise<boolean>;
+  },
+): Promise<ChapterDownloadViaExtensionResult> {
+  // 剥 ,{"webView": ...} option（同浏览器打开路径），油猴抓取只要纯帖子 URL
+  const url = stripChapterUrlOption(chapterUrl).trim();
+  const name = bookName.trim();
+  const sourceUrl = origin?.trim();
+  if (!url || !sourceUrl) {
+    return { status: "failed", error: "章节 URL 无效" };
+  }
+
+  try {
+    const parsed = await window.colorTxt.extensionWs.parseChapterAttachments(
+      url,
+    );
+    if (!parsed.ok) {
+      return { status: "failed", error: parsed.error };
+    }
+    // 已购附件直接下载（不涉及购买流程），与章节下载同一路径
+    if (parsed.purchased.length > 0) {
+      return await downloadPurchasedAttachments(
+        parsed.purchased,
+        url,
+        name,
+        bookUrl,
+        sourceUrl,
+        downloadDir,
+      );
+    }
+    if (parsed.unpaid.length === 0) {
+      return { status: "noAttachment" };
+    }
+
+    // 逐个 GET attachpay 购买页：取表单提交参数与计费信息
+    const forms: {
+      name: string;
+      action: string;
+      formhash: string;
+      aid: string;
+      referer: string;
+      price: number;
+      balanceAfter: number;
+    }[] = [];
+    for (const a of parsed.unpaid) {
+      const f = await window.colorTxt.extensionWs.parseAttachpay(a.url);
+      if (!f.ok) return { status: "failed", error: f.error };
+      forms.push({
+        name: a.name,
+        action: f.action,
+        formhash: f.formhash,
+        aid: f.aid,
+        referer: f.referer,
+        price: f.price,
+        balanceAfter: f.balanceAfter,
+      });
+    }
+    const totalCost = forms.reduce((s, f) => s + f.price, 0);
+    // 余额不足预判：发起前本金 = 首个表单的购买后余额 + 该附件售价
+    const first = forms[0]!;
+    const balanceShort = first.balanceAfter + first.price < totalCost;
+    const confirmed = await hooks.confirmPurchase({
+      attachments: forms.map((f) => ({ name: f.name, price: f.price })),
+      balanceAfter: first.balanceAfter,
+      totalCost,
+      balanceShort,
+    });
+    if (!confirmed) {
+      return {
+        status: "needBuy",
+        names: parsed.unpaid.map((a) => a.name).filter(Boolean),
+      };
+    }
+
+    // 逐个提交购买（form_post）：HTTP 200 即成功，不解析响应内容
+    for (const f of forms) {
+      const body = new URLSearchParams({
+        formhash: f.formhash,
+        aid: f.aid,
+        ...(f.referer ? { referer: f.referer } : {}),
+        paysubmit: "true",
+      }).toString();
+      const r = await window.colorTxt.extensionWs.formPost({
+        url: f.action,
+        body,
+        referer: url,
+      });
+      if (!r.ok) {
+        return { status: "failed", error: `购买请求失败：${r.error}` };
+      }
+    }
+
+    // 重新发起获取帖子的请求过滤附件下载链接（购买已生效，不做额外等待）
+    const reparsed = await window.colorTxt.extensionWs.parseChapterAttachments(
+      url,
+    );
+    if (!reparsed.ok) {
+      return {
+        status: "failed",
+        error: `购买后重新获取帖子失败：${reparsed.error}`,
+      };
+    }
+    if (reparsed.purchased.length === 0) {
+      return {
+        status: "failed",
+        error: "购买未生效（余额不足或站点拒绝），附件仍为未购状态",
+      };
+    }
+    // 拿到直链后与章节下载同一路径触发下发
+    return await downloadPurchasedAttachments(
+      reparsed.purchased,
+      url,
+      name,
+      bookUrl,
+      sourceUrl,
+      downloadDir,
+    );
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return { status: "failed", error: msg };
   }
 }

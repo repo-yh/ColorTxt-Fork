@@ -746,6 +746,12 @@ async function onLogin(item: BookSourceListItem) {
     appToast("此书源未配置登录", { kind: "warning" });
     return;
   }
+  // WebSocket 通道：登录态在外部浏览器会话，跳系统默认浏览器打开登录页
+  if (source.enabledWebSocket) {
+    await window.colorTxt.openExternal(source.loginUrl.trim());
+    appToast("已在外部浏览器打开登录页", { kind: "info" });
+    return;
+  }
   // 对齐 Legado SourceLoginActivity：无 loginUi → WebView；有 loginUi → 弹层
   if (!source.loginUi?.trim()) {
     const r = await window.colorTxt.bookSourceBrowserLogin(
