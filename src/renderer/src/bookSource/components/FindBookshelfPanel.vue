@@ -93,6 +93,7 @@ const rowMenu = useAnchoredAppShellMenu({
   placement: "below-end",
   widthPx: 168,
   gap: 6,
+  autoFlip: true,
 });
 const {
   open: rowMenuOpen,

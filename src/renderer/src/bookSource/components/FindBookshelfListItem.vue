@@ -127,6 +127,8 @@ watch(
 );
 
 function onClick(e: MouseEvent) {
+  // 空白处不响应点击（用户拍板）：非管理模式仅标题/作者/书源/分类等字段按钮可点
+  if (!props.managing) return;
   emit("click", props.item, e);
 }
 
@@ -160,6 +162,13 @@ function onSearchAuthorClick(e: MouseEvent) {
   e.stopPropagation();
   if (!authorSearchable.value) return;
   emit("searchAuthor", authorDisplay.value);
+}
+
+/** 最新章节/最后阅读行点击＝打开帖子内容（原有整行链路：readBook → 快照渲染） */
+function onOpenChapterClick(e: MouseEvent) {
+  if (props.managing) return;
+  e.stopPropagation();
+  emit("click", props.item, e);
 }
 
 function onSearchSourceClick(e: MouseEvent) {
@@ -260,7 +269,11 @@ function onSelectCategoryClick(e: MouseEvent) {
             {{ authorDisplay }}
           </button>
         </div>
-        <div class="findBookListItemLatest">
+        <button
+          type="button"
+          class="link findBookListItemLatest"
+          @click="onOpenChapterClick"
+        >
           <span
             class="findBookshelfMetaIcon"
             title="最新章节"
@@ -272,8 +285,12 @@ function onSelectCategoryClick(e: MouseEvent) {
             v-html="icons.lock"
             aria-hidden="true"
           /><span :title="latestChapterText">{{ latestChapterText }}</span>
-        </div>
-        <div class="findBookListItemLatest">
+        </button>
+        <button
+          type="button"
+          class="link findBookListItemLatest"
+          @click="onOpenChapterClick"
+        >
           <span
             class="findBookshelfMetaIcon"
             title="最后阅读"
@@ -285,7 +302,7 @@ function onSelectCategoryClick(e: MouseEvent) {
             v-html="icons.lock"
             aria-hidden="true"
           /><span :title="lastReadText">{{ lastReadText }}</span>
-        </div>
+        </button>
         <div v-if="showOriginMeta" class="findBookListItemOrigin">
           <span v-if="item.originName" class="findBookshelfOrigin">
             <span
@@ -399,7 +416,6 @@ function onSelectCategoryClick(e: MouseEvent) {
   background: var(--surface-elevated);
   border: 1px solid var(--border);
   color: var(--fg);
-  cursor: pointer;
   transition: background 0.12s ease, border-color 0.12s ease, box-shadow 0.12s ease;
 }
 .findBookListItem:hover {
@@ -719,6 +735,11 @@ img.findBookListItemCover {
   color: var(--accent);
 }
 .findBookListItemLatest {
+  /* 覆盖 button.link 的 inline-block：保持块级布局各占一行；
+     fit-content 让点击区=内容宽度，行尾空白不响应（用户拍板） */
+  display: block;
+  width: fit-content;
+  max-width: 100%;
   font-size: 12px;
   color: var(--muted);
   margin-bottom: 4px;
