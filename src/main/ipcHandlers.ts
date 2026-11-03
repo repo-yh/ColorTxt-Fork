@@ -1495,7 +1495,12 @@ function unknownQuoteAttributions(
       getSearchInFileFn,
     );
 
-    return { ok: started, reason: started ? undefined : "端口被占用" };
+    if (!started) return { ok: false as const, reason: "端口被占用" as const };
+
+    // 单开关联动：Web 展示服务启动即挂载 WS 油猴通道（共用 8888 端口）
+    const ws = await startExtensionWsServer();
+    if (!ws.ok) console.warn(`[webDisplay] WS 油猴通道挂载失败: ${ws.reason}`);
+    return { ok: true as const };
   });
 
   ipcMain.handle("webDisplay:stop", async () => {
@@ -1518,6 +1523,8 @@ function unknownQuoteAttributions(
       ) as Promise<FileListItem[]>;
     };
 
+    // 单开关联动：先停 WS 油猴通道（摘宿主 upgrade 监听）再关 Web 展示服务
+    if (isExtensionWsRunning()) stopExtensionWsServer();
     stopWebDisplay(getFileList);
     clearCache();
     return { ok: true as const };
@@ -1533,19 +1540,6 @@ function unknownQuoteAttributions(
 
   ipcMain.handle("webDisplay:isRunning", async () => {
     return isWebDisplayRunning();
-  });
-
-  ipcMain.handle("extensionWs:start", async () => {
-    return startExtensionWsServer();
-  });
-
-  ipcMain.handle("extensionWs:stop", async () => {
-    stopExtensionWsServer();
-    return { ok: true as const };
-  });
-
-  ipcMain.handle("extensionWs:isRunning", async () => {
-    return isExtensionWsRunning();
   });
 
   ipcMain.handle(

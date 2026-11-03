@@ -275,7 +275,6 @@ export function useAppPersistence(deps: {
   restoreSessionOnStartup: Ref<boolean>;
   recentFilesHistoryLimit: Ref<number>;
   webDisplayEnabled: Ref<boolean>;
-  extensionWsEnabled: Ref<boolean>;
   chapterMinCharCount: Ref<number>;
   monacoAdvancedWrapping: Ref<boolean>;
   monacoCjkWrapOptimize: Ref<boolean>;
@@ -433,7 +432,6 @@ export function useAppPersistence(deps: {
       syncCurrentFile: deps.syncCurrentFile.value,
       recentFilesHistoryLimit: recentLimit(),
       webDisplayEnabled: deps.webDisplayEnabled.value,
-      extensionWsEnabled: deps.extensionWsEnabled.value,
       chapterMinCharCount: deps.chapterMinCharCount.value,
       monacoAdvancedWrapping: deps.monacoAdvancedWrapping.value,
       monacoCjkWrapOptimize: deps.monacoCjkWrapOptimize.value,
@@ -1335,9 +1333,6 @@ export function useAppPersistence(deps: {
     }
     if (typeof data.webDisplayEnabled === "boolean") {
       deps.webDisplayEnabled.value = data.webDisplayEnabled;
-    }
-    if (typeof data.extensionWsEnabled === "boolean") {
-      deps.extensionWsEnabled.value = data.extensionWsEnabled;
     }
     if (
       typeof data.chapterMinCharCount === "number" &&

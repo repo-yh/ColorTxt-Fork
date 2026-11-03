@@ -505,15 +505,6 @@ const api = {
       }>,
   },
   extensionWs: {
-    start: () =>
-      ipcRenderer.invoke("extensionWs:start") as Promise<{
-        ok: boolean;
-        reason?: string;
-      }>,
-    stop: () =>
-      ipcRenderer.invoke("extensionWs:stop") as Promise<{ ok: boolean }>,
-    isRunning: () =>
-      ipcRenderer.invoke("extensionWs:isRunning") as Promise<boolean>,
     openAndGetHtml: (url: string) =>
       ipcRenderer.invoke("extensionWs:openAndGetHtml", url) as Promise<
         | {

@@ -483,3 +483,8 @@ export function stopWebDisplay(getFileList?: () => Promise<FileListItem[]>): voi
 export function isWebDisplayRunning(): boolean {
   return server !== null;
 }
+
+/** 暴露宿主 http.Server 供 WS 服务挂载（单端口 HTTP+WS）；未启动返回 null */
+export function getWebDisplayServer(): Server | null {
+  return server;
+}

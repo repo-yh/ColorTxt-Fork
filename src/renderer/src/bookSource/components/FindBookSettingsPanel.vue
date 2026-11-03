@@ -757,7 +757,6 @@ watch(draftFontSize, (size) => {
               v-show="activeTab === 'reading'"
               v-model:draft-font-family="draftFontFamily"
               :pinned-other-fonts="fb.pinnedOtherFonts.value"
-              :show-extension-ws-option="false"
               v-model:draft-font-size="draftFontSize"
               v-model:draft-line-height-multiple="draftLineHeightMultiple"
               v-model:draft-line-spacing-px="draftLineSpacingPx"

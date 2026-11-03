@@ -197,7 +197,6 @@ import {
   defaultReaderTheme,
   defaultRecentFilesHistoryLimit,
   defaultWebDisplayEnabled,
-  defaultExtensionWsEnabled,
   mergeReaderPaletteColorEnabled,
   resolveEffectiveReaderPalette,
   defaultRestoreSessionOnStartup,
@@ -984,31 +983,14 @@ watch(webDisplayEnabled, async (enabled) => {
       if (currentFile.value) {
         void window.colorTxt.webDisplay.setCurrentFile(currentFile.value);
       }
-      appToast("Web 展示服务已启动: http://localhost:8888", { kind: "success" });
+      // 油猴通道随 Web 展示服务启停（主进程联动挂载，共用 8888 端口）
+      appToast(
+        "Web 展示服务已启动: http://localhost:8888（含油猴通道）",
+        { kind: "success" },
+      );
     }
   } else {
     await window.colorTxt.webDisplay.stop();
-  }
-});
-
-const extensionWsEnabled = ref(defaultExtensionWsEnabled);
-
-watch(extensionWsEnabled, async (enabled) => {
-  if (enabled) {
-    const r = await window.colorTxt.extensionWs.start();
-    if (!r.ok) {
-      extensionWsEnabled.value = false;
-      appToast(
-        `油猴脚本服务启动失败: ${r.reason || "未知错误"}`,
-        { kind: "danger" },
-      );
-    } else {
-      appToast("油猴脚本服务已启动: ws://127.0.0.1:8899", {
-        kind: "success",
-      });
-    }
-  } else {
-    await window.colorTxt.extensionWs.stop();
   }
 });
 
@@ -1562,7 +1544,6 @@ const persistence = useAppPersistence({
   restoreSessionOnStartup,
   recentFilesHistoryLimit,
   webDisplayEnabled,
-  extensionWsEnabled,
   chapterMinCharCount,
   monacoAdvancedWrapping,
   monacoCjkWrapOptimize,
@@ -3915,7 +3896,6 @@ async function applySettings(payload: SettingsApplyPayload) {
   scrollbarTrackBehavior.value = payload.scrollbarTrackBehavior;
   monacoCjkWrapOptimize.value = payload.monacoCjkWrapOptimize;
   webDisplayEnabled.value = payload.webDisplayEnabled;
-  extensionWsEnabled.value = payload.extensionWsEnabled;
   mouseWheelScrollSensitivity.value = clampMouseWheelScrollSensitivity(
     payload.mouseWheelScrollSensitivity,
   );
@@ -4883,7 +4863,6 @@ useAppShellThemeWatch({
       :scrollbar-track-behavior="scrollbarTrackBehavior"
       :monaco-cjk-wrap-optimize="monacoCjkWrapOptimize"
       :web-display-enabled="webDisplayEnabled"
-      :extension-ws-enabled="extensionWsEnabled"
       :mouse-wheel-scroll-sensitivity="mouseWheelScrollSensitivity"
       :fast-scroll-sensitivity="fastScrollSensitivity"
       :sticky-chapter-title-enabled="stickyChapterTitleEnabled"

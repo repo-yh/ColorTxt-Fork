@@ -3,10 +3,12 @@ import fs from "node:fs";
 import path from "node:path";
 import { app, BrowserWindow } from "electron";
 import { WebSocketServer, WebSocket } from "ws";
+import { getWebDisplayServer } from "./webDisplay";
 import type { ExtensionWsDownloadEvent } from "../shared/bookSource/ipc";
 
-const PORT = 8899;
 const HOST = "127.0.0.1";
+/** WS 挂载路径：与 Web 展示服务共用 8888 端口（单端口 HTTP+WS），upgrade 按路径分发 */
+const WS_PATH = "/ws";
 /**
  * 服务器→脚本协议层心跳间隔：检测半开连接（SW 挂起/被杀时 TCP 无 FIN，
  * 服务器侧 client 引用永远占位，新连接会被误拒）。
@@ -375,38 +377,32 @@ function stopHeartbeat(): void {
   }
 }
 
-/** 启动 WS 服务（Promise 化，真实反映端口占用结果，供开关失败回滚） */
+/** 启动 WS 服务（挂 Web 展示服务宿主共用 8888 端口，仅接受 /ws 路径，随其开关联动） */
 export function startExtensionWsServer(): Promise<{
   ok: boolean;
   reason?: string;
 }> {
   if (wss) return Promise.resolve({ ok: true });
 
+  const host = getWebDisplayServer();
+  if (!host) {
+    return Promise.resolve({
+      ok: false,
+      reason: "Web 展示服务未启动（WS 与其共用端口 8888）",
+    });
+  }
+
   return new Promise((resolve) => {
-    const server = new WebSocketServer({ host: HOST, port: PORT });
-    let settled = false;
+    // server+path 模式：ws 自行挂宿主 upgrade 监听并按路径过滤（非 /ws 的 upgrade 直接拒绝）
+    const server = new WebSocketServer({ server: host, path: WS_PATH });
 
-    server.once("listening", () => {
-      settled = true;
-      wss = server;
-      console.log(`[extensionWs] WS 服务已启动: ws://${HOST}:${PORT}`);
-      startHeartbeat();
-      startExtensionWsDebugServer();
-      resolve({ ok: true });
-    });
-
-    server.once("error", (err: NodeJS.ErrnoException) => {
-      if (!settled) {
-        settled = true;
-        const reason =
-          err.code === "EADDRINUSE"
-            ? `端口 ${PORT} 被占用`
-            : String(err.message ?? err);
-        resolve({ ok: false, reason });
-      }
-      server.close();
-      if (wss === server) wss = null;
-    });
+    wss = server;
+    console.log(
+      `[extensionWs] WS 服务已启动: ws://${HOST}:8888${WS_PATH}（随 Web 展示服务）`,
+    );
+    startHeartbeat();
+    startExtensionWsDebugServer();
+    resolve({ ok: true });
 
     server.on("connection", (ws, req) => {
       console.log(`[extensionWs] 收到连接 ${req.socket.remoteAddress}`);

@@ -238,8 +238,6 @@ export type PersistedSettingsData = {
   webDavEnabled?: boolean;
   /** 是否启用 Web 展示服务（默认 false） */
   webDisplayEnabled?: boolean;
-  /** 是否启用油猴脚本 WS 服务（默认 false） */
-  extensionWsEnabled?: boolean;
   /** WebDAV 服务地址 */
   webDavUrl?: string;
   /** WebDAV 用户名 */
@@ -670,9 +668,6 @@ export function loadPersistedSettingsData(
   }
   if (typeof obj.webDisplayEnabled === "boolean") {
     data.webDisplayEnabled = obj.webDisplayEnabled;
-  }
-  if (typeof obj.extensionWsEnabled === "boolean") {
-    data.extensionWsEnabled = obj.extensionWsEnabled;
   }
   if (typeof obj.webDavUrl === "string") {
     data.webDavUrl = obj.webDavUrl;

@@ -50,7 +50,6 @@ import {
   defaultFullscreenShowSystemTime,
   defaultMonacoCjkWrapOptimize,
   defaultWebDisplayEnabled,
-  defaultExtensionWsEnabled,
   defaultMonacoSmoothScrolling,
   defaultScrollbarTrackBehavior,
   defaultMouseWheelScrollSensitivity,
@@ -165,7 +164,6 @@ export type SettingsApplyPayload = {
   scrollbarTrackBehavior: import("../constants/appUi").ScrollbarTrackBehavior;
   monacoCjkWrapOptimize: boolean;
   webDisplayEnabled: boolean;
-  extensionWsEnabled: boolean;
   mouseWheelScrollSensitivity: number;
   fastScrollSensitivity: number;
   stickyChapterTitleEnabled: boolean;
@@ -229,7 +227,6 @@ const props = defineProps<{
   scrollbarTrackBehavior: import("../constants/appUi").ScrollbarTrackBehavior;
   monacoCjkWrapOptimize: boolean;
   webDisplayEnabled: boolean;
-  extensionWsEnabled: boolean;
   mouseWheelScrollSensitivity: number;
   fastScrollSensitivity: number;
   stickyChapterTitleEnabled: boolean;
@@ -313,7 +310,6 @@ const draftMonacoSmoothScrolling = ref(true);
 const draftScrollbarTrackBehavior = ref(defaultScrollbarTrackBehavior);
 const draftMonacoCjkWrapOptimize = ref(defaultMonacoCjkWrapOptimize);
 const draftWebDisplayEnabled = ref(false);
-const draftExtensionWsEnabled = ref(false);
 const draftMouseWheelScrollSensitivity = ref(
   defaultMouseWheelScrollSensitivity,
 );
@@ -413,7 +409,6 @@ function syncDraftFromProps() {
   draftScrollbarTrackBehavior.value = props.scrollbarTrackBehavior;
   draftMonacoCjkWrapOptimize.value = props.monacoCjkWrapOptimize;
   draftWebDisplayEnabled.value = props.webDisplayEnabled;
-  draftExtensionWsEnabled.value = props.extensionWsEnabled;
   draftMouseWheelScrollSensitivity.value = clampMouseWheelScrollSensitivity(
     props.mouseWheelScrollSensitivity,
   );
@@ -637,7 +632,6 @@ function resetReadingDraft() {
   draftScrollbarTrackBehavior.value = defaultScrollbarTrackBehavior;
   draftMonacoCjkWrapOptimize.value = defaultMonacoCjkWrapOptimize;
   draftWebDisplayEnabled.value = defaultWebDisplayEnabled;
-  draftExtensionWsEnabled.value = defaultExtensionWsEnabled;
   draftMouseWheelScrollSensitivity.value = defaultMouseWheelScrollSensitivity;
   draftFastScrollSensitivity.value = defaultFastScrollSensitivity;
   draftStickyChapterTitleEnabled.value = defaultStickyChapterTitleEnabled;
@@ -878,7 +872,6 @@ async function onConfirm() {
     scrollbarTrackBehavior: draftScrollbarTrackBehavior.value,
     monacoCjkWrapOptimize: draftMonacoCjkWrapOptimize.value,
     webDisplayEnabled: draftWebDisplayEnabled.value,
-    extensionWsEnabled: draftExtensionWsEnabled.value,
     mouseWheelScrollSensitivity: clampMouseWheelScrollSensitivity(
       draftMouseWheelScrollSensitivity.value,
     ),
@@ -1185,7 +1178,6 @@ async function onImportConfig(): Promise<void> {
               v-model:draft-scrollbar-track-behavior="draftScrollbarTrackBehavior"
               v-model:draft-monaco-cjk-wrap-optimize="draftMonacoCjkWrapOptimize"
               v-model:draft-web-display-enabled="draftWebDisplayEnabled"
-              v-model:draft-extension-ws-enabled="draftExtensionWsEnabled"
               v-model:draft-mouse-wheel-scroll-sensitivity="
                 draftMouseWheelScrollSensitivity
               "
