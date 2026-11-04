@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ColorTxt 找书通道（油猴版 WS 客户端）
 // @namespace    colortxt-find-book
-// @version      1.3.21
+// @version      1.3.24
 // @description  连接 ColorTxt 桌面端 WS 服务（ws://127.0.0.1:8888/ws，与 Web 展示服务共用 8888 端口）：主 tab 持锁收任务，抓页任务开后台 tab 真实加载（导航执行 _dsign 挑战 JS 过墙）经 worker 池取页；表单 POST（附件购买）/ 附件下载同源 fetch。单连接锁 + 心跳 + 断线指数退避，行为清单见脚本内注释
 // @updateURL    http://127.0.0.1:8888/background.user.js
 // @downloadURL  http://127.0.0.1:8888/background.user.js
@@ -47,6 +47,12 @@
     // 自更新：脚本下发与检查更新的统一来源（Web 展示服务 /background.user.js 端点）。
     // 主 tab 每次加载比对远程 @version，有新版当前 tab 跳该链接触发 Tampermonkey 安装页
     const UPDATE_SCRIPT_URL = "http://127.0.0.1:8888/background.user.js";
+    // 自更新 reload 标记（sessionStorage，用户拍板）：跳安装页前写入；脚本加载/
+    // bfcache 恢复读到即刷新页面换新代码（实测 1.3.21→1.3.22：bfcache 恢复跑的还是
+    // 跳转前冻结的旧代码上下文），读后即删防重复刷新。sessionStorage 同 tab 跳安装
+    // 页再返回仍在、只影响本 tab（GM 全局值会殃及其他 sxsy33 tab 且无人消费时残留），
+    // tab 关闭自然清理
+    const UPDATE_RELOAD_FLAG = "ws_update_reload_flag";
 
     // 退避配置
     const BASE_DELAY = 1000;
@@ -75,6 +81,18 @@
     // 服务端维护映射）
     let myTabId = null;
     let myHolderId = null;
+
+    // 脚本加载最前（初始化前）：更新标记在 → 本页是装完新版后返回/重载的，直接
+    // 刷新换新代码（读后即删，刷新后的加载不再命中；bfcache 恢复不重跑脚本顶层，
+    // 由 pageshow 分支处理）。reload 后 return 阻止本次初始化继续跑
+    try {
+        if (sessionStorage.getItem(UPDATE_RELOAD_FLAG)) {
+            sessionStorage.removeItem(UPDATE_RELOAD_FLAG);
+            console.log("[Update] 检测到脚本已更新，刷新页面加载新代码");
+            location.reload();
+            return;
+        }
+    } catch (e) { /* sessionStorage 不可用（隐私模式等）则跳过检查 */ }
 
     // 锁归属标识 = GM_getTab 的 tabId（Tampermonkey 按浏览上下文分配，同 tab 刷新/
     // 跳转稳定、跨 tab 不重复）：不能用 sessionStorage 存随机串——window.open /
@@ -127,6 +145,17 @@
     // 所有 tab 注册（worker 恢复走验证跳过连接）
     window.addEventListener("pageshow", (ev) => {
         if (!ev.persisted) return;
+        // bfcache 恢复先查更新标记：恢复的 JS 上下文是跳转安装页前冻结的旧代码
+        // （实测恢复日志仍报旧版本），标记在说明期间已装新版——刷新换新代码
+        // （读后即删防循环），不重建旧连接
+        try {
+            if (sessionStorage.getItem(UPDATE_RELOAD_FLAG)) {
+                sessionStorage.removeItem(UPDATE_RELOAD_FLAG);
+                console.log("[Update] bfcache 恢复但脚本已更新，刷新页面加载新代码");
+                location.reload();
+                return;
+            }
+        } catch (e) { /* 标记检查失败按无标记处理 */ }
         // 日志带脚本版本：bfcache 恢复跑的是冻结时的旧代码上下文——此处输出的
         // 版本即可判断「回退后加载的是新代码还是旧代码」（旧=需刷新换新，观测用）
         console.log(`[Tab] 页面从BFCache恢复（脚本版本 ${GM_info.script.version}），重建 WS 连接与池子监听`);
@@ -156,6 +185,9 @@
                 // 跳转前主动关 WS：服务端立即感知断开（不等心跳超时判死）；100ms 延迟
                 // 给 close 帧留出网络 flush 时间。pagehide 释放锁链路照常生效
                 try { if (ws) ws.close(1000, "self update"); } catch (e) { /* 已关则忽略 */ }
+                // 打开安装页前留 reload 标记（实测 bfcache 恢复跑的还是旧代码）：
+                // 装完新版返回本页时据此自动刷新一次换新代码
+                try { sessionStorage.setItem(UPDATE_RELOAD_FLAG, "1"); } catch (e) { /* 存不进则 back 后不自动刷新 */ }
                 setTimeout(() => { location.href = UPDATE_SCRIPT_URL; }, 100);
             },
             onerror: () => {},
