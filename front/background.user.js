@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ColorTxt 找书通道（油猴版 WS 客户端）
 // @namespace    colortxt-find-book
-// @version      1.3.8
+// @version      1.3.21
 // @description  连接 ColorTxt 桌面端 WS 服务（ws://127.0.0.1:8888/ws，与 Web 展示服务共用 8888 端口）：主 tab 持锁收任务，抓页任务开后台 tab 真实加载（导航执行 _dsign 挑战 JS 过墙）经 worker 池取页；表单 POST（附件购买）/ 附件下载同源 fetch。单连接锁 + 心跳 + 断线指数退避，行为清单见脚本内注释
 // @updateURL    http://127.0.0.1:8888/background.user.js
 // @downloadURL  http://127.0.0.1:8888/background.user.js
@@ -101,7 +101,7 @@
             workerRegister();
             return;
         }
-        console.log("[Tab] 锁空闲/过期/归属本tab，作为主tab连接WS（仅启动时一次）");
+        console.log(`[Tab] 锁空闲/过期/归属本tab，作为主tab连接WS（仅启动时一次，脚本版本 ${GM_info.script.version}）`);
         becomeMain();
     }
 
@@ -127,7 +127,9 @@
     // 所有 tab 注册（worker 恢复走验证跳过连接）
     window.addEventListener("pageshow", (ev) => {
         if (!ev.persisted) return;
-        console.log("[Tab] 页面从BFCache恢复，重建 WS 连接与池子监听");
+        // 日志带脚本版本：bfcache 恢复跑的是冻结时的旧代码上下文——此处输出的
+        // 版本即可判断「回退后加载的是新代码还是旧代码」（旧=需刷新换新，观测用）
+        console.log(`[Tab] 页面从BFCache恢复（脚本版本 ${GM_info.script.version}），重建 WS 连接与池子监听`);
         watchPool();
         tryConnect();
     });
@@ -189,12 +191,18 @@
         } catch (e) { /* 忽略发送失败 */ }
     }
 
-    /** 锁被其他 tab 持有 → 退位：置 holdLock=false、停续约（防把别人的锁续活）。
+    /** 锁被其他 tab 持有且仍在时效内 → 退位：置 holdLock=false、停续约（防把别人的锁续活）。
      * tryConnect 连接前与 onclose 排重试前共用；worker tab（holdLock 本就 false）
-     * 调用无副作用，仅被挡下不连接。锁不存在/归属本 tab → 返回 false */
+     * 调用无副作用，仅被挡下不连接。锁不存在/归属本 tab/已过期 → 返回 false 照常
+     * 连接/重试（onopen 会重新占锁）。
+     * 过期检查必须有：持有者正常死亡（关 tab/浏览器重启）时 pagehide 释放 GM 写
+     * 不可靠，残留锁续约断供超过 LOCK_TTL 即失效可认领——否则残留锁会把唯一活 tab
+     * 永久挡在重试之外（单 tab 死锁不重连）。时效内才认「被持有」也与 startup
+     * 的认领口径一致（fresh 才转 worker） */
     function resignIfLockStolen() {
         const lock = GM_getValue(LOCK_KEY, null);
-        if (!lock || lock.holderId === myHolderId) return false;
+        if (!lock || !lock.active || lock.holderId === myHolderId) return false;
+        if (Date.now() - lock.ts >= LOCK_TTL) return false;
         console.log("[Tab] 锁已被其他tab持有，本tab退位不连接");
         holdLock = false;
         clearInterval(renewTimer);
@@ -214,7 +222,7 @@
         ws.onopen = () => {
             holdLock = true;
             backoffDelay = BASE_DELAY; // 连上成功，重置退避
-            GM_setValue(LOCK_KEY, { active: true, ts: Date.now(), holderId });
+            GM_setValue(LOCK_KEY, { active: true, ts: Date.now(), holderId: myHolderId });
             console.log("[Tab] ✅ WS已连接，启动续约+心跳");
 
             if (renewTimer) clearInterval(renewTimer);
@@ -223,7 +231,7 @@
             // 续约必须带 holderId：锁认领（本 tab 刷新/跳转后 lockIsMine 判定）依赖
             // 该字段，漏写会把字段抹掉导致跳转后新文档永远认领失败变 worker
             renewTimer = setInterval(() => {
-                GM_setValue(LOCK_KEY, { active: true, ts: Date.now(), holderId });
+                GM_setValue(LOCK_KEY, { active: true, ts: Date.now(), holderId: myHolderId });
             }, RENEW_INTERVAL);
 
             // 心跳发送定时器
@@ -291,16 +299,37 @@
 
     // ---------- worker 池 ----------
 
-    function getPool() {
+    /** 池子数据口径版本：登记/存储口径变化时 +1（v2 = 1.3.12 起登记 URL 剥 hash）。
+     *  加载时数据版本低于当前直接清空——旧口径存量一次性作废（用户拍板「缓存 key
+     *  增加版本号，低于当前版本就直接清理」），不做逐字段清洗 */
+    const POOL_DATA_VERSION = 2;
+
+    /** 解析池子 GM 值 → 记录数组；裸数组旧格式（≤1.3.13 无版本号）或版本低于当前
+     *  口径 → 直接清空作废 */
+    function parsePoolRaw(raw) {
+        let obj;
         try {
-            return JSON.parse(GM_getValue(POOL_KEY, "[]"));
+            obj = JSON.parse(raw);
         } catch (e) {
             return [];
         }
+        if (Array.isArray(obj) || !obj || typeof obj !== "object" || !Array.isArray(obj.list)) {
+            if (Array.isArray(obj)) savePool([]);
+            return [];
+        }
+        if ((Number(obj.v) || 0) < POOL_DATA_VERSION) {
+            savePool([]);
+            return [];
+        }
+        return obj.list;
+    }
+
+    function getPool() {
+        return parsePoolRaw(GM_getValue(POOL_KEY, "[]"));
     }
 
     function savePool(list) {
-        GM_setValue(POOL_KEY, JSON.stringify(list));
+        GM_setValue(POOL_KEY, JSON.stringify({ v: POOL_DATA_VERSION, list }));
     }
 
     /** 匹配口径：剥 _dsign 签名参数与 hash——挑战壳页 JS 跳转后的真页 URL 带 _dsign，需与任务裸 URL 对齐 */
@@ -336,38 +365,118 @@
     /** 页面登记进池子当缓存（帖子详情内容不变，应用之后打开同帖直接命中秒回）。
      * 无 <title> 的页面是挑战壳页/中间跳转页，CF 拦截页（title=Just a moment）是
      * 挑战中——都跳过不登记，等跳到真页后由新文档重新执行脚本登记（否则主 tab 会
-     * 把中间页当结果取走）。返回本页 token（无则空串） */
+     * 把中间页当结果取走）。返回 { saved, token }：saved=false 壳页/中间页未登记；
+     * saved=true 内容已进池子，token 可为空串（挑战壳页跳转丢 hash 且接力断，
+     * 主 tab watchPool 按 normalize URL 剥 _dsign/hash 兜底匹配取回） */
     function registerPageToPool() {
         // token 搬运放最前：挑战壳页（无 title）与 CF 页也要搬——hash 随挑战跳转/
         // HTTP 302 丢失，sessionStorage 同 tab 客户端与服务器跳转全程保留，真页凭它认领任务
         const m = location.hash.match(/_colortxt_spawn=([a-z0-9]+)/i);
         if (m) sessionStorage.setItem(SPAWN_TOKEN_KEY, m[1]);
-        if (!document.title) return "";
-        if (document.title.includes("Just a moment")) return "";
+        if (!document.title) return { saved: false, token: "" };
+        if (document.title.includes("Just a moment")) return { saved: false, token: "" };
+        // meta refresh 跳往别处的中间页不登记（未登录拦截页/操作成功跳转页）——等
+        // 跳转后的最终页登记，任务回传 href 才是真实最终 URL（登录失效检测靠它）；
+        // 自刷新（无 url= 或目标=当前页）不算中间页
+        const metaRefresh = document.querySelector('meta[http-equiv="refresh" i]');
+        if (metaRefresh) {
+            const target = ((metaRefresh.getAttribute("content") || "").match(/url\s*=\s*(.+)$/i) || [])[1];
+            if (target) {
+                try {
+                    if (new URL(target.trim().replace(/^['"]+|['"]+$/g, ""), location.href).href !== location.href)
+                        return { saved: false, token: "" };
+                } catch (e) { /* 目标非法按自刷新处理 */ }
+            }
+        }
         const token = (m && m[1]) || sessionStorage.getItem(SPAWN_TOKEN_KEY) || "";
-        const item = { url: location.href, body: pickStorableBody(), token };
-        // 去重：同一个url只保留最新一条（新快照自动替换旧缓存）
-        const filtered = getPool().filter(
-            (x) => normalizeTaskUrl(x.url) !== normalizeTaskUrl(item.url),
+        // 登记 URL 剥 hash：worker 页面未跳转时 location.href 带着 spawn hash
+        // （#_colortxt_spawn=…），缓存命中回传 cached.url 会把它带进服务端 finalUrl
+        let itemUrl = location.href;
+        try {
+            const u = new URL(itemUrl);
+            u.hash = "";
+            itemUrl = u.href;
+        } catch (e) { /* 解析失败保底原样（匹配侧 normalize 有同样口径） */ }
+        const item = { url: itemUrl, body: pickStorableBody(), token };
+        // 去重：同一个url只保留最新一条（新快照自动替换旧缓存）；帖子页按 tid 键
+        // 去重（_dsign/URL 形态变体的同帖旧记录一并替换），无 tid 页面按归一化 URL
+        const itemThreadKey = extractThreadKey(item.url);
+        const filtered = getPool().filter((x) =>
+            itemThreadKey
+                ? extractThreadKey(x.url) !== itemThreadKey
+                : normalizeTaskUrl(x.url) !== normalizeTaskUrl(item.url),
         );
         filtered.push(item);
         // 永久存储防膨胀：只留最近 POOL_MAX 条，满后从队头挤掉最旧一条
         while (filtered.length > POOL_MAX) filtered.shift();
         savePool(filtered);
-        return token;
+        return { saved: true, token };
     }
 
     /** worker tab：登记页面后，仅脚本开出的 tab（token 在手）自关；用户手动打开的
-     * 页面无 token 永不误杀。挑战壳页跳转会丢 hash 但 sessionStorage 已接力 */
+     * 页面无 token 永不误杀。挑战壳页跳转会丢 hash 但 sessionStorage 已接力；
+     * 接力也断时（壳页跳转快于脚本注入）真页已按 URL 兜底登记，主 tab 正常取回，
+     * 只是 tab 无法自关（无 token 区分不了手动 tab），由主 tab 句柄统一关闭 */
     function workerRegister() {
-        const token = registerPageToPool();
-        if (!token) {
-            console.log("[Worker] 已登记页面进池子（非脚本tab，不自关）", location.href);
+        const r = registerPageToPool();
+        if (!r.saved) {
+            console.log("[Worker] 本页不登记（壳页/中间跳转页），不自关", location.href);
+            return;
+        }
+        if (!r.token) {
+            console.log("[Worker] 已登记进池子（无token不自关，主tab按URL匹配取回）", location.href);
             return;
         }
         console.log("[Worker] 已登记页面进池子，即将自关", location.href);
         // 延迟自关：给 GM 值变更广播留传播时间（确保主 tab 先收到登记）
         setTimeout(() => window.close(), 500);
+    }
+
+    /** 搜索结果短窗缓存（用户拍板 5 分钟，键=搜索词）：检查更新反复搜同一关键词是
+     * 限流大户，短窗内同键任务直接回传不开 tab。任务 URL（srchtxt 形态）没有
+     * searchid，且每次搜索生成的 searchid 都是新的，按 searchid 做键永远命中不了
+     * ——键统一为**搜索词**：读=任务 URL 的 srchtxt 解码值，写=真实结果 URL 的 kw
+     * 解码值（Discuz 302 把 srchtxt 换成 kw，两边解码后是同一个词）。限流/登录等
+     * 异常真实返回 URL 无 kw，取不到键天然不缓存，无需按任务 URL 做限流特征判定
+     * 与清洗。仅主 tab 内存（刷新即清，防 GM 存储膨胀，写入时顺手清过期条目） */
+    const SEARCH_CACHE_TTL_MS = 5 * 60 * 1000;
+    const searchResultCache = new Map();
+    /** 提取 URL 的搜索词：取 srchtxt（搜索任务侧）或 kw（302 后结果侧）参数值，
+     * 优先 URL API 自动解码；整段被编码时参数拆分失效，回退正则 +
+     * decodeURIComponent。无/解析失败返回空串 */
+    function extractSearchWord(u) {
+        try {
+            const sp = new URL(u, location.origin).searchParams;
+            const v = sp.get("srchtxt") || sp.get("kw");
+            if (v) return v.trim();
+        } catch (e) { /* 落回正则 */ }
+        const m = String(u).match(/[?&](?:srchtxt|kw)=([^&]+)/i);
+        if (m) {
+            try { return decodeURIComponent(m[1]).trim(); } catch (e) { return m[1]; }
+        }
+        return "";
+    }
+    /** 帖子缓存键：tid 参数值（用户拍板——_dsign 等参数形态差异不影响命中）。
+     * 静态重写形态 thread-N-P-1.html 取路径段首段 tid；tid 参数值可能被 URL
+     * 编码，统一解码。抓页只取第 1 页楼主层，键=裸 tid，不区分翻页 */
+    function extractThreadKey(u) {
+        try {
+            const url = new URL(u, location.origin);
+            let tid = url.searchParams.get("tid");
+            if (!tid) {
+                const m = url.pathname.match(/\/thread-(\d+)(?:-\d+)*\.html/i);
+                if (m) tid = m[1];
+            }
+            return tid ? decodeURIComponent(tid).trim() : "";
+        } catch (e) {
+            return "";
+        }
+    }
+    function pruneSearchCache() {
+        const now = Date.now();
+        for (const [k, v] of searchResultCache) {
+            if (now - v.ts >= SEARCH_CACHE_TTL_MS) searchResultCache.delete(k);
+        }
     }
 
     /** 主 tab 抓页任务表：taskId → {url, token, resolve, timer}——记住任务 id 与下发
@@ -381,23 +490,25 @@
     function watchPool() {
         GM_addValueChangeListener(POOL_KEY, (k, oldV, raw, remote) => {
             if (!remote) return;
-            let arr;
-            try {
-                arr = JSON.parse(raw);
-            } catch (e) {
-                return;
-            }
+            const arr = parsePoolRaw(raw);
             for (const [taskId, task] of [...pendingFetchTasks]) {
                 const want = normalizeTaskUrl(task.url);
+                const taskThreadKey = extractThreadKey(task.url);
                 const found = arr.find(
                     (x) =>
                         (x.token && x.token === task.token) ||
-                        (!x.token && normalizeTaskUrl(x.url) === want),
+                        (!x.token &&
+                            (taskThreadKey
+                                ? extractThreadKey(x.url) === taskThreadKey
+                                : normalizeTaskUrl(x.url) === want)),
                 );
                 if (found) {
                     pendingFetchTasks.delete(taskId);
                     clearTimeout(task.timer);
-                    task.resolve(found.body);
+                    // 整条记录回传（含登记时真实 location.href）——搜索 302 searchid、
+                    // 未登录跳登录页后任务回传 href 必须是最终 URL，服务端登录失效/
+                    // 搜索限流判定全靠它；只回 body 会把真实 url 丢成任务 URL
+                    task.resolve(found);
                 }
             }
         });
@@ -436,19 +547,24 @@
      */
     async function runFetchPageTask(payload, taskId) {
         const url = new URL(payload.url, location.origin).href;
-        const want = normalizeTaskUrl(url);
         // 缓存命中直接回传（不开 worker tab，重复打开帖子秒回，省挑战 13~66s）。
-        // 帖子详情内容不变，无限缓存；search.php 排除是防御——搜索 302 searchid 后
-        // 池子里存的是 searchid URL，任务的 srchtxt URL 本就永不命中缓存，但万一某
-        // 次搜索未 302 直出，同书检查更新的固定搜索 URL 会命中旧快照致更新检测失效。
+        // 白名单只复用内容不变的页面（用户拍板：缓存只覆盖帖子，发现页不要缓存）：
+        // 帖子详情无限缓存，匹配键=任务 URL 的 tid 值（extractThreadKey——_dsign/
+        // 参数形态差异不影响命中）。搜索结果走独立 searchid 短窗缓存（5 分钟）。
+        // 发现页/板块列表（forumdisplay）按时间排序内容持续变化，命中旧快照会漏
+        // 更新，每次真实抓取。
         // skipCache=true（购买附件后重抓等需要新鲜页的场景）强制越过缓存：购买前
         // 抓的未购快照还在池子里，命中会导致购买后仍解析不到已购直链
-        if (payload.skipCache !== true && !/\/search\.php\?/i.test(url)) {
+        const cacheable =
+            /\/thread-\d+\.html/i.test(url) ||
+            /[?&]mod=viewthread\b/i.test(url);
+        const taskThreadKey = extractThreadKey(url);
+        if (payload.skipCache !== true && cacheable && taskThreadKey) {
             const cached = getPool().find(
-                (x) => x.body && normalizeTaskUrl(x.url) === want,
+                (x) => x.body && extractThreadKey(x.url) === taskThreadKey,
             );
             if (cached) {
-                console.log(`[Tab] 缓存命中 ${taskId} html长度=${cached.body.length} url=${url}`);
+                console.log(`[Tab] 缓存命中 ${taskId} html长度=${cached.body.length} url=${url} 实际=${cached.url}`);
                 sendJson({
                     type: "task_result",
                     taskId,
@@ -457,7 +573,33 @@
                         title: extractTitle(cached.body),
                         text: extractText(cached.body),
                         html: cached.body,
-                        href: url,
+                        // 回传记录登记时的真实 URL（匹配靠归一化，回传不丢真身）——
+                        // 服务端登录失效/限流判定吃 finalUrl
+                        href: cached.url || url,
+                    },
+                });
+                return;
+            }
+        }
+        // 搜索结果 5 分钟短窗缓存读：键=任务 URL 的 srchtxt 解码值（extractSearchWord
+        // 统一解码），命中直接回传（不开 tab、不耗站点请求配额——检查更新反复搜索
+        // 同一关键词是限流大户）。非搜索页取不到搜索词键，自然跳过；限流页写不进
+        // 缓存（见写侧）
+        const taskSearchWord = payload.skipCache !== true ? extractSearchWord(url) : "";
+        if (taskSearchWord) {
+            pruneSearchCache();
+            const hit = searchResultCache.get(taskSearchWord);
+            if (hit) {
+                console.log(`[Tab] 搜索缓存命中 ${taskId} html长度=${hit.body.length} url=${url} 实际=${hit.url} 存龄=${Math.round((Date.now() - hit.ts) / 1000)}s`);
+                sendJson({
+                    type: "task_result",
+                    taskId,
+                    ok: true,
+                    pageData: {
+                        title: extractTitle(hit.body),
+                        text: extractText(hit.body),
+                        html: hit.body,
+                        href: hit.url,
                     },
                 });
                 return;
@@ -468,8 +610,9 @@
         // hash 自关仅作 close() 不可用（TM 版本差异）时的兜底
         let workerTab = null;
         let html;
+        let finalUrl = url;
         try {
-            html = await new Promise((resolve, reject) => {
+            const got = await new Promise((resolve, reject) => {
                 // 一次性 spawn token：任务关联键（搜索 302 searchid 后 URL 不匹配，靠
                 // token 精确认领）+ worker 自关凭证；hash 随挑战跳转/302 丢失时由
                 // workerRegister 搬进 sessionStorage 接力
@@ -495,6 +638,8 @@
                     setParent: true,
                 });
             });
+            html = got.body;
+            if (got.url) finalUrl = got.url;
         } finally {
             if (workerTab && typeof workerTab.close === "function") {
                 try {
@@ -502,7 +647,17 @@
                 } catch (e) { /* 关闭失败交给 worker hash 自关兜底 */ }
             }
         }
-        console.log(`[Tab] 任务完成 ${taskId} html长度=${html.length} href=${url}`);
+        console.log(`[Tab] 任务完成 ${taskId} html长度=${html.length} href=${finalUrl}`);
+        // 搜索结果写缓存：键=真实返回 URL 的 kw 解码值（Discuz 302 把任务侧 srchtxt
+        // 换成 kw，与读侧 srchtxt 解码后是同一个搜索词，extractSearchWord 统一解码）
+        // ——限流/登录等异常真实返回 URL 无 kw，取不到键天然不缓存（用户拍板，无需
+        // 按任务 URL 做限流特征判定与清洗）；再要求结果列表容器 #threadlist 在场
+        // （searchid 页偶发提示页防污染）
+        const finalSearchWord = extractSearchWord(finalUrl);
+        if (finalSearchWord && /id=["']?threadlist\b/i.test(html)) {
+            searchResultCache.set(finalSearchWord, { body: html, url: finalUrl, ts: Date.now() });
+            pruneSearchCache();
+        }
         sendJson({
             type: "task_result",
             taskId,
@@ -511,7 +666,7 @@
                 title: extractTitle(html),
                 text: extractText(html),
                 html,
-                href: url,
+                href: finalUrl,
             },
         });
     }
