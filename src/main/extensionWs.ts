@@ -1,7 +1,7 @@
 import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
-import { app, BrowserWindow } from "electron";
+import { app, BrowserWindow, shell } from "electron";
 import { WebSocketServer, WebSocket } from "ws";
 import { getWebDisplayServer, setWebDisplayDebugHandler } from "./webDisplay";
 import type { ExtensionWsDownloadEvent } from "../shared/bookSource/ipc";
@@ -67,6 +67,77 @@ let heartbeatTimer: NodeJS.Timeout | null = null;
 let clientTabId: number | null = null;
 const pendingTasks = new Map<string, PendingTask>();
 let taskIdSeq = 0;
+
+// ---- 脚本未连接自动拉起 ----
+
+/** 未连接且无法拉起（服务未启动/拉起等待已超时）时返回给调用方的错误文案 */
+const SCRIPT_NOT_CONNECTED_ERROR =
+  "脚本未连接（请确认油猴脚本已启用、服务开关已打开）";
+/** 自动拉起冷却：一次开页后 60s 内不重复开页（批量任务连环未连接时避免刷屏开 tab） */
+const AUTO_OPEN_COOLDOWN_MS = 60_000;
+/** 拉起后等待脚本连入时长：浏览器冷启动 + 站点慢页到 document-idle（脚本 @run-at 才连接） */
+const AUTO_OPEN_WAIT_MS = 45_000;
+let lastAutoOpenAt = 0;
+/** 进行中的拉起等待：并发未连接任务共享同一次「开页+等待」，不各自空等满时长 */
+let autoOpenWaiter: Promise<string | null> | null = null;
+
+function isScriptConnected(): boolean {
+  return client !== null && client.readyState === WebSocket.OPEN;
+}
+
+/**
+ * 任务下发前的连接保障：脚本未连接时用系统默认浏览器打开「拉起页」（油猴 @match
+ * 站点内页面，document-idle 加载完脚本自动连入 WS），等待连入后任务照常下发。
+ * 拉起页优先发起页（表单 POST 的 referer / 下载的 postUrl 帖子页），避免默认浏览器
+ * 直接 GET 附件/购买页产生副作用；抓页任务即任务 URL 本身（GET 页面无副作用）。
+ * 冷却期内不重复开页也不空等，直接判未连接失败（上次拉起已证连接不来）。
+ * 返回 null 表示已连接可继续下发；否则返回调用方应上报的错误文案。
+ */
+function ensureScriptConnectedBeforeTask(
+  url: string,
+  preferOpenUrl?: string,
+): Promise<string | null> {
+  if (isScriptConnected()) return Promise.resolve(null);
+  if (autoOpenWaiter) return autoOpenWaiter;
+  autoOpenWaiter = doEnsureScriptConnected(preferOpenUrl?.trim() || url).finally(
+    () => {
+      autoOpenWaiter = null;
+    },
+  );
+  return autoOpenWaiter;
+}
+
+async function doEnsureScriptConnected(
+  openUrl: string,
+): Promise<string | null> {
+  if (!wss) return SCRIPT_NOT_CONNECTED_ERROR;
+  if (Date.now() - lastAutoOpenAt <= AUTO_OPEN_COOLDOWN_MS) {
+    console.warn("[extensionWs] 脚本未连接（自动拉起冷却期内），任务判失败");
+    return SCRIPT_NOT_CONNECTED_ERROR;
+  }
+  lastAutoOpenAt = Date.now();
+  console.log(
+    `[extensionWs] 脚本未连接，自动打开书源页拉起脚本: ${openUrl}（等待连入 ≤${Math.round(AUTO_OPEN_WAIT_MS / 1000)}s）`,
+  );
+  try {
+    await shell.openExternal(openUrl);
+  } catch (err) {
+    console.warn(`[extensionWs] 自动打开书源页失败: ${String(err)}`);
+  }
+  const deadline = Date.now() + AUTO_OPEN_WAIT_MS;
+  while (Date.now() < deadline) {
+    if (!wss) return SCRIPT_NOT_CONNECTED_ERROR;
+    if (isScriptConnected()) {
+      console.log("[extensionWs] 脚本已连入（自动拉起成功），继续下发任务");
+      return null;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  console.warn(
+    `[extensionWs] 等待脚本连入超时（${Math.round(AUTO_OPEN_WAIT_MS / 1000)}s），任务判失败`,
+  );
+  return "脚本未连接（已自动打开书源页等待脚本连入，仍超时未连上；请确认油猴脚本已启用、服务开关已打开）";
+}
 
 function resolveTask(taskId: string, result: OpenAndGetHtmlResult): void {
   const task = pendingTasks.get(taskId);
@@ -488,26 +559,24 @@ export function openAndGetHtml(
   url: string,
   opts?: { skipCache?: boolean },
 ): Promise<OpenAndGetHtmlResult> {
-  if (!client || client.readyState !== WebSocket.OPEN) {
-    return Promise.resolve({
-      ok: false,
-      error: "脚本未连接（请确认油猴脚本已启用、服务开关已打开）",
-    });
-  }
+  // 未连接自动拉起：打开任务页等脚本连入后照常下发（详见 ensureScriptConnectedBeforeTask）
+  return ensureScriptConnectedBeforeTask(url).then((error) => {
+    if (error) return { ok: false as const, error };
 
-  taskIdSeq += 1;
-  const taskId = `task-${Date.now()}-${taskIdSeq}`;
+    taskIdSeq += 1;
+    const taskId = `task-${Date.now()}-${taskIdSeq}`;
 
-  return new Promise((resolve) => {
-    pendingTasks.set(taskId, {
-      url,
-      timer: setTimeout(() => {}, 0),
-      resolve,
-      tabId: clientTabId,
-      retries: 0,
-      skipCache: opts?.skipCache === true,
+    return new Promise<OpenAndGetHtmlResult>((resolve) => {
+      pendingTasks.set(taskId, {
+        url,
+        timer: setTimeout(() => {}, 0),
+        resolve,
+        tabId: clientTabId,
+        retries: 0,
+        skipCache: opts?.skipCache === true,
+      });
+      dispatchTask(taskId);
     });
-    dispatchTask(taskId);
   });
 }
 
@@ -518,18 +587,20 @@ export function openAndGetHtml(
  * 下载完成或失败后推 download_result（带 bookName + name + 帖子 URL），
  * 服务端按 taskId 归属映射找到需要替换的书籍，落盘/记日志保证失败也有感知。
  */
-export function downloadBookSourceFileViaExtension(
+export async function downloadBookSourceFileViaExtension(
   url: string,
   referer?: string,
   postUrl?: string,
   bookName?: string,
   downloadDir?: string,
-): { ok: boolean; error?: string } {
+): Promise<{ ok: boolean; error?: string }> {
+  // 未连接自动拉起：优先开发起页 postUrl（默认浏览器直接 GET 附件 URL 会把附件
+  // 下载进浏览器下载目录），无发起页才用任务 URL 兜底
+  const error = await ensureScriptConnectedBeforeTask(url, postUrl || referer);
+  if (error) return { ok: false, error };
+  // await 之后 client 收窄失效：send 前再判一次（断开则不创建任务直接失败）
   if (!client || client.readyState !== WebSocket.OPEN) {
-    return {
-      ok: false,
-      error: "脚本未连接（请确认油猴脚本已启用、服务开关已打开）",
-    };
+    return { ok: false, error: SCRIPT_NOT_CONNECTED_ERROR };
   }
 
   taskIdSeq += 1;
@@ -567,29 +638,28 @@ export function formPostViaExtension(
   body: string,
   referer?: string,
 ): Promise<OpenAndGetHtmlResult> {
-  if (!client || client.readyState !== WebSocket.OPEN) {
-    return Promise.resolve({
-      ok: false,
-      error: "脚本未连接（请确认油猴脚本已启用、服务开关已打开）",
-    });
-  }
+  // 未连接自动拉起：优先开 referer 帖子页（默认浏览器直接 GET attachpay 页会展示
+  // 购买确认页，有误导性），无 referer 才用任务 URL 兜底
+  return ensureScriptConnectedBeforeTask(url, referer).then((error) => {
+    if (error) return { ok: false as const, error };
 
-  taskIdSeq += 1;
-  const taskId = `fp-${Date.now()}-${taskIdSeq}`;
+    taskIdSeq += 1;
+    const taskId = `fp-${Date.now()}-${taskIdSeq}`;
 
-  return new Promise((resolve) => {
-    pendingTasks.set(taskId, {
-      url,
-      timer: setTimeout(() => {}, 0),
-      resolve,
-      tabId: clientTabId,
-      retries: 0,
-      kind: "form_post",
-      body,
-      referer,
-      noRetry: true,
+    return new Promise<OpenAndGetHtmlResult>((resolve) => {
+      pendingTasks.set(taskId, {
+        url,
+        timer: setTimeout(() => {}, 0),
+        resolve,
+        tabId: clientTabId,
+        retries: 0,
+        kind: "form_post",
+        body,
+        referer,
+        noRetry: true,
+      });
+      dispatchTask(taskId);
     });
-    dispatchTask(taskId);
   });
 }
 
@@ -616,11 +686,11 @@ function stopExtensionWsDebugServer(): void {
 }
 
 /** 调试请求处理（webDisplay 宿主按 /api/debug/ 前缀转交，url 已解析） */
-function handleDebugRequest(
+async function handleDebugRequest(
   _req: http.IncomingMessage,
   res: http.ServerResponse,
   url: URL,
-): void {
+): Promise<void> {
   const target = url.searchParams.get("url");
   if (!target) {
     res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
@@ -656,24 +726,29 @@ function handleDebugRequest(
     const postUrl = url.searchParams.get("postUrl") ?? undefined;
     const bookName = url.searchParams.get("bookName") ?? undefined;
     console.log(`[extensionWs] 调试端点下载下发 ${target}`);
-    const r = downloadBookSourceFileViaExtension(
-      target,
-      referer,
-      postUrl,
-      bookName,
-    );
-    res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
-    res.end(
-      JSON.stringify(
-        r.ok
-          ? {
-              ok: true,
-              message:
-                "下载任务已下发（fire-and-forget）；脚本 fetch 完成后主动推送 download_result，服务端落盘到系统下载目录（失败也推送并记日志）",
-            }
-          : r,
-      ),
-    );
+    try {
+      const r = await downloadBookSourceFileViaExtension(
+        target,
+        referer,
+        postUrl,
+        bookName,
+      );
+      res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+      res.end(
+        JSON.stringify(
+          r.ok
+            ? {
+                ok: true,
+                message:
+                  "下载任务已下发（fire-and-forget）；脚本 fetch 完成后主动推送 download_result，服务端落盘到系统下载目录（失败也推送并记日志）",
+              }
+            : r,
+        ),
+      );
+    } catch (err: unknown) {
+      res.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
+      res.end(JSON.stringify({ ok: false, error: String(err) }));
+    }
     return;
   }
   res.writeHead(404, { "Content-Type": "application/json; charset=utf-8" });

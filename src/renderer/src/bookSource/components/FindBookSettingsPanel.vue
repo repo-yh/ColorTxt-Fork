@@ -251,6 +251,13 @@ function parseDelayMsInput(raw: string): number | null {
   return digits ? Number(digits) : null;
 }
 
+/** 油猴脚本安装/更新入口：外部浏览器打开 8888 端点下发的 background.user.js
+ *  （.user.js 后缀访问即弹 Tampermonkey 安装页，与脚本自更新同源地址）；
+ *  需先开启「Web 展示服务器」（脚本分发与 WS 通道都随其启停） */
+function onInstallUserscript(): void {
+  void window.colorTxt.openExternal("http://127.0.0.1:8888/background.user.js");
+}
+
 function syncFindBookOnlyDraftFromStore() {
   draftCacheDir.value = fb.cacheDir.value;
   draftDownloadDir.value = fb.downloadDir.value;
@@ -871,6 +878,20 @@ watch(draftFontSize, (size) => {
                   1000ms 基础 + 此值；填值全局覆盖书源
                   webViewDelayTime，留空 = 无额外延时（书源未配延时，总等待
                   1000ms，建议填值）。调小可加快搜索，过小可能导致结果不全。
+                </p>
+              </div>
+              <div class="settingsRow">
+                <div class="settingsRowMain settingsRowMain--baseline">
+                  <span class="settingsLabel short">脚本安装</span>
+                  <button class="btn" type="button" @click="onInstallUserscript">
+                    打开安装页
+                  </button>
+                </div>
+                <p class="settingsHint">
+                  在日常浏览器打开
+                  http://127.0.0.1:8888/background.user.js——访问即弹
+                  Tampermonkey 安装/更新页；需先开启「Web 展示服务器」（脚本分发与
+                  WS 通道随其启停）。
                 </p>
               </div>
             </div>
