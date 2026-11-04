@@ -16,7 +16,9 @@ import {
 } from "../composables/useBookSource";
 import { useBookshelfCoverUrls } from "../composables/useBookshelfCoverUrls";
 import type { BookSourceListItem, ExploreKind, SearchBookItem } from "@shared/bookSource/types";
+import { LOGIN_EXPIRED_LOG_MARK } from "@shared/bookSource/ipc";
 import { appLog, appPrompt } from "../../services/appDialog";
+import { appToast } from "../../services/appToast";
 import { legadoFlexChildStyle } from "@shared/bookSource/legadoFlexStyle";
 import "./findBookListShared.css";
 
@@ -215,6 +217,23 @@ function mergeKindsLogs(existing: string[], extra: string): string[] {
   return [...existing, detail];
 }
 
+/** 同一来源登录失效提醒 60s 节流（分类加载、翻页会重复触发同一标记） */
+const loginExpiredToastAt = new Map<string, number>();
+function toastLoginExpiredIfMarked(
+  sourceKey: string,
+  sourceName: string,
+  logs?: string[] | null,
+): void {
+  if (!logs?.some((l) => l.includes(LOGIN_EXPIRED_LOG_MARK))) return;
+  const now = Date.now();
+  if (now - (loginExpiredToastAt.get(sourceKey) ?? 0) < 60_000) return;
+  loginExpiredToastAt.set(sourceKey, now);
+  appToast(
+    `「${sourceName}」登录已失效，请到浏览器打开书源站点重新登录`,
+    { kind: "warning" },
+  );
+}
+
 function kindsIsEmpty(sourceUrl: string): boolean {
   const kinds = kindsByUrl.value.get(sourceUrl);
   return kinds !== undefined && kinds.length === 0;
@@ -240,6 +259,7 @@ async function loadKinds(source: BookSourceListItem, force = false) {
       await window.colorTxt.bookSourceExploreClearKindsCache(source.bookSourceUrl);
     }
     const r = await window.colorTxt.bookSourceExploreKinds(source.bookSourceUrl);
+    toastLoginExpiredIfMarked(source.bookSourceUrl, source.bookSourceName, r.logs);
     const rawKinds = r.kinds ?? [];
     const errorKind = rawKinds.find(isKindsErrorKind);
     const validKinds = rawKinds.filter((k) => !isKindsErrorKind(k));
@@ -396,6 +416,7 @@ async function loadExplorePage(append: boolean, requestSeq?: number) {
       mergeExploreKinds(captured.sourceUrl, r.kinds);
     }
     if (r.logs?.length) exploreLogs.value = r.logs;
+    toastLoginExpiredIfMarked(captured.sourceUrl, show.sourceName, r.logs);
     const items = r.items ?? [];
     // 仅有 message 时视为失败；空列表但有日志可能是登录提示等软空结果（对齐 Legado toast）
     if (!append && !items.length && r.message?.trim()) {

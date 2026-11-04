@@ -9,7 +9,10 @@ import FindBookshelfListItem from "./FindBookshelfListItem.vue";
 import { useFindBookBookshelf } from "../composables/useFindBookBookshelf";
 import { useBookshelfCoverUrls } from "../composables/useBookshelfCoverUrls";
 import { useBookshelfLastReadTitles } from "../composables/useBookshelfLastReadTitles";
-import { useBookshelfUpdate } from "../composables/useBookshelfUpdate";
+import {
+  consumeLoginExpiredSourceNames,
+  useBookshelfUpdate,
+} from "../composables/useBookshelfUpdate";
 import { useSortableReorder } from "../../composables/useSortableReorder";
 import { useAnchoredAppShellMenu } from "../../composables/useAnchoredAppShellMenu";
 import { useListSelectionHotkeys } from "../../composables/useListSelectionHotkeys";
@@ -490,6 +493,14 @@ async function onRowMenuUpdate() {
     return;
   }
   const ok = await updateBook(item);
+  const expired = consumeLoginExpiredSourceNames();
+  if (expired.length) {
+    appToast(
+      `「${expired.join("、")}」登录已失效，请到浏览器打开书源站点重新登录`,
+      { kind: "warning" },
+    );
+    return;
+  }
   appToast(ok ? "更新完成" : "更新失败", { kind: ok ? "success" : "warning" });
 }
 
@@ -530,6 +541,14 @@ async function manualAdd() {
   }
   appToast(`已添加，正在通过「${source.name}」检查更新…`);
   const ok = await updateBook(book);
+  const expired = consumeLoginExpiredSourceNames();
+  if (expired.length) {
+    appToast(
+      `首检失败：「${expired.join("、")}」登录已失效，请到浏览器打开书源站点重新登录`,
+      { kind: "warning" },
+    );
+    return;
+  }
   appToast(
     ok ? "检查更新完成" : "未匹配到书源帖子，可稍后重试「更新目录」",
     { kind: ok ? "success" : "warning" },
@@ -663,6 +682,14 @@ function onBatchSetCanUpdate(canUpdate: boolean) {
 async function updateAll() {
   if (!books.value.length || isAnyUpdating.value) return;
   await updateBooks(books.value);
+  const expired = consumeLoginExpiredSourceNames();
+  if (expired.length) {
+    appToast(
+      `检查更新已终止：「${expired.join("、")}」登录已失效，请到浏览器打开书源站点重新登录`,
+      { kind: "warning" },
+    );
+    return;
+  }
   appToast("书架更新完成", { kind: "success" });
 }
 

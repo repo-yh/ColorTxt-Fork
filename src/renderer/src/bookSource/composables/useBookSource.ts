@@ -11,7 +11,9 @@ import type {
 } from "@shared/bookSource/types";
 import { parseBookSourceJson } from "@shared/bookSource/types";
 import { searchBookToBook } from "@shared/bookSource/bookModel";
+import { LOGIN_EXPIRED_LOG_MARK } from "@shared/bookSource/ipc";
 import { appPrompt } from "../../services/appDialog";
+import { appToast } from "../../services/appToast";
 import { appLoading } from "../../services/appLoading";
 import { ipcPlain } from "../ipcPlain";
 import { healFindBookBookshelfSources } from "./useFindBookBookshelf";
@@ -368,6 +370,14 @@ export function useBookSourceSearch() {
         ];
         if (ev.logs?.length) {
           searchLogs.value = [...searchLogs.value, ...ev.logs];
+        }
+        // 引擎 logs 命中登录页标记 → 搜索页同书架更新弹未登录提醒
+        // （主进程节流 toast 弹在书源浏览器窗口，搜索页场景看不到）
+        if (ev.logs?.some((l) => l.includes(LOGIN_EXPIRED_LOG_MARK))) {
+          appToast(
+            `「${ev.sourceName}」登录已失效，请到浏览器打开书源站点重新登录`,
+            { kind: "warning" },
+          );
         }
         if (ev.error) {
           searchSourceErrors.value = [

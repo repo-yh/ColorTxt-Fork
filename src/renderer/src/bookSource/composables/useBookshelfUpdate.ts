@@ -16,8 +16,17 @@ const updatingKeys = ref(new Set<string>());
 /** 更新目录错误日志（批量/单项共用，打开「日志」面板查看） */
 const bookshelfUpdateLogEntries = ref<string[]>([]);
 
-/** 批量更新中发现登录失效的书源（WS 源命中后终止该源剩余书的检查更新） */
-const loginExpiredOrigins = new Set<string>();
+/** 批量更新中发现登录失效的书源（WS 源命中后终止该源剩余书的检查更新）。
+ *  origin → 源名：批量/单本结束时 toast 需点名失效源（「更新完成」不得掩盖失效） */
+const loginExpiredOrigins = new Map<string, string>();
+
+/** 取走本轮检出登录失效的源名列表并清空记录——toast 点名后不留残留，
+ *  避免下次单本更新成功仍被旧记录误报失效 */
+export function consumeLoginExpiredSourceNames(): string[] {
+  const names = [...new Set(loginExpiredOrigins.values())];
+  loginExpiredOrigins.clear();
+  return names;
+}
 
 /** 检查更新中被搜索限流（WS 源搜索被重定向回搜索首页）的书源集合——
  *  引擎 SEARCH_RATE_LIMITED_LOG_MARK 标记经 onRateLimited 回调写入，
@@ -210,7 +219,7 @@ export function useBookshelfUpdate(onBooksChanged?: (books: BookshelfBook[]) => 
         appendLog: appendBookshelfUpdateLog,
         onBooksChanged,
         // 引擎 logs 命中登录失效标记 → 记入失效集合（批量时同源剩余书提前跳过）
-        onLoginExpired: () => loginExpiredOrigins.add(book.origin),
+        onLoginExpired: () => loginExpiredOrigins.set(book.origin, book.originName || book.origin),
         // 引擎 logs 命中搜索限流标记（搜索被重定向回搜索首页）→ 记入限流集合
         // （批量 WS 源串行组据此挂起 concurrentRate 时长后重试本书）
         onRateLimited: () => searchRateLimitedOrigins.add(book.origin),
@@ -235,7 +244,8 @@ export function useBookshelfUpdate(onBooksChanged?: (books: BookshelfBook[]) => 
       );
       if (!infoRes.detail) {
         // 引擎 logs 命中登录页标记 → 记入失效集合（批量时同源剩余书提前跳过）
-        if (hasLoginExpiredLog(infoRes.logs)) loginExpiredOrigins.add(book.origin);
+        if (hasLoginExpiredLog(infoRes.logs))
+          loginExpiredOrigins.set(book.origin, book.originName || book.origin);
         appendBookshelfUpdateLog(
           formatUpdateErrorEntry(
             book,
@@ -252,7 +262,8 @@ export function useBookshelfUpdate(onBooksChanged?: (books: BookshelfBook[]) => 
         book: detail,
       });
       if (tocRes.message?.trim() && !(tocRes.chapters?.length)) {
-        if (hasLoginExpiredLog(tocRes.logs)) loginExpiredOrigins.add(book.origin);
+        if (hasLoginExpiredLog(tocRes.logs))
+          loginExpiredOrigins.set(book.origin, book.originName || book.origin);
         appendBookshelfUpdateLog(
           formatUpdateErrorEntry(
             book,
@@ -264,7 +275,8 @@ export function useBookshelfUpdate(onBooksChanged?: (books: BookshelfBook[]) => 
       }
       if (tocRes.message?.trim() && tocRes.chapters?.length) {
         // 有目录但仍有告警：记入日志，继续写入
-        if (hasLoginExpiredLog(tocRes.logs)) loginExpiredOrigins.add(book.origin);
+        if (hasLoginExpiredLog(tocRes.logs))
+          loginExpiredOrigins.set(book.origin, book.originName || book.origin);
         appendBookshelfUpdateLog(
           formatUpdateErrorEntry(book, tocRes.message.trim(), tocRes.logs),
         );
