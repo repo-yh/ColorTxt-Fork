@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { app, BrowserWindow } from "electron";
 import { WebSocketServer, WebSocket } from "ws";
-import { getWebDisplayServer } from "./webDisplay";
+import { getWebDisplayServer, setWebDisplayDebugHandler } from "./webDisplay";
 import type { ExtensionWsDownloadEvent } from "../shared/bookSource/ipc";
 
 const HOST = "127.0.0.1";
@@ -53,6 +53,8 @@ type PendingTask = {
   referer?: string;
   /** 表单 POST 非幂等（重复提交可能重复扣金钱）：超时/断线不重推，直接判失败 */
   noRetry?: boolean;
+  /** 抓页任务强制越过脚本侧池子缓存（购买附件后重抓等需要新鲜页的场景） */
+  skipCache?: boolean;
 };
 
 let wss: WebSocketServer | null = null;
@@ -146,6 +148,7 @@ function dispatchTask(taskId: string): void {
       ...(task.kind ? { kind: task.kind } : {}),
       ...(task.body !== undefined ? { body: task.body } : {}),
       ...(task.referer ? { referer: task.referer } : {}),
+      ...(task.skipCache ? { skipCache: true } : {}),
     }),
   );
   console.log(
@@ -481,7 +484,10 @@ export function startExtensionWsServer(): Promise<{
 }
 
 /** 指挥脚本打开页面并抓取 pageData（v1 引擎接入点雏形；内部 console.log 验证） */
-export function openAndGetHtml(url: string): Promise<OpenAndGetHtmlResult> {
+export function openAndGetHtml(
+  url: string,
+  opts?: { skipCache?: boolean },
+): Promise<OpenAndGetHtmlResult> {
   if (!client || client.readyState !== WebSocket.OPEN) {
     return Promise.resolve({
       ok: false,
@@ -499,6 +505,7 @@ export function openAndGetHtml(url: string): Promise<OpenAndGetHtmlResult> {
       resolve,
       tabId: clientTabId,
       retries: 0,
+      skipCache: opts?.skipCache === true,
     });
     dispatchTask(taskId);
   });
@@ -586,95 +593,91 @@ export function formPostViaExtension(
   });
 }
 
-/** 本机调试端点端口（仅 loopback），随 WS 服务同启停；8901 被系统服务占用，避开 */
-const DEBUG_PORT = 8911;
-let debugServer: http.Server | null = null;
-
 /**
- * 调试用：把油猴通道暴露为本机 HTTP 接口，供 curl 手动验证与采集解析样本。
- * GET /openAndGetHtml?url=<encodeURIComponent 后的目标 URL>[&raw=1]
+ * 调试用：把油猴通道暴露为 HTTP 接口——并入 Web 展示服务 8888 单端口
+ * （/api/debug/*，宿主按前缀转交），供 curl 手动验证与采集解析样本。
+ * 仅开发版注册（打包发布版无此路由，/api/debug/* 走宿主 404）。
+ * GET /api/debug/openAndGetHtml?url=<encodeURIComponent 后的目标 URL>[&raw=1]
  *   raw=1 且抓取成功时直接返回 HTML 文本，否则返回 OpenAndGetHtmlResult JSON。
- * GET /download?url=<附件 URL>&referer=<发起页 URL>&postUrl=<帖子 URL>
+ * GET /api/debug/download?url=<附件 URL>&referer=<发起页 URL>&postUrl=<帖子 URL>
  *   fire-and-forget：下发即返回；脚本 fetch 完成后主动推送 download_result，
  *   服务端落盘到系统下载目录（成功/失败都推送，失败记日志）。
  */
 function startExtensionWsDebugServer(): void {
-  if (debugServer) return;
-  // 调试脚手架仅开发版提供，打包发布版不开此端口
   if (app.isPackaged) return;
-  const server = http.createServer((req, res) => {
-    const u = new URL(req.url ?? "/", `http://127.0.0.1:${DEBUG_PORT}`);
-    const target = u.searchParams.get("url");
-    if (!target) {
-      res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
-      res.end(
-        JSON.stringify({
-          ok: false,
-          error:
-            "用法: /openAndGetHtml?url=<encodeURIComponent 后的目标 URL>&raw=1 或 /download?url=<附件 URL>&referer=<发起页 URL>",
-        }),
-      );
-      return;
-    }
-    if (u.pathname === "/openAndGetHtml") {
-      console.log(`[extensionWs] 调试端点请求 ${target}`);
-      openAndGetHtml(target)
-        .then((r) => {
-          if (u.searchParams.get("raw") === "1" && r.ok) {
-            res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-            res.end(r.html);
-            return;
-          }
-          res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
-          res.end(JSON.stringify(r));
-        })
-        .catch((err: unknown) => {
-          res.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
-          res.end(JSON.stringify({ ok: false, error: String(err) }));
-        });
-      return;
-    }
-    if (u.pathname === "/download") {
-      const referer = u.searchParams.get("referer") ?? undefined;
-      const postUrl = u.searchParams.get("postUrl") ?? undefined;
-      const bookName = u.searchParams.get("bookName") ?? undefined;
-      console.log(`[extensionWs] 调试端点下载下发 ${target}`);
-      const r = downloadBookSourceFileViaExtension(
-        target,
-        referer,
-        postUrl,
-        bookName,
-      );
-      res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
-      res.end(
-        JSON.stringify(
-          r.ok
-            ? {
-                ok: true,
-                message:
-                  "下载任务已下发（fire-and-forget）；脚本 fetch 完成后主动推送 download_result，服务端落盘到系统下载目录（失败也推送并记日志）",
-              }
-            : r,
-        ),
-      );
-      return;
-    }
-    res.writeHead(404, { "Content-Type": "application/json; charset=utf-8" });
-    res.end(JSON.stringify({ ok: false, error: "未知端点" }));
-  });
-  server.on("error", (err: NodeJS.ErrnoException) => {
-    console.warn(`[extensionWs] 调试端点启动失败: ${err.message}`);
-  });
-  server.listen(DEBUG_PORT, HOST);
-  debugServer = server;
-  console.log(`[extensionWs] 调试端点已启动: http://${HOST}:${DEBUG_PORT}`);
+  setWebDisplayDebugHandler(handleDebugRequest);
+  console.log(
+    "[extensionWs] 调试端点已并入 Web 展示服务单端口: http://127.0.0.1:8888/api/debug/*（仅开发版）",
+  );
 }
 
 function stopExtensionWsDebugServer(): void {
-  if (!debugServer) return;
-  const server = debugServer;
-  debugServer = null;
-  server.close(() => {});
+  setWebDisplayDebugHandler(null);
+}
+
+/** 调试请求处理（webDisplay 宿主按 /api/debug/ 前缀转交，url 已解析） */
+function handleDebugRequest(
+  _req: http.IncomingMessage,
+  res: http.ServerResponse,
+  url: URL,
+): void {
+  const target = url.searchParams.get("url");
+  if (!target) {
+    res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+    res.end(
+      JSON.stringify({
+        ok: false,
+        error:
+          "用法: /api/debug/openAndGetHtml?url=<encodeURIComponent 后的目标 URL>&raw=1 或 /api/debug/download?url=<附件 URL>&referer=<发起页 URL>",
+      }),
+    );
+    return;
+  }
+  if (url.pathname === "/api/debug/openAndGetHtml") {
+    console.log(`[extensionWs] 调试端点请求 ${target}`);
+    openAndGetHtml(target)
+      .then((r) => {
+        if (url.searchParams.get("raw") === "1" && r.ok) {
+          res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+          res.end(r.html);
+          return;
+        }
+        res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify(r));
+      })
+      .catch((err: unknown) => {
+        res.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ ok: false, error: String(err) }));
+      });
+    return;
+  }
+  if (url.pathname === "/api/debug/download") {
+    const referer = url.searchParams.get("referer") ?? undefined;
+    const postUrl = url.searchParams.get("postUrl") ?? undefined;
+    const bookName = url.searchParams.get("bookName") ?? undefined;
+    console.log(`[extensionWs] 调试端点下载下发 ${target}`);
+    const r = downloadBookSourceFileViaExtension(
+      target,
+      referer,
+      postUrl,
+      bookName,
+    );
+    res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+    res.end(
+      JSON.stringify(
+        r.ok
+          ? {
+              ok: true,
+              message:
+                "下载任务已下发（fire-and-forget）；脚本 fetch 完成后主动推送 download_result，服务端落盘到系统下载目录（失败也推送并记日志）",
+            }
+          : r,
+      ),
+    );
+    return;
+  }
+  res.writeHead(404, { "Content-Type": "application/json; charset=utf-8" });
+  res.end(JSON.stringify({ ok: false, error: "未知端点" }));
 }
 
 export function stopExtensionWsServer(): void {

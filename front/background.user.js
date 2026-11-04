@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ColorTxt 找书通道（油猴版 WS 客户端）
 // @namespace    colortxt-find-book
-// @version      1.3.5
+// @version      1.3.8
 // @description  连接 ColorTxt 桌面端 WS 服务（ws://127.0.0.1:8888/ws，与 Web 展示服务共用 8888 端口）：主 tab 持锁收任务，抓页任务开后台 tab 真实加载（导航执行 _dsign 挑战 JS 过墙）经 worker 池取页；表单 POST（附件购买）/ 附件下载同源 fetch。单连接锁 + 心跳 + 断线指数退避，行为清单见脚本内注释
 // @updateURL    http://127.0.0.1:8888/background.user.js
 // @downloadURL  http://127.0.0.1:8888/background.user.js
@@ -71,50 +71,60 @@
     let heartbeatTimeoutTimer = null;
     let holdLock = false;
     let backoffDelay = BASE_DELAY;
-    // Tampermonkey 本 tab 标识（GM_getTab 异步到手；回报统一带上供服务端维护映射）
+    // Tampermonkey 本 tab 标识与锁归属标识（GM_getTab 异步到手；回报统一带上供
+    // 服务端维护映射）
     let myTabId = null;
+    let myHolderId = null;
 
-    const now = Date.now();
-    // 锁归属标识：sessionStorage 同 tab 刷新（含后台回收重载）后保留、跨 tab 隔离。
-    // 锁里记录持有者标识，主 tab 刷新后新文档凭它认领自己的旧锁直接重连——卸载阶段的
-    // GM 写删除经实测不可靠（beforeunload/pagehide/unload 全挂载仍失败，锁残留导致
-    // 新文档误判 worker 且自关主 tab），故释放不能依赖卸载钩子，锁认领才是权威路径
-    let holderId = sessionStorage.getItem("ws_lock_holder");
-    if (!holderId) {
-        holderId = Math.random().toString(36).slice(2);
-        sessionStorage.setItem("ws_lock_holder", holderId);
-    }
-    const lock = GM_getValue(LOCK_KEY, null);
-    const lockIsMine = !!(lock && lock.holderId === holderId);
-    if (lock && lock.active && !lockIsMine && (now - lock.ts < LOCK_TTL)) {
-        // 已有其他 tab 持锁：本 tab 转为 worker，把页面内容登记进池子供主 tab 匹配取用
-        workerRegister();
-        return;
-    }
-
-    console.log("[Tab] 锁空闲/过期/归属本tab，尝试WS初始连接（仅启动时一次）");
-    // 拿 Tampermonkey 本 tab 标识（数字，同一 tab 刷新前后稳定）：回报消息统一带
-    // tabId，服务端按 typeof number 更新 connId→tabId 映射——新连接顶替旧连接策略下，
-    // tab 刷新重连后服务端重推任务仍对得上本 tab（防止刷新重连后任务丢失）
+    // 锁归属标识 = GM_getTab 的 tabId（Tampermonkey 按浏览上下文分配，同 tab 刷新/
+    // 跳转稳定、跨 tab 不重复）：不能用 sessionStorage 存随机串——window.open /
+    // target=_blank / GM_openInTab 打开的新 tab 会复制 opener 的 sessionStorage
+    // （HTML 规范），holderId 随之泄漏给 worker tab 与用户新开的 tab，锁认领失效
+    // → 多 tab 同时判定「锁是我的」一起连 WS，在服务端「新连接顶替旧连接」策略下
+    // 无限互顶抢锁。锁认领仍是权威释放路径：卸载阶段 GM 写删除实测不可靠
+    // （beforeunload/pagehide/unload 全挂载仍失败），主 tab 刷新/跳转后新文档凭
+    // 同 tabId 认领旧锁直接重连。拿不到 tabId（TM 版本过旧等）退化为随机串：
+    // 永不认领旧锁（安全方向），等下次刷新/跳转恢复
     GM_getTab((tabData) => {
-        myTabId = tabData.tabId;
+        myTabId = tabData && typeof tabData.tabId === "number" ? tabData.tabId : null;
+        myHolderId =
+            myTabId !== null ? `tab-${myTabId}` : Math.random().toString(36).slice(2);
+        startup();
     });
-    // 先占锁再连接：握手窗口内其他新 Tab 见锁直接终止，避免无谓竞争；
-    // 初始连接失败由 onerror(!holdLock) 释放锁，Tab 刷新后脚本重新执行再试
-    GM_setValue(LOCK_KEY, { active: true, ts: Date.now(), holderId });
-    // 主 tab 浏览的页面同样登记进池子当缓存：用户点链接跳转重当主后，当前页面（帖子
-    // 详情等）供应用之后的任务命中（token 为空永不自关，纯缓存语义）
-    registerPageToPool();
-    // 主 tab 唯一的池子监听器：worker 登记 → 按 token/url 匹配任务表 → 按 taskId 回传
-    watchPool();
-    tryConnect();
-    checkSelfUpdate();
+
+    /** 启动分流：锁活跃且非本 tab → worker；否则当主 tab（初始启动仅一次） */
+    function startup() {
+        const lock = GM_getValue(LOCK_KEY, null);
+        const lockIsMine = !!(lock && lock.holderId === myHolderId);
+        if (lock && lock.active && !lockIsMine && Date.now() - lock.ts < LOCK_TTL) {
+            // 已有其他 tab 持锁：本 tab 转为 worker，把页面内容登记进池子供主 tab 匹配取用
+            workerRegister();
+            return;
+        }
+        console.log("[Tab] 锁空闲/过期/归属本tab，作为主tab连接WS（仅启动时一次）");
+        becomeMain();
+    }
+
+    /** 主 tab 逻辑：占锁 + 池子监听 + 连 WS + 自更新检查。
+     * 先占锁再连接：握手窗口内其他新 tab 见锁直接转 worker，避免无谓竞争；
+     * 初始连接失败由 onerror(!holdLock) 释放锁，Tab 刷新后脚本重新执行再试 */
+    function becomeMain() {
+        GM_setValue(LOCK_KEY, { active: true, ts: Date.now(), holderId: myHolderId });
+        // 主 tab 浏览的页面同样登记进池子当缓存：用户点链接跳转重当主后，当前页面（帖子
+        // 详情等）供应用之后的任务命中（token 为空永不自关，纯缓存语义）
+        registerPageToPool();
+        // 主 tab 唯一的池子监听器：worker 登记 → 按 token/url 匹配任务表 → 按 taskId 回传
+        watchPool();
+        tryConnect();
+        checkSelfUpdate();
+    }
 
     // BFCache 恢复（自更新跳 TM 安装页后用户后退返回等场景）：页面冻结期间浏览器
     // 关闭了 WS、断开了 GM 值监听 port（watchPool 的值变更监听随之失效），而脚本顶层
     // 不会因 bfcache 恢复重新执行——必须在 pageshow(persisted) 手动重建连接与监听。
-    // tryConnect 防重入，与解冻后迟到的 onclose 重连兜底不冲突；锁凭 holderId 认领，
-    // 定时器（续约/心跳）解冻后自然恢复。仅主 tab 注册（worker 页面无监听可重建）
+    // tryConnect 防重入且带锁归属验证（worker tab 恢复时锁非己静默不连），与解冻后
+    // 迟到的 onclose 重连兜底不冲突；定时器（续约/心跳）解冻后自然恢复。
+    // 所有 tab 注册（worker 恢复走验证跳过连接）
     window.addEventListener("pageshow", (ev) => {
         if (!ev.persisted) return;
         console.log("[Tab] 页面从BFCache恢复，重建 WS 连接与池子监听");
@@ -179,9 +189,25 @@
         } catch (e) { /* 忽略发送失败 */ }
     }
 
+    /** 锁被其他 tab 持有 → 退位：置 holdLock=false、停续约（防把别人的锁续活）。
+     * tryConnect 连接前与 onclose 排重试前共用；worker tab（holdLock 本就 false）
+     * 调用无副作用，仅被挡下不连接。锁不存在/归属本 tab → 返回 false */
+    function resignIfLockStolen() {
+        const lock = GM_getValue(LOCK_KEY, null);
+        if (!lock || lock.holderId === myHolderId) return false;
+        console.log("[Tab] 锁已被其他tab持有，本tab退位不连接");
+        holdLock = false;
+        clearInterval(renewTimer);
+        renewTimer = null;
+        return true;
+    }
+
     function tryConnect() {
         // 防重入：连接中/已连接不重复建连（对齐油猴通道 connect）
         if (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) return;
+        // 连接前验证锁归属：锁被其他 tab 持有绝不连接（服务端新连接顶替旧连接，
+        // 双主会死循环互顶抢锁）。锁不存在=空闲，照常连接（onopen 会重新占锁）
+        if (resignIfLockStolen()) return;
         stopAllHeartbeat();
         ws = new WebSocket(WS_SERVER);
 
@@ -234,11 +260,14 @@
             console.log(`[Tab] WS断开，准备退避重试，下次延迟：${backoffDelay}ms`);
             stopAllHeartbeat();
             // 续约定时器不清：重试期间依然持有锁、持续续约（断线重试规则），
-            // 仅 beforeunload 主动释放时才清
+            // 仅 pagehide/退位时才清
             ws = null;
 
-            // 曾经成功建立连接，持有锁：执行退避重试
+            // 只有仍持有锁的 tab 才重试连接：断线期间锁被其他 tab 持有（后台节流
+            // 漏续约后被抢等）则就地退位、不排退避重试，防与持锁者互顶；锁不存在
+            // =空闲照常重试（连接成功后重新占锁）
             if (holdLock) {
+                if (resignIfLockStolen()) return;
                 retryTimer = setTimeout(() => {
                     tryConnect();
                 }, backoffDelay);
@@ -411,8 +440,10 @@
         // 缓存命中直接回传（不开 worker tab，重复打开帖子秒回，省挑战 13~66s）。
         // 帖子详情内容不变，无限缓存；search.php 排除是防御——搜索 302 searchid 后
         // 池子里存的是 searchid URL，任务的 srchtxt URL 本就永不命中缓存，但万一某
-        // 次搜索未 302 直出，同书检查更新的固定搜索 URL 会命中旧快照致更新检测失效
-        if (!/\/search\.php\?/i.test(url)) {
+        // 次搜索未 302 直出，同书检查更新的固定搜索 URL 会命中旧快照致更新检测失效。
+        // skipCache=true（购买附件后重抓等需要新鲜页的场景）强制越过缓存：购买前
+        // 抓的未购快照还在池子里，命中会导致购买后仍解析不到已购直链
+        if (payload.skipCache !== true && !/\/search\.php\?/i.test(url)) {
             const cached = getPool().find(
                 (x) => x.body && normalizeTaskUrl(x.url) === want,
             );
@@ -690,7 +721,7 @@
     // 站内导航都会触发；unload 被 Chrome Permissions Policy 默认禁止（报 violation
     // 且不执行），beforeunload 属废弃趋势不挂。e.persisted=true → 页面进 bfcache
     // 只是休眠未注销，跳过清理（退回时继续工作）；只有真销毁才清理。GM 写在卸载
-    // 阶段可能静默失败，锁释放权威路径 = sessionStorage 锁认领 + LOCK_TTL 过期
+    // 阶段可能静默失败，锁释放权威路径 = tabId 锁认领 + LOCK_TTL 过期
     window.addEventListener("pagehide", (e) => {
         if (e.persisted) return;
         clearInterval(renewTimer);
@@ -708,7 +739,7 @@
     // 的卸载阶段 GM 写（实测静默失败）可靠得多——tab 即将跳走，提前放锁让新文档立即
     // 抢占。排除：target=_blank（新 tab 开，本 tab 仍是主）、外链（新页面不跑脚本，
     // 靠 pagehide 兜底）、纯锚点（不导航）、javascript: 伪链接。若点击被脚本拦截未
-    // 导航，锁被误删也自愈（本 tab 续约 6s 内写回 + sessionStorage 认领兜底）
+    // 导航，锁被误删也自愈（本 tab 续约 6s 内写回 + tabId 锁认领兜底）
     document.addEventListener(
         "click",
         (e) => {

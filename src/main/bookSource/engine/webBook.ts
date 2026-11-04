@@ -15,7 +15,7 @@ import {
 import { normalizeBookSourceBaseUrl, normalizeHttpUrlPath, resolveAbsoluteUrl } from "@shared/bookSource/url";
 import { wordCountFormat } from "@shared/bookSource/wordCountFormat";
 import { formatLegadoBookAuthor, formatLegadoBookName } from "@shared/bookSource/formatBookAuthor";
-import { LOGIN_EXPIRED_LOG_MARK } from "@shared/bookSource/ipc";
+import { LOGIN_EXPIRED_LOG_MARK, SEARCH_RATE_LIMITED_LOG_MARK } from "@shared/bookSource/ipc";
 import {
   splitUrlAndRuleVariables,
   extractUrlFetchOptionsSuffix,
@@ -133,6 +133,28 @@ function runJsLib(
   host: ReturnType<typeof createJsExtensionHost>,
 ): void {
   ensureBookSourceJsLib(source, host);
+}
+
+/** 搜索限流判定（WS 源 searchUpdate 批量更新漏桶策略）：
+ *  请求 URL 带查询参数（搜索提交），响应最终 URL 却落在同 origin 同路径的无参页
+ *  （如 Discuz 搜索限流 302 回搜索首页 search.php）→ 视为被限流 */
+function isSearchRateLimitedRedirect(
+  requestUrl: string,
+  finalUrl: string,
+): boolean {
+  if (requestUrl === finalUrl) return false;
+  try {
+    const req = new URL(requestUrl);
+    const fin = new URL(finalUrl);
+    return (
+      fin.origin === req.origin &&
+      fin.pathname === req.pathname &&
+      req.search.length > 0 &&
+      fin.search.length === 0
+    );
+  } catch {
+    return false;
+  }
 }
 
 /** 详情页常见 Open Graph 小说 meta（书源未配 kind 或选择器未命中时兜底） */
@@ -2250,6 +2272,18 @@ export async function getChapterList(
     body = res.body;
     redirectUrl = res.url;
     firstPageBaseUrl = res.url;
+    // WS 源搜索限流检测（用户拍板漏桶策略：批量更新只在被限流时挂起 concurrentRate
+    // 时长）——请求带搜索参数、响应最终 URL 落回同路径无参页（如 Discuz 限流 302
+    // 回搜索首页 search.php）；非 WS 源不做此检测
+    if (
+      sourceIsSearchUpdate &&
+      source.enabledWebSocket === true &&
+      isSearchRateLimitedRedirect(analyzeUrl.url, redirectUrl)
+    ) {
+      logs.push(
+        `${SEARCH_RATE_LIMITED_LOG_MARK}，搜索被重定向到搜索首页：${source.bookSourceName}`,
+      );
+    }
     // bookId 误带 90000001_ 前缀时 all-chapter 返回空 rows，去掉前缀再试
     if (
       body.trim().startsWith("{") &&

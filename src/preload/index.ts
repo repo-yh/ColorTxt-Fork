@@ -516,8 +516,12 @@ const api = {
           }
         | { ok: false; error: string }
       >,
-    parseChapterAttachments: (url: string) =>
-      ipcRenderer.invoke("extensionWs:parseChapterAttachments", url) as Promise<
+    parseChapterAttachments: (url: string, opts?: { skipCache?: boolean }) =>
+      ipcRenderer.invoke(
+        "extensionWs:parseChapterAttachments",
+        url,
+        opts,
+      ) as Promise<
         | {
             ok: true;
             finalUrl: string;

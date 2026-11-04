@@ -19,6 +19,10 @@ import type { LoginUiRow } from "./loginUi";
  *  主进程 push 与渲染层（批量更新提前终止等）检测共用单一来源 */
 export const LOGIN_EXPIRED_LOG_MARK = "检测到登录页特征";
 
+/** 引擎 logs 中「搜索被站点限流（响应被重定向回搜索首页）」的固定标记，
+ *  主进程 push 与渲染层（批量更新漏桶限流挂起等）检测共用单一来源 */
+export const SEARCH_RATE_LIMITED_LOG_MARK = "检测到搜索限流特征";
+
 export const BOOK_SOURCE_IPC = {
   list: "bookSource:list",
   get: "bookSource:get",

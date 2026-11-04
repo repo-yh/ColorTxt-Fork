@@ -19,6 +19,14 @@ const bookshelfUpdateLogEntries = ref<string[]>([]);
 /** 批量更新中发现登录失效的书源（WS 源命中后终止该源剩余书的检查更新） */
 const loginExpiredOrigins = new Set<string>();
 
+/** 检查更新中被搜索限流（WS 源搜索被重定向回搜索首页）的书源集合——
+ *  引擎 SEARCH_RATE_LIMITED_LOG_MARK 标记经 onRateLimited 回调写入，
+ *  串行组检查完一本后读取并清除，据此挂起 concurrentRate 时长 */
+const searchRateLimitedOrigins = new Set<string>();
+
+/** 单本限流重试上限：挂起后重试连续超过此数仍被限流则放弃本书（防死循环） */
+const SEARCH_RATE_LIMIT_MAX_RETRIES = 3;
+
 /** 引擎 logs 是否含「响应 URL 命中书源登录页」标记（fetchWithLoginCheck 统一 push） */
 function hasLoginExpiredLog(logs?: string[] | null): boolean {
   return (logs ?? []).some((l) => l.includes(LOGIN_EXPIRED_LOG_MARK));
@@ -203,6 +211,9 @@ export function useBookshelfUpdate(onBooksChanged?: (books: BookshelfBook[]) => 
         onBooksChanged,
         // 引擎 logs 命中登录失效标记 → 记入失效集合（批量时同源剩余书提前跳过）
         onLoginExpired: () => loginExpiredOrigins.add(book.origin),
+        // 引擎 logs 命中搜索限流标记（搜索被重定向回搜索首页）→ 记入限流集合
+        // （批量 WS 源串行组据此挂起 concurrentRate 时长后重试本书）
+        onRateLimited: () => searchRateLimitedOrigins.add(book.origin),
       });
     }
 
@@ -285,11 +296,15 @@ export function useBookshelfUpdate(onBooksChanged?: (books: BookshelfBook[]) => 
 
     clearBookshelfUpdateLogs();
     loginExpiredOrigins.clear();
+    searchRateLimitedOrigins.clear();
 
-    // searchUpdate 书源（如 sxsy45）站点限制「请求间隔 + 不能并发」：
-    // 源内逐本串行，本间间隔读源 concurrentRate sleep（限流只做在检查更新代码里，
-    // 请求层——查看帖子/WS 脚本交互——不限流）；其余书源保持多 worker 并发池。
-    // 分组判定每源只查一次书源库。
+    // searchUpdate 书源（如 sxsy45）站点搜索限流是漏桶算法（非固定间隔）：
+    // WS 源启用自适应——限流未发生时一本接一本直查；某本搜索被限流（响应被
+    // 重定向回搜索首页，引擎 SEARCH_RATE_LIMITED_LOG_MARK 标记）时挂起
+    // concurrentRate 时长后重试本书，且此后剩余书按 concurrentRate 固定本间
+    // 间隔走（漏桶已空，等不了恢复全部，只能按间隔请求剩下的）；非 WS 源
+    // 维持原固定本间间隔。限流只做在检查更新代码里，请求层——查看帖子/WS
+    // 脚本交互——不限流。其余书源保持多 worker 并发池。分组判定每源只查一次书源库。
     const searchUpdateOrigins = new Set<string>();
     // WS 油猴通道书源：登录态在外部浏览器（脚本会话），本地无 Cookie 可自愈——
     // 批量更新中检测到登录失效即提前终止该源剩余书的检查；非 WS 源保持弹窗自愈不终止
@@ -336,26 +351,53 @@ export function useBookshelfUpdate(onBooksChanged?: (books: BookshelfBook[]) => 
     const serialWorkers = [...serialGroups.entries()].map(
       async ([origin, group]) => {
         const intervalMs = await sourceUpdateIntervalMs(origin);
+        const adaptive = wsOrigins.has(origin);
+        // 组级限流状态：一旦本组出现限流，剩余书固定间隔走（不等漏桶恢复全部）
+        let rateLimitedMode = false;
         for (let i = 0; i < group.length; i++) {
-          // 该源已检出登录失效（仅 WS 源）：终止剩余书（本间 sleep 也一并跳过）
+          // 该源已检出登录失效（仅 WS 源）：终止剩余书（本间挂起也一并跳过）
           if (wsOrigins.has(origin) && loginExpiredOrigins.has(origin)) {
             appendBookshelfUpdateLog(
               `书源「${group[0]?.originName || origin}」登录已失效，已终止该源剩余 ${group.length - i} 本的检查更新`,
             );
             break;
           }
-          // 转圈覆盖「检查 + 本间等待」全程：旧版间隔由请求层限流承担（转圈期间
-          // 一直在 sleep），限流撤层后间隔挪到本书检查前、仍在置位窗口内——
-          // 避免 20s+ 本间间隔期书架完全静止、转圈只剩检查瞬间一闪
           const book = group[i];
           const key = bookshelfBookKey(book.bookUrl, book.origin);
           if (updatingKeys.value.has(key)) continue;
+          // 转圈覆盖「挂起 + 检查 + 限流重试」全程：被限流时该行持续转圈可见
+          // （未限流时无挂起，转圈只覆盖检查瞬间，秒进秒出）
           setUpdating(key, true);
           try {
-            if (i > 0 && intervalMs > 0) {
-              await new Promise((r) => setTimeout(r, intervalMs));
+            if (adaptive) {
+              let waitBeforeRetry = false;
+              let retries = 0;
+              while (true) {
+                // 挂起：限流重试前（waitBeforeRetry）或限流后剩余书每本前
+                if ((waitBeforeRetry || rateLimitedMode) && intervalMs > 0) {
+                  await new Promise((r) => setTimeout(r, intervalMs));
+                }
+                waitBeforeRetry = false;
+                await withSourceUpdateLock(origin, () => updateBookOnce(book));
+                if (!searchRateLimitedOrigins.delete(origin)) break;
+                // 本次搜索被限流：挂起 intervalMs 后重试本书（超上限放弃）
+                rateLimitedMode = true;
+                retries += 1;
+                if (retries > SEARCH_RATE_LIMIT_MAX_RETRIES) {
+                  appendBookshelfUpdateLog(
+                    `「${book.name}」重试 ${SEARCH_RATE_LIMIT_MAX_RETRIES} 次仍被搜索限流，跳过本书`,
+                  );
+                  break;
+                }
+                waitBeforeRetry = true;
+              }
+            } else {
+              // 非 WS searchUpdate 源：固定本间间隔（限流检测依赖 WS 通道 finalUrl）
+              if (i > 0 && intervalMs > 0) {
+                await new Promise((r) => setTimeout(r, intervalMs));
+              }
+              await withSourceUpdateLock(origin, () => updateBookOnce(book));
             }
-            await withSourceUpdateLock(origin, () => updateBookOnce(book));
           } finally {
             setUpdating(key, false);
           }

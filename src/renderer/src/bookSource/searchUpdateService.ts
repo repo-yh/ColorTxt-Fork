@@ -1,5 +1,8 @@
 import type { BookChapter, BookSourceRecord } from "@shared/bookSource/types";
-import { LOGIN_EXPIRED_LOG_MARK } from "@shared/bookSource/ipc";
+import {
+  LOGIN_EXPIRED_LOG_MARK,
+  SEARCH_RATE_LIMITED_LOG_MARK,
+} from "@shared/bookSource/ipc";
 import { ipcPlain } from "./ipcPlain";
 import {
   bookshelfAsBook,
@@ -227,6 +230,9 @@ export type SearchUpdateHooks = {
   onBooksChanged?: (books: BookshelfBook[]) => void;
   /** 引擎 logs 命中登录失效标记时回调（批量更新据此终止该源剩余书的检查） */
   onLoginExpired?: () => void;
+  /** 引擎 logs 命中搜索限流标记（响应被重定向回搜索首页）时回调
+   *  （批量更新 WS 源串行组据此挂起 concurrentRate 时长后重试本书） */
+  onRateLimited?: () => void;
 };
 
 /**
@@ -265,11 +271,22 @@ export async function runSearchUpdateForBook(
       );
       return false;
     }
+    // 引擎 logs 命中搜索限流标记（响应被重定向回搜索首页）→ 回调；
+    // 批量更新 WS 源串行组据此挂起 concurrentRate 时长后重试本书
+    if (logs.some((line) => line.includes(SEARCH_RATE_LIMITED_LOG_MARK))) {
+      hooks.onRateLimited?.();
+    }
     if (!chapters.length) {
+      // 被限流（响应落搜索首页）与真 0 条（脏书名/登录态）日志文案区分
+      const rateLimited = logs.some((line) =>
+        line.includes(SEARCH_RATE_LIMITED_LOG_MARK),
+      );
       hooks.appendLog(
-        `${formatSearchUpdateLogHead(book)}\n搜索 0 条结果（可能登录态失效，请到书源重新登录）${
-          message ? `\n${message}` : ""
-        }`,
+        `${formatSearchUpdateLogHead(book)}\n${
+          rateLimited
+            ? "搜索被站点限流（响应被重定向到搜索首页）"
+            : "搜索 0 条结果（可能登录态失效，请到书源重新登录）"
+        }${message ? `\n${message}` : ""}`,
       );
       return false;
     }
@@ -564,9 +581,12 @@ export async function downloadLatestPostViaExtension(
       }
     }
 
-    // 重新发起获取帖子的请求过滤附件下载链接（购买已生效，不做额外等待）
+    // 重新发起获取帖子的请求过滤附件下载链接（购买已生效，不做额外等待）。
+    // skipCache 强制越过脚本侧池子缓存：购买前抓的未购快照还在池子里，命中会
+    // 导致仍解析不到已购直链、误报「购买未生效」
     const reparsed = await window.colorTxt.extensionWs.parseChapterAttachments(
       url,
+      { skipCache: true },
     );
     if (!reparsed.ok) {
       return {

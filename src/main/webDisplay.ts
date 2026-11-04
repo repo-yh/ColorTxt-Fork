@@ -172,6 +172,24 @@ export async function cleanStaleCache(validFilePaths: string[]): Promise<void> {
 
 // ---- Server ----
 
+/**
+ * 调试请求处理器（extensionWs 注册）：宿主按 /api/debug/ 前缀转交，
+ * 仅开发版注册（随 WS 开关联动），未注册时该前缀走 404
+ */
+type WebDisplayDebugHandler = (
+  req: import("node:http").IncomingMessage,
+  res: import("node:http").ServerResponse,
+  url: URL,
+) => void;
+let debugHandler: WebDisplayDebugHandler | null = null;
+
+/** 注册/注销调试请求处理器（extensionWs 调用；null 注销） */
+export function setWebDisplayDebugHandler(
+  handler: WebDisplayDebugHandler | null,
+): void {
+  debugHandler = handler;
+}
+
 function serveFile(
   res: import("node:http").ServerResponse,
   filePath: string,
@@ -444,6 +462,12 @@ export function startWebDisplay(
         "Content-Type": "application/json; charset=utf-8",
       });
       res.end(JSON.stringify({ ok: fp != null, file: fp ?? undefined }));
+      return;
+    }
+
+    // /api/debug/*：extensionWs 调试端点（仅开发版注册；未注册走下方 404）
+    if (url.pathname.startsWith("/api/debug/") && debugHandler) {
+      debugHandler(req, res, url);
       return;
     }
 

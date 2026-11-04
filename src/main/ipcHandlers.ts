@@ -1549,16 +1549,20 @@ function unknownQuoteAttributions(
     },
   );
 
-  // WS 油猴通道：抓版本帖并解析付费附件（已购/未购两态），供「点章节下载 / 提示需购买」编排
-  ipcMain.handle("extensionWs:parseChapterAttachments", async (_evt, url: string) => {
-    const r = await openAndGetHtml(url);
-    if (!r.ok) return { ok: false as const, error: r.error };
-    return {
-      ok: true as const,
-      finalUrl: r.finalUrl,
-      ...parseChapterAttachments(r.html, r.finalUrl),
-    };
-  });
+  // WS 油猴通道：抓版本帖并解析付费附件（已购/未购两态），供「点章节下载 / 提示需购买」编排；
+  // opts.skipCache 透传（购买后重抓需越过脚本侧池子缓存的未购旧快照）
+  ipcMain.handle(
+    "extensionWs:parseChapterAttachments",
+    async (_evt, url: string, opts?: { skipCache?: boolean }) => {
+      const r = await openAndGetHtml(url, opts);
+      if (!r.ok) return { ok: false as const, error: r.error };
+      return {
+        ok: true as const,
+        finalUrl: r.finalUrl,
+        ...parseChapterAttachments(r.html, r.finalUrl),
+      };
+    },
+  );
 
   // WS 油猴通道：抓 attachpay 购买页并解析表单（action/hidden/售价/购买后余额），供购买确认编排
   ipcMain.handle("extensionWs:parseAttachpay", async (_evt, url: string) => {
