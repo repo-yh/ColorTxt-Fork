@@ -230,8 +230,9 @@ export type SearchUpdateHooks = {
   onBooksChanged?: (books: BookshelfBook[]) => void;
   /** 引擎 logs 命中登录失效标记时回调（批量更新据此终止该源剩余书的检查） */
   onLoginExpired?: () => void;
-  /** 引擎 logs 命中搜索限流标记（响应被重定向回搜索首页）时回调
-   *  （批量更新 WS 源串行组据此挂起 concurrentRate 时长后重试本书） */
+  /** 引擎 logs 命中搜索限流标记（响应未正常落到搜索结果页：302 回搜索首页或
+   *  最终 URL 原地不变）时回调（批量更新同源串行组据此挂起 concurrentRate
+   *  时长后重试本书） */
   onRateLimited?: () => void;
 };
 
@@ -271,20 +272,20 @@ export async function runSearchUpdateForBook(
       );
       return false;
     }
-    // 引擎 logs 命中搜索限流标记（响应被重定向回搜索首页）→ 回调；
-    // 批量更新 WS 源串行组据此挂起 concurrentRate 时长后重试本书
+    // 引擎 logs 命中搜索限流标记（响应未正常落到搜索结果页）→ 回调；
+    // 批量更新同源串行组据此挂起 concurrentRate 时长后重试本书
     if (logs.some((line) => line.includes(SEARCH_RATE_LIMITED_LOG_MARK))) {
       hooks.onRateLimited?.();
     }
     if (!chapters.length) {
-      // 被限流（响应落搜索首页）与真 0 条（脏书名/登录态）日志文案区分
+      // 被限流/拒答（URL 未落到结果页）与真 0 条（脏书名/登录态）日志文案区分
       const rateLimited = logs.some((line) =>
         line.includes(SEARCH_RATE_LIMITED_LOG_MARK),
       );
       hooks.appendLog(
         `${formatSearchUpdateLogHead(book)}\n${
           rateLimited
-            ? "搜索被站点限流（响应被重定向到搜索首页）"
+            ? "搜索被站点限流（未返回结果页，稍后自动重试）"
             : "搜索 0 条结果（可能登录态失效，请到书源重新登录）"
         }${message ? `\n${message}` : ""}`,
       );

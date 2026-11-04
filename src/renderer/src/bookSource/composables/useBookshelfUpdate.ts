@@ -310,13 +310,14 @@ export function useBookshelfUpdate(onBooksChanged?: (books: BookshelfBook[]) => 
     loginExpiredOrigins.clear();
     searchRateLimitedOrigins.clear();
 
-    // searchUpdate 书源（如 sxsy45）站点搜索限流是漏桶算法（非固定间隔）：
-    // WS 源启用自适应——限流未发生时一本接一本直查；某本搜索被限流（响应被
-    // 重定向回搜索首页，引擎 SEARCH_RATE_LIMITED_LOG_MARK 标记）时挂起
-    // concurrentRate 时长后重试本书，且此后剩余书按 concurrentRate 固定本间
-    // 间隔走（漏桶已空，等不了恢复全部，只能按间隔请求剩下的）；非 WS 源
-    // 维持原固定本间间隔。限流只做在检查更新代码里，请求层——查看帖子/WS
-    // 脚本交互——不限流。其余书源保持多 worker 并发池。分组判定每源只查一次书源库。
+    // searchUpdate 书源（如 sxsy45/sxsy33 同站系）站点搜索限流是漏桶算法（非固定
+    // 间隔）：按源分组同源串行——等前一个搜索结果返回后才发下一个；被限流
+    // （302 回搜索首页或最终 URL 原地不变，引擎 SEARCH_RATE_LIMITED_LOG_MARK
+    // 标记）时挂起 concurrentRate 时长后重试本书（超上限跳过），未限流则快速
+    // 下一本，且限流发生后剩余书按 concurrentRate 固定本间间隔走（漏桶已空，
+    // 等不了恢复全部，只能按间隔请求剩下的）。限流只做在检查更新代码里，请求
+    // 层——查看帖子/WS 脚本交互——不限流。其余书源保持多 worker 并发池。
+    // 分组判定每源只查一次书源库。
     const searchUpdateOrigins = new Set<string>();
     // WS 油猴通道书源：登录态在外部浏览器（脚本会话），本地无 Cookie 可自愈——
     // 批量更新中检测到登录失效即提前终止该源剩余书的检查；非 WS 源保持弹窗自愈不终止

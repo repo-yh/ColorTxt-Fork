@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ColorTxt 找书通道（油猴版 WS 客户端）
 // @namespace    colortxt-find-book
-// @version      1.3.24
+// @version      1.3.32
 // @description  连接 ColorTxt 桌面端 WS 服务（ws://127.0.0.1:8888/ws，与 Web 展示服务共用 8888 端口）：主 tab 持锁收任务，抓页任务开后台 tab 真实加载（导航执行 _dsign 挑战 JS 过墙）经 worker 池取页；表单 POST（附件购买）/ 附件下载同源 fetch。单连接锁 + 心跳 + 断线指数退避，行为清单见脚本内注释
 // @updateURL    http://127.0.0.1:8888/background.user.js
 // @downloadURL  http://127.0.0.1:8888/background.user.js
@@ -35,6 +35,44 @@
     // 池子上限：GM 存储是永久的（浏览器重启都在），无上限会一直膨胀占磁盘——
     // 只留最近 20 条，满后新登记挤掉最旧一条（队列尾=最新）
     const POOL_MAX = 20;
+    // worker 回报广播通道（用户拍板 1.3.29 统一 worker 路径，1.3.28 仅搜索）：worker
+    // tab（spawn 任务 tab 与用户手动打开的页面）加载完一律 BroadcastChannel 广播
+    // page_result 给主 tab——同源所有 tab 即时收到、不持久化、无清池动作；主 tab
+    // （holdLock）统一消费：搜索键→写 5 分钟内存缓存、帖子键→主 tab 写 GM 帖子池子
+    // （缓存写入权收归主 tab 一处，worker 不再碰 GM 存储），并匹配任务表回传。主 tab
+    // 不在场时消息自然丢弃（无积压无残留）；bfcache 冻结/恢复不补发也无需重建
+    // （同一 JS 上下文监听随冻结保留，GM 值监听 port 断的问题不存在）
+    const BC_PAGE_CHANNEL = "colortxt-ws-page";
+    // 通道单例在此创建而非消费侧附近：startup 的 GM_getTab 回调可能同步执行，
+    // worker tab 启动即 workerRegister→registerPageToPool→postMessage，通道必须
+    // 先于启动分流就绪（否则 TDZ ReferenceError）。构造失败（极旧环境无此 API）
+    // 置 null：发送侧 try/catch 静默，接收侧判空跳过，主链路不受影响
+    // 广播回报 ACK 等待表（用户拍板 1.3.30：worker 广播回报后不再盲等 500ms 自关，
+    // 主 tab 收到回 ack、worker 凭 ack 才关——发送侧 msgId 注册 resolve，收到对应
+    // ack 即兑现；2s 超时兜底，防主 tab 刷新中/不在场时 tab 滞留）。仅发送回报的
+    // tab 有条目，收到别人的 ack 按 msgId 查不到即忽略，天然隔离
+    const pendingAcks = new Map();
+    const BC_ACK_TIMEOUT_MS = 2000;
+    let pageChannel = null;
+    try {
+        pageChannel = new BroadcastChannel(BC_PAGE_CHANNEL);
+        pageChannel.onmessage = (e) => {
+            const msg = e.data;
+            // ack 消息在 holdLock 门之外处理：等 ack 的是 worker tab 自己（收到
+            // 别人 ack 的 tab 按 msgId 查不到条目，静默忽略）
+            if (msg && msg.type === "ack") {
+                const fn = msg.msgId && pendingAcks.get(msg.msgId);
+                if (fn) {
+                    pendingAcks.delete(msg.msgId);
+                    fn();
+                }
+                return;
+            }
+            if (!holdLock) return; // 消费只有主 tab 做——worker/手动 tab 静默丢弃（用户拍板）
+            handlePageBroadcast(msg);
+        };
+        pageChannel.onmessageerror = () => { /* 反序列化失败静默丢弃 */ };
+    } catch (e) { /* BroadcastChannel 不可用：广播回报整体退化，找书主链路不受影响 */ }
     // worker tab 自关凭证 + 任务关联键：主 tab GM_openInTab 时在 URL hash 带一次性
     // token（_colortxt_spawn=<随机>）；壳页/CF 页阶段脚本把 token 搬进 sessionStorage
     // （挑战跳转与 HTTP 302 都会丢 hash，sessionStorage 同 tab 全程保留）——真页登记
@@ -81,6 +119,12 @@
     // 服务端维护映射）
     let myTabId = null;
     let myHolderId = null;
+    // 本文档首次当主时记一个锁时间（内存变量，脚本每次加载初始化一次，之后整个
+    // 文档会话不变——断线重连复用同一时间，仅刷新/跳转产生新文档才重置）。随
+    // hello 上报服务端仲裁连接：服务器已有维持连接时只有锁时间不小于现存连接的
+    // 新连接才能顶替（相等=本文档重连自己的半开残留，更小=旧文档来抢被拒），
+    // 服务器无现存连接时不看时间直接接受（网络闪断主 tab 重连不能被旧时间挡住）
+    let lockAcquiredAt = 0;
 
     // 脚本加载最前（初始化前）：更新标记在 → 本页是装完新版后返回/重载的，直接
     // 刷新换新代码（读后即删，刷新后的加载不再命中；bfcache 恢复不重跑脚本顶层，
@@ -123,23 +167,28 @@
         becomeMain();
     }
 
-    /** 主 tab 逻辑：占锁 + 池子监听 + 连 WS + 自更新检查。
+    /** 主 tab 逻辑：占锁 + 连 WS + 自更新检查（worker 回报经 BroadcastChannel 广播，
+     * 统一消费在常量区顶层 pageChannel.onmessage→handlePageBroadcast）。
      * 先占锁再连接：握手窗口内其他新 tab 见锁直接转 worker，避免无谓竞争；
      * 初始连接失败由 onerror(!holdLock) 释放锁，Tab 刷新后脚本重新执行再试 */
     function becomeMain() {
+        // 首次当主才取时间：同一文档断线重连/锁续期都复用这一个值（服务端凭它
+        // 区分「同文档重连残留」与「旧文档抢占」）
+        if (!lockAcquiredAt) lockAcquiredAt = Date.now();
         GM_setValue(LOCK_KEY, { active: true, ts: Date.now(), holderId: myHolderId });
         // 主 tab 浏览的页面同样登记进池子当缓存：用户点链接跳转重当主后，当前页面（帖子
-        // 详情等）供应用之后的任务命中（token 为空永不自关，纯缓存语义）
-        registerPageToPool();
-        // 主 tab 唯一的池子监听器：worker 登记 → 按 token/url 匹配任务表 → 按 taskId 回传
-        watchPool();
+        // 详情等）供应用之后的任务命中（token 为空永不自关，纯缓存语义）；搜索结果页
+        // 走直写内存缓存（fromMain 分流，见 registerPageToPool）
+        registerPageToPool(true);
+        // 广播回报无需任何起动动作：不持久化（无积压可消费）、监听在常量区顶层随
+        // 脚本一次挂载（bfcache 恢复也无需重建）
         tryConnect();
         checkSelfUpdate();
     }
 
     // BFCache 恢复（自更新跳 TM 安装页后用户后退返回等场景）：页面冻结期间浏览器
-    // 关闭了 WS、断开了 GM 值监听 port（watchPool 的值变更监听随之失效），而脚本顶层
-    // 不会因 bfcache 恢复重新执行——必须在 pageshow(persisted) 手动重建连接与监听。
+    // 关闭了 WS（BroadcastChannel 监听随冻结上下文保留不受影响），而脚本顶层
+    // 不会因 bfcache 恢复重新执行——必须在 pageshow(persisted) 手动重建连接。
     // tryConnect 防重入且带锁归属验证（worker tab 恢复时锁非己静默不连），与解冻后
     // 迟到的 onclose 重连兜底不冲突；定时器（续约/心跳）解冻后自然恢复。
     // 所有 tab 注册（worker 恢复走验证跳过连接）
@@ -158,8 +207,8 @@
         } catch (e) { /* 标记检查失败按无标记处理 */ }
         // 日志带脚本版本：bfcache 恢复跑的是冻结时的旧代码上下文——此处输出的
         // 版本即可判断「回退后加载的是新代码还是旧代码」（旧=需刷新换新，观测用）
-        console.log(`[Tab] 页面从BFCache恢复（脚本版本 ${GM_info.script.version}），重建 WS 连接与池子监听`);
-        watchPool();
+        console.log(`[Tab] 页面从BFCache恢复（脚本版本 ${GM_info.script.version}），重建 WS 连接`);
+        // 广播监听（pageChannel.onmessage）随冻结上下文保留，恢复即续用无需重建
         tryConnect();
     });
 
@@ -256,6 +305,10 @@
             backoffDelay = BASE_DELAY; // 连上成功，重置退避
             GM_setValue(LOCK_KEY, { active: true, ts: Date.now(), holderId: myHolderId });
             console.log("[Tab] ✅ WS已连接，启动续约+心跳");
+            // 连接后立即自报身份（第一条消息；tabId 由 sendJson 统一注入）：服务端
+            // 凭 lockAcquiredAt 仲裁本连接能否接受/顶替现存连接——被拒会回
+            // connect_rejected 并断开本连接，现有连接不动
+            sendJson({ type: "hello", lockAcquiredAt });
 
             if (renewTimer) clearInterval(renewTimer);
             // 持锁后续约无条件执行（不依赖 ws 状态）：断线退避重试期间也持续续约，
@@ -287,6 +340,25 @@
             // 服务端返回pong，重置心跳超时计时器
             if (payload.type === "pong") {
                 resetHeartbeatTimer();
+                return;
+            }
+
+            // 服务端拒绝本连接（本 tab 锁时间比现存连接更旧=旧文档来抢）：服务器
+            // 已回消息并立即断开。本 tab 释放锁转 worker 且不再重试——holdLock=false
+            // 后 onclose 不排重试，避免旧 tab 一直重试抢占。刷新/跳转产生新文档
+            // （新锁时间）后才可能重新当主
+            if (payload.type === "connect_rejected") {
+                console.log("[Tab] 被服务器拒绝（锁时间比现存连接旧），释放锁转为worker，不再重试");
+                holdLock = false;
+                clearInterval(renewTimer);
+                renewTimer = null;
+                clearTimeout(retryTimer);
+                retryTimer = null;
+                stopAllHeartbeat();
+                const lock = GM_getValue(LOCK_KEY, null);
+                if (lock && lock.holderId === myHolderId) GM_deleteValue(LOCK_KEY);
+                workerRegister();
+                if (ws) ws.close(1000, "connect rejected");
                 return;
             }
 
@@ -331,10 +403,12 @@
 
     // ---------- worker 池 ----------
 
-    /** 池子数据口径版本：登记/存储口径变化时 +1（v2 = 1.3.12 起登记 URL 剥 hash）。
-     *  加载时数据版本低于当前直接清空——旧口径存量一次性作废（用户拍板「缓存 key
-     *  增加版本号，低于当前版本就直接清理」），不做逐字段清洗 */
-    const POOL_DATA_VERSION = 2;
+    /** 池子数据口径版本：登记/存储口径变化时 +1（v2 = 1.3.12 起登记 URL 剥 hash；
+     *  v3 = 1.3.26 起记录带 threadKey 预计算键 + 无键且无 token 的页面不登记，
+     *  防登录页等无缓存价值页面挤占坑位——用户拍板「写入时就提取 tid，提取不到
+     *  的不进缓存」）。加载时数据版本低于当前直接清空——旧口径存量一次性作废
+     *  （用户拍板「缓存 key 增加版本号，低于当前版本就直接清理」），不做逐字段清洗 */
+    const POOL_DATA_VERSION = 3;
 
     /** 解析池子 GM 值 → 记录数组；裸数组旧格式（≤1.3.13 无版本号）或版本低于当前
      *  口径 → 直接清空作废 */
@@ -394,13 +468,15 @@
         return (h1 ? h1.outerHTML : "") + floor.outerHTML;
     }
 
-    /** 页面登记进池子当缓存（帖子详情内容不变，应用之后打开同帖直接命中秒回）。
+    /** 页面回报给主 tab（帖子详情内容不变，应用之后打开同帖直接命中秒回）。
      * 无 <title> 的页面是挑战壳页/中间跳转页，CF 拦截页（title=Just a moment）是
-     * 挑战中——都跳过不登记，等跳到真页后由新文档重新执行脚本登记（否则主 tab 会
-     * 把中间页当结果取走）。返回 { saved, token }：saved=false 壳页/中间页未登记；
-     * saved=true 内容已进池子，token 可为空串（挑战壳页跳转丢 hash 且接力断，
-     * 主 tab watchPool 按 normalize URL 剥 _dsign/hash 兜底匹配取回） */
-    function registerPageToPool() {
+     * 挑战中——都跳过不回报，等跳到真页后由新文档重新执行脚本回报（否则主 tab 会
+     * 把中间页当结果取走）。返回 { saved, token }：saved=false 壳页/中间页未回报；
+     * saved=true 内容已广播，token 可为空串（挑战壳页跳转丢 hash 且接力断，
+     * 主 tab handlePageBroadcast 按 normalize URL 剥 _dsign/hash 兜底匹配取回）。
+     * fromMain=主 tab becomeMain 调用：不走广播，搜索结果页直接写内存缓存、帖子页
+     * 直接写池子（自己写自己，同步函数调用） */
+    function registerPageToPool(fromMain) {
         // token 搬运放最前：挑战壳页（无 title）与 CF 页也要搬——hash 随挑战跳转/
         // HTTP 302 丢失，sessionStorage 同 tab 客户端与服务器跳转全程保留，真页凭它认领任务
         const m = location.hash.match(/_colortxt_spawn=([a-z0-9]+)/i);
@@ -429,20 +505,102 @@
             u.hash = "";
             itemUrl = u.href;
         } catch (e) { /* 解析失败保底原样（匹配侧 normalize 有同样口径） */ }
-        const item = { url: itemUrl, body: pickStorableBody(), token };
-        // 去重：同一个url只保留最新一条（新快照自动替换旧缓存）；帖子页按 tid 键
-        // 去重（_dsign/URL 形态变体的同帖旧记录一并替换），无 tid 页面按归一化 URL
-        const itemThreadKey = extractThreadKey(item.url);
+        const itemBody = pickStorableBody();
+        const itemThreadKey = extractThreadKey(itemUrl);
+        const itemSearchKey = extractSearchWord(itemUrl);
+        // 搜索结果页分流：搜索页整页 HTML 远大于帖子裁剪记录，不进帖子池子挤占
+        // 坑位——主 tab 浏览时直接写 5 分钟内存缓存；worker 统一广播回报（见下），
+        // 主 tab 收到后写内存缓存。写内存缓存带 #threadlist 守卫（对齐任务回传写侧，
+        // 防 searchid 偶发提示页污染缓存）
+        if (itemSearchKey && fromMain) {
+            if (/id=["']?threadlist\b/i.test(itemBody)) {
+                searchResultCache.set(itemSearchKey, { body: itemBody, url: itemUrl, ts: Date.now() });
+                pruneSearchCache();
+                console.log(`[Cache] 主tab浏览搜索结果页，已写搜索缓存（键=${itemSearchKey}）`);
+            }
+            return { saved: true, token: "" };
+        }
+        // 帖子池子键门禁（1.3.26）：键提取不到的页面（登录页/发现页/杂页）分两种：
+        // 无 token=纯缓存路径（手动浏览/主 tab 登记），没有键就没有任何命中可能，
+        // 登记只挤占 20 条坑 → 不登记；有 token=worker 任务结果回传通道（登录页
+        // 也要回传给服务端弹登录窗自愈），必须回报
+        if (!itemThreadKey && !itemSearchKey && !token) {
+            console.log("[Cache] 页面无缓存键（非帖子）且无任务token，不回报", itemUrl);
+            return { saved: false, token: "" };
+        }
+        if (fromMain) {
+            // 主 tab 浏览帖子页：自己写自己的池子（同步函数调用，无需广播）
+            registerPoolItem({ url: itemUrl, body: itemBody, token: "", threadKey: itemThreadKey });
+            return { saved: true, token: "" };
+        }
+        // worker 统一回报广播（用户拍板 1.3.29 统一 worker 路径）：帖子+搜索一律
+        // page_result 交给主 tab，worker 不再写 GM 池子（缓存写入权收归主 tab 一处，
+        // 杜绝多 tab 并发写 GM 值）；广播同步入队，发出后 worker 自关不影响送达。
+        // 消息带一次性 msgId（1.3.30）：主 tab 收到即回 ack，worker 凭 ack 自关
+        // （见 pendingAcks），2s 无 ack 走超时兜底关闭
+        // 搜索提交页无 kw（正常处理不管有无结果都 302 到带 kw 的 searchid 结果页）
+        // = 被站点限流/拒答的原地提示页（1.3.31 诊断）：采集导航状态码随消息带回
+        // 主 tab 打印——worker tab 会自动关闭其 console 不可见，状态码只有本 tab
+        // 的 performance 导航条目有
+        let diag = null;
+        if (itemSearchKey) {
+            try {
+                const su = new URL(itemUrl);
+                if (su.searchParams.has("srchtxt") && !su.searchParams.has("kw")) {
+                    const nav = ((typeof performance.getEntriesByType === "function"
+                        && performance.getEntriesByType("navigation")) || [])[0];
+                    diag = {
+                        status: nav && nav.responseStatus != null ? nav.responseStatus : null,
+                        title: document.title,
+                    };
+                }
+            } catch (e) { /* URL 解析失败不采集 */ }
+        }
+        const msgId = Date.now().toString(36) + Math.random().toString(36).slice(2);
+        let ackPromise = null;
+        try {
+            pageChannel.postMessage({
+                type: "page_result",
+                msgId,
+                url: itemUrl,
+                body: itemBody,
+                token,
+                threadKey: itemThreadKey,
+                searchKey: itemSearchKey,
+                diag,
+                ts: Date.now(),
+            });
+            console.log(`[Cache] 页面已广播回报（帖子键=${itemThreadKey || "无"} 搜索键=${itemSearchKey || "无"} token=${token ? "有" : "无"}）`, itemUrl);
+            // ACK 等待：主 tab 回 ack 时由 onmessage 的 ack 分支兑现 resolve；
+            // 2s 超时 reject（主 tab 刷新中/不在场——消息本就丢弃，超时让调用方
+            // 兜底关闭 tab 防滞留）
+            ackPromise = new Promise((resolve, reject) => {
+                const timer = setTimeout(() => {
+                    pendingAcks.delete(msgId);
+                    reject(new Error("广播回报无ACK（主tab不在场或未处理）"));
+                }, BC_ACK_TIMEOUT_MS);
+                pendingAcks.set(msgId, () => {
+                    clearTimeout(timer);
+                    resolve();
+                });
+            });
+        } catch (e) { /* 广播失败静默（主 tab 不在场等，任务走超时重推兜底） */ }
+        return { saved: true, token, ackPromise };
+    }
+
+    /** 池子登记（主 tab 专属写入口）：按 threadKey 去重（_dsign/URL 形态变体的同帖
+     * 旧记录一并替换，无键记录按归一化 URL；threadKey 缺失时现算兜底），只留最近
+     * POOL_MAX 条（满后挤掉最旧）。主 tab 浏览直写与 worker 广播代写共用 */
+    function registerPoolItem(item) {
+        const itemThreadKey = item.threadKey || extractThreadKey(item.url);
         const filtered = getPool().filter((x) =>
             itemThreadKey
-                ? extractThreadKey(x.url) !== itemThreadKey
+                ? (x.threadKey || extractThreadKey(x.url)) !== itemThreadKey
                 : normalizeTaskUrl(x.url) !== normalizeTaskUrl(item.url),
         );
         filtered.push(item);
-        // 永久存储防膨胀：只留最近 POOL_MAX 条，满后从队头挤掉最旧一条
         while (filtered.length > POOL_MAX) filtered.shift();
         savePool(filtered);
-        return { saved: true, token };
     }
 
     /** worker tab：登记页面后，仅脚本开出的 tab（token 在手）自关；用户手动打开的
@@ -452,16 +610,24 @@
     function workerRegister() {
         const r = registerPageToPool();
         if (!r.saved) {
-            console.log("[Worker] 本页不登记（壳页/中间跳转页），不自关", location.href);
+            console.log("[Worker] 本页不回报（壳页/中间跳转页/无缓存键且无token），不自关", location.href);
             return;
         }
         if (!r.token) {
-            console.log("[Worker] 已登记进池子（无token不自关，主tab按URL匹配取回）", location.href);
+            console.log("[Worker] 已广播回报（无token不自关，主tab按键/URL匹配取回）", location.href);
             return;
         }
-        console.log("[Worker] 已登记页面进池子，即将自关", location.href);
-        // 延迟自关：给 GM 值变更广播留传播时间（确保主 tab 先收到登记）
-        setTimeout(() => window.close(), 500);
+        console.log("[Worker] 已广播回报，等主tab ACK后自关", location.href);
+        // 自关时机（用户拍板 1.3.30）：主 tab 收到回报回 ack 才关（收到即关，不再
+        // 盲等固定延迟）；2s 无 ack（主 tab 刷新中/不在场，回报消息本就丢弃）超时
+        // 兜底关闭防 tab 滞留。广播失败（pageChannel 不可用）无 ackPromise 同样兜底
+        // （1.3.31 诊断期曾停用自关保留停留界面，1.3.32 恢复；诊断日志保留）
+        const selfClose = () => window.close();
+        if (r.ackPromise) {
+            r.ackPromise.then(selfClose).catch(selfClose);
+        } else {
+            setTimeout(selfClose, 500);
+        }
     }
 
     /** 搜索结果短窗缓存（用户拍板 5 分钟，键=搜索词）：检查更新反复搜同一关键词是
@@ -512,39 +678,89 @@
     }
 
     /** 主 tab 抓页任务表：taskId → {url, token, resolve, timer}——记住任务 id 与下发
-     * 打开 url 及其 spawn token 的关系，worker 登记池子后按 token 匹配取回结果 */
+     * 打开 url 及其 spawn token 的关系，worker 广播回报后按 token/键匹配取回结果 */
     const pendingFetchTasks = new Map();
 
-    /** 主 tab 唯一的池子监听器：池子变化时遍历任务表匹配，命中即按 taskId 取回结果。
-     * 匹配口径：记录带 token（脚本 tab）时按 token 精确匹配（任务 URL 与 worker 最终
-     * URL 可能因搜索 302 searchid/挑战跳转不一致）；记录无 token（手动 tab）时退回
-     * normalize URL 匹配兜底 */
-    function watchPool() {
-        GM_addValueChangeListener(POOL_KEY, (k, oldV, raw, remote) => {
-            if (!remote) return;
-            const arr = parsePoolRaw(raw);
-            for (const [taskId, task] of [...pendingFetchTasks]) {
-                const want = normalizeTaskUrl(task.url);
-                const taskThreadKey = extractThreadKey(task.url);
-                const found = arr.find(
-                    (x) =>
-                        (x.token && x.token === task.token) ||
-                        (!x.token &&
-                            (taskThreadKey
-                                ? extractThreadKey(x.url) === taskThreadKey
-                                : normalizeTaskUrl(x.url) === want)),
-                );
-                if (found) {
-                    pendingFetchTasks.delete(taskId);
-                    clearTimeout(task.timer);
-                    // 整条记录回传（含登记时真实 location.href）——搜索 302 searchid、
-                    // 未登录跳登录页后任务回传 href 必须是最终 URL，服务端登录失效/
-                    // 搜索限流判定全靠它；只回 body 会把真实 url 丢成任务 URL
-                    task.resolve(found);
+    /** 主 tab 统一消费 worker 回报广播（用户拍板 1.3.29 统一 worker 路径：帖子+搜索
+     * 一条通道，缓存写入权收归主 tab，worker 不再碰 GM 池子）。顺序：任务匹配→resolve
+     * 回传服务器（低延迟优先），缓存写入 setTimeout 宏任务延后——resolve 触发的
+     * runFetchPageTask 续体（sendJson）是微任务，天然先于宏任务执行，GM 池子写 IO
+     * 不阻塞回复。写缓存口径：搜索键带 #threadlist 守卫进内存缓存；帖子键进 GM 池子
+     * （registerPoolItem 去重裁剪）；两键皆无（token 通道消息，如登录页）不写缓存。
+     * 非任务消息（手动 tab 回报无任务可匹配）只写缓存，无任务回复动作；ACK 对所有
+     * page_result 统一回（收到即回，worker 自关凭证，见入口注释）。
+     * 匹配口径：token 精确优先（spawn 任务）；无 token 按帖子键/搜索词兜底（治
+     * token 接力断），两键皆无退归一化 URL。过期消息（ts 超 5 分钟）直接丢弃 */
+    function handlePageBroadcast(msg) {
+        if (!msg || msg.type !== "page_result") return;
+        // 立即 ACK（用户拍板 1.3.30，对齐「收到即回」语义）：worker 凭 ack 自关，
+        // 处理快慢不影响其关闭；过期消息也回（已被主 tab 消费掉，worker 无需保留）。
+        // 回失败静默——worker 2s 超时兜底关闭
+        try {
+            pageChannel.postMessage({ type: "ack", msgId: msg.msgId });
+        } catch (e) { /* worker 侧走超时兜底 */ }
+        // 观测主日志点（用户拍板）：发送侧 spawn 任务 tab 等 ACK 自关 console 看不到，
+        // 广播是否送达/被拒只能靠主 tab 这头——收到即打（holdLock 拦截在 onmessage
+        // 保持静默=worker 视角），键/token/body 概况一条带全
+        console.log(`[Cache] 主tab收到广播回报（帖子键=${msg.threadKey || "无"} 搜索键=${msg.searchKey || "无"} token=${msg.token ? "有" : "无"} body=${(msg.body || "").length}字）`);
+        // 限流/拒答诊断（用户要求 1.3.31）：worker 采集的导航状态码 + 回报 body 的
+        // title 与纯文本摘要——看拒答页到底是什么（状态码 worker tab 才有，随消息带回）
+        if (msg.diag || (msg.searchKey && msg.body && !/id=["']?threadlist\b/i.test(msg.body))) {
+            const mTitle = (msg.body || "").match(/<title>([^<]*)<\/title>/i);
+            const plain = (msg.body || "")
+                .replace(/<script[\s\S]*?<\/script>/gi, " ")
+                .replace(/<style[\s\S]*?<\/style>/gi, " ")
+                .replace(/<[^>]+>/g, " ")
+                .replace(/\s+/g, " ")
+                .trim()
+                .slice(0, 300);
+            console.log(
+                `[诊断] 搜索回报无结果容器：status=${msg.diag && msg.diag.status != null ? msg.diag.status : "无"} title=${(mTitle && mTitle[1]) || (msg.diag && msg.diag.title) || "无"} 文本=${plain || "（空）"}`,
+            );
+        }
+        if (Date.now() - (msg.ts || 0) >= SEARCH_CACHE_TTL_MS) {
+            console.log("[Cache] 广播回报已过期，丢弃");
+            return;
+        }
+        // 任务匹配先行（命中即 resolve，runFetchPageTask 续体回传服务器）
+        for (const [taskId, task] of [...pendingFetchTasks]) {
+            const want = normalizeTaskUrl(task.url);
+            const taskThreadKey = extractThreadKey(task.url);
+            const taskSearchWord = extractSearchWord(task.url);
+            const matched =
+                (msg.token && msg.token === task.token) ||
+                (!msg.token &&
+                    ((msg.threadKey && taskThreadKey === msg.threadKey) ||
+                     (msg.searchKey && taskSearchWord === msg.searchKey) ||
+                     (!msg.threadKey && !msg.searchKey && normalizeTaskUrl(msg.url) === want)));
+            if (matched) {
+                pendingFetchTasks.delete(taskId);
+                clearTimeout(task.timer);
+                // 整条消息回传（url=广播时真实最终 URL，服务端登录失效/限流判定靠它）
+                console.log(`[Cache] 广播回报命中任务回传（taskId=${taskId}）`);
+                task.resolve(msg);
+            }
+        }
+        // 缓存写入延后（用户拍板：写缓存放回复服务器之后）——宏任务排在 resolve 触发
+        // 的续体（sendJson 回服务器）之后执行，非任务消息同样落缓存
+        setTimeout(() => {
+            if (msg.searchKey) {
+                if (msg.body && /id=["']?threadlist\b/i.test(msg.body)) {
+                    searchResultCache.set(msg.searchKey, { body: msg.body, url: msg.url, ts: Date.now() });
+                    pruneSearchCache();
+                    console.log(`[Cache] 广播回报已写搜索缓存（键=${msg.searchKey}）`);
+                } else if (msg.body) {
+                    console.log(`[Cache] 广播回报无结果列表容器，不写搜索缓存（键=${msg.searchKey}）`);
                 }
             }
-        });
+            if (msg.threadKey && msg.body) {
+                registerPoolItem({ url: msg.url, body: msg.body, token: msg.token, threadKey: msg.threadKey });
+                console.log(`[Cache] 广播回报已写帖子池子（键=${msg.threadKey}）`);
+            }
+        }, 0);
     }
+
+    // （通道单例 pageChannel 在常量区创建，消费只有主 tab 做，见顶部注释）
 
     // ---------- 任务分发 ----------
 
@@ -574,8 +790,8 @@
     /**
      * 抓页任务（openAndGetHtml）：开后台 tab 真实加载目标页——导航会执行站点的
      * _dsign 挑战 JS 自动过墙（fetch 不执行 JS 拿不到真页）。任务表 pendingFetchTasks
-     * 记住 taskId 与下发打开 url 的关系，worker tab 加载后登记池子，watchPool 按
-     * url 匹配取回 body，再按 taskId 回传服务器。
+     * 记住 taskId 与下发打开 url 的关系，worker tab 加载后 BroadcastChannel 广播
+     * page_result 回报，handlePageBroadcast 匹配取回 body，再按 taskId 回传服务器。
      */
     async function runFetchPageTask(payload, taskId) {
         const url = new URL(payload.url, location.origin).href;
@@ -593,7 +809,7 @@
         const taskThreadKey = extractThreadKey(url);
         if (payload.skipCache !== true && cacheable && taskThreadKey) {
             const cached = getPool().find(
-                (x) => x.body && extractThreadKey(x.url) === taskThreadKey,
+                (x) => x.body && (x.threadKey || extractThreadKey(x.url)) === taskThreadKey,
             );
             if (cached) {
                 console.log(`[Tab] 缓存命中 ${taskId} html长度=${cached.body.length} url=${url} 实际=${cached.url}`);
@@ -651,10 +867,11 @@
                 const token = Date.now().toString(36) + Math.random().toString(36).slice(2);
                 const timer = setTimeout(() => {
                     pendingFetchTasks.delete(taskId);
-                    reject(new Error("后台页未登记内容（worker 加载超时或被重定向）"));
+                    reject(new Error("后台页未回报内容（worker 加载超时或被重定向）"));
                 }, PAGE_TIMEOUT_MS);
-                // 登记任务表（taskId ↔ 下发打开 url + token），worker 登记后由 watchPool
-                // 匹配取回；服务端超时重推同 taskId 时先清旧 timer，防旧计时器到点误删新记录
+                // 登记任务表（taskId ↔ 下发打开 url + token），worker 广播回报后由
+                // handlePageBroadcast 匹配取回；服务端超时重推同 taskId 时先清旧 timer，
+                // 防旧计时器到点误删新记录
                 const prev = pendingFetchTasks.get(taskId);
                 if (prev) clearTimeout(prev.timer);
                 pendingFetchTasks.set(taskId, { url, token, resolve, timer });
@@ -673,6 +890,9 @@
             html = got.body;
             if (got.url) finalUrl = got.url;
         } finally {
+            // 任务终态（成功/超时/异常）统一主动关 worker tab——开 tab 的人负责关
+            // tab，用户手动打开的页面永不触碰；worker 侧 hash 自关仅作 close()
+            // 不可用（TM 版本差异）时的兜底（1.3.31 诊断期曾停用，1.3.32 恢复）
             if (workerTab && typeof workerTab.close === "function") {
                 try {
                     workerTab.close();
@@ -680,16 +900,6 @@
             }
         }
         console.log(`[Tab] 任务完成 ${taskId} html长度=${html.length} href=${finalUrl}`);
-        // 搜索结果写缓存：键=真实返回 URL 的 kw 解码值（Discuz 302 把任务侧 srchtxt
-        // 换成 kw，与读侧 srchtxt 解码后是同一个搜索词，extractSearchWord 统一解码）
-        // ——限流/登录等异常真实返回 URL 无 kw，取不到键天然不缓存（用户拍板，无需
-        // 按任务 URL 做限流特征判定与清洗）；再要求结果列表容器 #threadlist 在场
-        // （searchid 页偶发提示页防污染）
-        const finalSearchWord = extractSearchWord(finalUrl);
-        if (finalSearchWord && /id=["']?threadlist\b/i.test(html)) {
-            searchResultCache.set(finalSearchWord, { body: html, url: finalUrl, ts: Date.now() });
-            pruneSearchCache();
-        }
         sendJson({
             type: "task_result",
             taskId,
@@ -701,6 +911,17 @@
                 href: finalUrl,
             },
         });
+        // 搜索结果写缓存（用户拍板：写缓存一律放回复服务器之后，降任务链路延迟）：
+        // 键=真实返回 URL 的 kw 解码值（Discuz 302 把任务侧 srchtxt 换成 kw，与读侧
+        // srchtxt 解码后是同一个搜索词，extractSearchWord 统一解码）——限流/登录等
+        // 异常真实返回 URL 无 kw，取不到键天然不缓存（用户拍板，无需按任务 URL 做
+        // 限流特征判定与清洗）；再要求结果列表容器 #threadlist 在场（searchid 页
+        // 偶发提示页防污染）
+        const finalSearchWord = extractSearchWord(finalUrl);
+        if (finalSearchWord && /id=["']?threadlist\b/i.test(html)) {
+            searchResultCache.set(finalSearchWord, { body: html, url: finalUrl, ts: Date.now() });
+            pruneSearchCache();
+        }
     }
 
     /**
