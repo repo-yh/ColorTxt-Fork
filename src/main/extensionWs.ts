@@ -62,9 +62,17 @@ let wss: WebSocketServer | null = null;
 let client: WebSocket | null = null;
 /** 心跳存活标记：每轮 interval 先查后 ping，收到协议层 pong 置 true */
 let clientAlive = true;
+/** 最近一次收到当前连接协议层 pong 的时间（连接接受时初始化为当下）：链路新鲜度
+ * 判定用——半开连接（对端已死 TCP 无 FIN）readyState 仍 OPEN 但 pong 已停 */
+let lastPongAt = 0;
 let heartbeatTimer: NodeJS.Timeout | null = null;
 /** 服务端维护的 connId → tabId 映射（单连接下即 clientTabId；连接断开后保留，重连复用） */
 let clientTabId: number | null = null;
+/** 当前 client 连接自报的锁时间（脚本文档内存时间，断线重连不变；null=旧脚本未上报） */
+let clientLockAcquiredAt: number | null = null;
+/** 已收到 TCP 连接但还没 hello 仲裁的脚本连接（仲裁期间不接管任务、不动现有连接） */
+let pendingWs: WebSocket | null = null;
+let pendingHelloTimer: NodeJS.Timeout | null = null;
 const pendingTasks = new Map<string, PendingTask>();
 let taskIdSeq = 0;
 
@@ -86,6 +94,19 @@ function isScriptConnected(): boolean {
 }
 
 /**
+ * 链路新鲜度：连接存在且一个心跳周期（+10s 余量，容忍主进程定时器调度延迟）内
+ * 收到过协议层 pong。半开连接 readyState 仍 OPEN 但 pong 已停——仅凭 readyState
+ * 判活会把任务推进死连接（实测 40s 超时重推全部空转无结果）
+ */
+function isClientLinkFresh(): boolean {
+  return (
+    client !== null &&
+    client.readyState === WebSocket.OPEN &&
+    Date.now() - lastPongAt <= HEARTBEAT_INTERVAL_MS + 10_000
+  );
+}
+
+/**
  * 任务下发前的连接保障：脚本未连接时用系统默认浏览器打开「拉起页」（油猴 @match
  * 站点内页面，document-idle 加载完脚本自动连入 WS），等待连入后任务照常下发。
  * 拉起页优先发起页（表单 POST 的 referer / 下载的 postUrl 帖子页），避免默认浏览器
@@ -96,9 +117,32 @@ function isScriptConnected(): boolean {
 function ensureScriptConnectedBeforeTask(
   url: string,
   preferOpenUrl?: string,
+  opts?: { ignoreCooldown?: boolean },
 ): Promise<string | null> {
+  // 半开残留先断开：readyState 仍 OPEN 的死连接会让下方「已连接」判定与拉起等待
+  // 循环全部误判（任务照旧推进死连接 / 白等 45s）
+  if (client && !isClientLinkFresh()) {
+    console.warn(
+      "[extensionWs] 连接超过心跳周期无 pong（半开残留），先断开再拉起",
+    );
+    try {
+      client.terminate();
+    } catch {
+      // onclose 兜底清引用
+    }
+  }
   if (isScriptConnected()) return Promise.resolve(null);
   if (autoOpenWaiter) return autoOpenWaiter;
+  // 冷却检查放在调用时点（拉起进行中的并入方共享同一次开页等待，不走此检查）：
+  // 断线恢复路径用 ignoreCooldown 绕过——冷却防的是「从未连上时连环开页刷屏」，
+  // 连接被关闭/杀掉后的恢复拉起是唯一自愈路径，被冷却挡住会让批量检查挂死
+  if (
+    opts?.ignoreCooldown !== true &&
+    Date.now() - lastAutoOpenAt <= AUTO_OPEN_COOLDOWN_MS
+  ) {
+    console.warn("[extensionWs] 脚本未连接（自动拉起冷却期内），任务判失败");
+    return Promise.resolve(SCRIPT_NOT_CONNECTED_ERROR);
+  }
   autoOpenWaiter = doEnsureScriptConnected(preferOpenUrl?.trim() || url).finally(
     () => {
       autoOpenWaiter = null;
@@ -111,10 +155,6 @@ async function doEnsureScriptConnected(
   openUrl: string,
 ): Promise<string | null> {
   if (!wss) return SCRIPT_NOT_CONNECTED_ERROR;
-  if (Date.now() - lastAutoOpenAt <= AUTO_OPEN_COOLDOWN_MS) {
-    console.warn("[extensionWs] 脚本未连接（自动拉起冷却期内），任务判失败");
-    return SCRIPT_NOT_CONNECTED_ERROR;
-  }
   lastAutoOpenAt = Date.now();
   console.log(
     `[extensionWs] 脚本未连接，自动打开书源页拉起脚本: ${openUrl}（等待连入 ≤${Math.round(AUTO_OPEN_WAIT_MS / 1000)}s）`,
@@ -137,6 +177,47 @@ async function doEnsureScriptConnected(
     `[extensionWs] 等待脚本连入超时（${Math.round(AUTO_OPEN_WAIT_MS / 1000)}s），任务判失败`,
   );
   return "脚本未连接（已自动打开书源页等待脚本连入，仍超时未连上；请确认油猴脚本已启用、服务开关已打开）";
+}
+
+/**
+ * 断线后挂起任务恢复：连接断开时 pending 任务保留等「重连后重推」，但重连不会
+ * 自己发生——自动拉起只在新建任务时触发，而批量检查更新串行等在本任务回传上
+ * 不新建任务，实测会永久挂死（主 tab 被关闭后任务重推进死连接直到放弃，之后
+ * 无连接也无拉起，批量卡死不开新 tab）。等 8s 给脚本自愈重连（退避首试 1s，
+ * 常见 1-2s 内恢复，刷新/跳转场景不误拉起），仍无连接才自动拉起（绕过冷却）；
+ * 拉起失败把挂起任务全部判失败，渲染侧拿到明确错误而非永久等待
+ */
+const DISCONNECT_RECOVERY_DELAY_MS = 8_000;
+let pendingRecoveryTimer: NodeJS.Timeout | null = null;
+
+function schedulePendingTaskRecovery(): void {
+  if (pendingTasks.size === 0) return;
+  if (pendingRecoveryTimer) return;
+  pendingRecoveryTimer = setTimeout(() => {
+    pendingRecoveryTimer = null;
+    if (pendingTasks.size === 0 || isScriptConnected()) return;
+    const first = [...pendingTasks.values()][0]!;
+    console.warn(
+      `[extensionWs] 连接断开 ${Math.round(DISCONNECT_RECOVERY_DELAY_MS / 1000)}s 仍无脚本连入，自动拉起恢复挂起任务（${pendingTasks.size} 条）`,
+    );
+    // 拉起页用任务发起页 referer（抓页/表单 POST 的 referer 都是帖子页，GET 无副作用）；
+    // 下载走 download_start 推送模型不在 pendingTasks，无需考虑
+    const preferOpenUrl = first.referer;
+    ensureScriptConnectedBeforeTask(first.url, preferOpenUrl, {
+      ignoreCooldown: true,
+    }).then((error) => {
+      // 拉起成功：acceptConnection 已按 pending 重推，无需动作
+      if (!error) return;
+      for (const [taskId, task] of [...pendingTasks]) {
+        pendingTasks.delete(taskId);
+        clearTimeout(task.timer);
+        console.warn(
+          `[extensionWs] 拉起未恢复连接，挂起任务判失败 taskId=${taskId} url=${task.url}`,
+        );
+        task.resolve({ ok: false, error });
+      }
+    });
+  }, DISCONNECT_RECOVERY_DELAY_MS);
 }
 
 function resolveTask(taskId: string, result: OpenAndGetHtmlResult): void {
@@ -208,7 +289,12 @@ function emitDownloadEvent(ev: ExtensionWsDownloadEvent): void {
 function dispatchTask(taskId: string): void {
   const task = pendingTasks.get(taskId);
   if (!task) return;
-  if (!client || client.readyState !== WebSocket.OPEN) return;
+  if (!client || client.readyState !== WebSocket.OPEN) {
+    console.warn(
+      `[extensionWs] 任务下发时无可用连接，挂起等待重连/拉起恢复 taskId=${taskId}`,
+    );
+    return;
+  }
 
   client.send(
     JSON.stringify({
@@ -245,6 +331,21 @@ function dispatchTask(taskId: string): void {
       });
       return;
     }
+    // 重推前先验链路新鲜度：半开连接 readyState 仍 OPEN 但 pong 已停，盲推会把
+    // 本轮尝试又推进死连接。不新鲜（或已无连接）→ 断开等恢复：close 排断线恢复
+    // 拉起新 tab，重连后 acceptConnection 统一重推挂起任务
+    if (!isClientLinkFresh()) {
+      task.retries += 1;
+      console.warn(
+        `[extensionWs] 任务超时且链路不新鲜（超一个心跳周期无 pong），断开等重连恢复 taskId=${taskId}`,
+      );
+      try {
+        client?.terminate();
+      } catch {
+        // onclose 兜底清引用
+      }
+      return;
+    }
     task.retries += 1;
     console.warn(
       `[extensionWs] 任务超时，重新下发（带缓存 tabId=${task.tabId ?? "无"}） taskId=${taskId}`,
@@ -253,11 +354,115 @@ function dispatchTask(taskId: string): void {
   }, TASK_TIMEOUT_MS);
 }
 
-/** 处理已连接脚本的消息（心跳 pong / 任务结果） */
+/** hello 仲裁后的接受/顶替/拒绝（lockAcquiredAt=null 表示旧脚本未上报，按原行为接受）。
+ * 拒绝路径只回消息并立即断开本连接，现有 client 不动；接受/顶替路径接管任务下发 */
+function acceptConnection(
+  ws: WebSocket,
+  lockAcquiredAt: number | null,
+): void {
+  if (pendingWs === ws) {
+    clearPendingHello();
+    pendingWs = null;
+  }
+  if (client) {
+    if (
+      lockAcquiredAt !== null &&
+      clientLockAcquiredAt !== null &&
+      lockAcquiredAt < clientLockAcquiredAt
+    ) {
+      console.log(
+        `[extensionWs] 新连接锁时间过旧（${lockAcquiredAt} < ${clientLockAcquiredAt}），拒绝（现有连接保持）`,
+      );
+      try {
+        ws.send(
+          JSON.stringify({ type: "connect_rejected", reason: "lock_time_stale" }),
+        );
+      } catch {
+        // 忽略发送失败
+      }
+      try {
+        ws.close(4000, "lock time stale");
+      } catch {
+        // 忽略关闭失败
+      }
+      return;
+    }
+    // 顶替：旧连接多半是 SW 挂起后的半开残留（TCP 无 FIN，服务器侧 readyState
+    // 仍显示 OPEN）——时间相等=同文档断线重连自己的残留；更大=新文档接管；
+    // 任一方未上报时间（旧脚本）=原顶替行为
+    console.log("[extensionWs] 已有旧脚本连接，新连接顶替（旧连接视为挂起残留）");
+    try {
+      client.terminate();
+    } catch {
+      // 忽略旧连接断开失败
+    }
+    client = null;
+    clientLockAcquiredAt = null;
+  }
+  client = ws;
+  clientLockAcquiredAt = lockAcquiredAt;
+  clientAlive = true;
+  // 新连接视为新鲜链路（首个心跳 ping 在 ≤30s 内核实）
+  lastPongAt = Date.now();
+  // 连接已恢复，取消挂起的断线恢复拉起（挂起任务在下方按 pending 重推）
+  if (pendingRecoveryTimer) {
+    clearTimeout(pendingRecoveryTimer);
+    pendingRecoveryTimer = null;
+  }
+  console.log(
+    `[extensionWs] 脚本已连接${
+      lockAcquiredAt !== null ? `（锁时间 ${lockAcquiredAt}）` : ""
+    }`,
+  );
+
+  // WS 断开期间的 pending 任务视为待重试，脚本重连后重新下发（服务端断线重试规则）；
+  // 表单 POST（非幂等）例外：断线不重推直接判失败，防止重复扣金钱
+  if (pendingTasks.size > 0) {
+    for (const taskId of [...pendingTasks.keys()]) {
+      const task = pendingTasks.get(taskId);
+      if (task?.noRetry) {
+        pendingTasks.delete(taskId);
+        console.warn(
+          `[extensionWs] 断线期间表单 POST 任务不重推，判失败 taskId=${taskId} url=${task.url}`,
+        );
+        task.resolve({
+          ok: false,
+          error:
+            "脚本连接断开，表单提交结果未知（可能已提交成功，请重新检查购买状态）",
+        });
+        continue;
+      }
+      dispatchTask(taskId);
+    }
+  }
+}
+
+function clearPendingHello(): void {
+  if (pendingHelloTimer) {
+    clearTimeout(pendingHelloTimer);
+    pendingHelloTimer = null;
+  }
+}
+
+/** 处理已连接脚本的消息（hello 仲裁 / 心跳 pong / 任务结果） */
 function handleClientMessage(
   ws: WebSocket,
   parsed: Record<string, unknown>,
 ): void {
+  // 连接仲裁 hello（脚本 onopen 后第一条，tabId 由 sendJson 统一注入）：带锁时间
+  // 触发挂起连接的接受/顶替/拒绝；已仲裁连接重复发的 hello 忽略
+  if (parsed.type === "hello") {
+    if (typeof parsed.tabId === "number") {
+      clientTabId = parsed.tabId;
+    }
+    const time =
+      typeof parsed.lockAcquiredAt === "number" ? parsed.lockAcquiredAt : null;
+    if (ws === pendingWs) {
+      acceptConnection(ws, time);
+    }
+    return;
+  }
+
   if (parsed.type === "ping") {
     ws.send(JSON.stringify({ type: "pong" }));
     return;
@@ -481,44 +686,35 @@ export function startExtensionWsServer(): Promise<{
     server.on("connection", (ws, req) => {
       console.log(`[extensionWs] 收到连接 ${req.socket.remoteAddress}`);
 
-      // 顶替策略：旧连接多半是 SW 挂起后的半开残留（TCP 无 FIN，服务器侧
-      // readyState 仍显示 OPEN），直接断开让新连接接管——脚本重载/SW 唤醒后立即可用
-      if (client) {
-        console.log("[extensionWs] 已有旧脚本连接，新连接顶替（旧连接视为挂起残留）");
+      // 顶替仲裁延后到 hello：脚本连接后第一条消息自报 lockAcquiredAt（文档内存
+      // 时间，断线重连不变），服务端据此仲裁——服务器无现存连接时不看时间直接
+      // 接受（网络闪断主 tab 重连不能被旧时间挡住）；有现存连接时只有时间不小于
+      // 现存连接的才顶替（相等=同文档重连半开残留，更小=旧文档来抢，回
+      // connect_rejected 后立即断开本连接、现有连接不动，脚本收到后转 worker 不
+      // 再重试）。仲裁前连接挂起：不接管任务下发；上个 pending 未走完又来新连接
+      // （异常）时旧的视为僵死直接关
+      if (pendingWs) {
+        console.log("[extensionWs] 上一个连接未完成hello仲裁，视为僵死关闭");
+        clearPendingHello();
         try {
-          client.terminate();
+          pendingWs.terminate();
         } catch {
-          // 忽略旧连接断开失败
+          // 忽略
         }
-        client = null;
+        pendingWs = null;
       }
-      client = ws;
-      clientAlive = true;
-      console.log("[extensionWs] 脚本已连接");
+      pendingWs = ws;
+      pendingHelloTimer = setTimeout(() => {
+        pendingHelloTimer = null;
+        // 超时未收到 hello（旧版本脚本不发）：按原「新连接顶替」行为接受，保证
+        // 升级过渡期可用
+        console.log("[extensionWs] 未收到 hello（旧脚本？），按原顶替策略接受");
+        acceptConnection(ws, null);
+      }, 5000);
       ws.on("pong", () => {
         clientAlive = true;
+        lastPongAt = Date.now();
       });
-
-      // WS 断开期间的 pending 任务视为待重试，脚本重连后重新下发（服务端断线重试规则）；
-      // 表单 POST（非幂等）例外：断线不重推直接判失败，防止重复扣金钱
-      if (pendingTasks.size > 0) {
-        for (const taskId of [...pendingTasks.keys()]) {
-          const task = pendingTasks.get(taskId);
-          if (task?.noRetry) {
-            pendingTasks.delete(taskId);
-            console.warn(
-              `[extensionWs] 断线期间表单 POST 任务不重推，判失败 taskId=${taskId} url=${task.url}`,
-            );
-            task.resolve({
-              ok: false,
-              error:
-                "脚本连接断开，表单提交结果未知（可能已提交成功，请重新检查购买状态）",
-            });
-            continue;
-          }
-          dispatchTask(taskId);
-        }
-      }
 
       ws.on("message", (data, isBinary) => {
         if (isBinary) return;
@@ -533,8 +729,15 @@ export function startExtensionWsServer(): Promise<{
       });
 
       ws.on("close", (code) => {
+        if (pendingWs === ws) {
+          clearPendingHello();
+          pendingWs = null;
+          console.log(`[extensionWs] 连接在hello仲裁前断开 code=${code}`);
+          return;
+        }
         if (client === ws) {
           client = null;
+          clientLockAcquiredAt = null;
           // 停掉本次尝试的计时器；任务保留在 pendingTasks，脚本重连后重推
           for (const task of pendingTasks.values()) {
             clearTimeout(task.timer);
@@ -544,6 +747,8 @@ export function startExtensionWsServer(): Promise<{
           console.log(
             `[extensionWs] 脚本连接断开 code=${code}，pending 任务待重连后重推`,
           );
+          // 排断线恢复：8s 后仍无脚本连入则自动拉起（重连不会自己发生，见函数注释）
+          schedulePendingTaskRecovery();
         }
       });
 
@@ -759,6 +964,10 @@ export function stopExtensionWsServer(): void {
   stopExtensionWsDebugServer();
   stopHeartbeat();
   clientAlive = true;
+  if (pendingRecoveryTimer) {
+    clearTimeout(pendingRecoveryTimer);
+    pendingRecoveryTimer = null;
+  }
   if (!wss) return;
   const server = wss;
   wss = null;
@@ -771,6 +980,15 @@ export function stopExtensionWsServer(): void {
   downloadStarts.clear();
   downloadTaskDirs.clear();
 
+  if (pendingWs) {
+    clearPendingHello();
+    try {
+      pendingWs.close();
+    } catch {
+      // 忽略关闭失败
+    }
+    pendingWs = null;
+  }
   if (client) {
     try {
       client.close();
@@ -780,6 +998,7 @@ export function stopExtensionWsServer(): void {
     client = null;
   }
   clientTabId = null;
+  clientLockAcquiredAt = null;
 
   server.close(() => {
     console.log("[extensionWs] WS 服务已停止");
