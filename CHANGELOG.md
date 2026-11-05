@@ -1,3 +1,14 @@
+## 3.8.22
+
+新功能：
+
+- 找书限流显式上报（油猴脚本 @1.3.35）：page_result 新增 rateLimited 字段（页面限流/拒答文案命中即 true，不依赖跳转提取成功），主 tab 随 task_result pageData 透传，服务端 OpenAndGetHtmlResult 记录标志（任务完成日志带标志）并经 analyzeUrl WS 分支塞进 StrResponse；webBook.ts getChapterList 限流判定改显式信号优先 + 旧 kw 规则兜底（旧脚本无字段照常工作）——不再依赖「正常处理必 302 到带 kw 结果页」的站点行为推断，对站点改版免疫
+- 拒答页回报跳转目标（@1.3.33）：实测拒答页是延迟跳转中转页（worker 回报+ACK 自关抢在跳转前，location.href 停在提交 URL），脚本检测「只能进行一次搜索」文案后从内联 setTimeout 字符串回调静态提取跳转目标解析为绝对 URL，page_result 的 url 改报页面声明的跳转目标，限流/拒答判定与诊断日志更准
+
+修复：
+
+- 油猴脚本 @1.3.34 把 rateLimited 取值写在 try 块外而 const got 声明在 try 内致 ReferenceError 全任务失败，@1.3.35 按既有 html/finalUrl 模式在 try 内拷到外层 let 修复
+
 ## 3.8.21
 
 新功能：
