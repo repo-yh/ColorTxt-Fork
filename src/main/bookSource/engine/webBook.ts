@@ -138,7 +138,9 @@ function runJsLib(
 /** 搜索限流判定（WS 源 searchUpdate 批量更新漏桶策略）：
  *  站点行为（用户拍板）——搜索提交（带 srchtxt）正常处理时不管有没有结果，
  *  都 302 到带 kw 参数的 searchid 结果页；被限流/拒答时不产生 kw（302 回无参
- *  搜索首页，或原地渲染提示页停在提交 URL）。故以最终 URL 是否带 kw 判定 */
+ *  搜索首页，或原地渲染提示页停在提交 URL）。故以最终 URL 是否带 kw 判定。
+ *  脚本 1.3.34 起检测到限流文案时显式上报 rateLimited（页面自白，站点改版
+ *  免疫）——调用侧显式信号优先，本函数作 URL 形态推断兜底（旧脚本无显式字段） */
 function isSearchRateLimitedRedirect(
   requestUrl: string,
   finalUrl: string,
@@ -2268,12 +2270,15 @@ export async function getChapterList(
     redirectUrl = res.url;
     firstPageBaseUrl = res.url;
     // WS 源搜索限流检测（用户拍板漏桶策略：批量更新只在被限流时挂起 concurrentRate
-    // 时长）——搜索提交正常处理必 302 到带 kw 的 searchid 结果页（不管有没有
-    // 结果），最终 URL 无 kw 即被限流/拒答。非 WS 源不做此检测
+    // 时长）——脚本 1.3.34 起检测到限流文案显式上报 rateLimited（页面自白），
+    // 显式优先；URL 形态推断兜底（旧脚本无字段）：搜索提交正常处理必 302 到带 kw
+    // 的 searchid 结果页（不管有没有结果），最终 URL 无 kw 即被限流/拒答。
+    // 非 WS 源不做此检测
     if (
       sourceIsSearchUpdate &&
       source.enabledWebSocket === true &&
-      isSearchRateLimitedRedirect(analyzeUrl.url, redirectUrl)
+      (res.rateLimited === true ||
+        isSearchRateLimitedRedirect(analyzeUrl.url, redirectUrl))
     ) {
       logs.push(
         `${SEARCH_RATE_LIMITED_LOG_MARK}，搜索被站点限流：${source.bookSourceName}`,

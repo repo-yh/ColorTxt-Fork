@@ -25,8 +25,10 @@ const TASK_TIMEOUT_MS = 40_000;
 const TASK_MAX_RETRIES = 3;
 
 /**
- * pageData 为脚本抓取结果（协议）：title/text/html/href；
- * 服务端对外展开平铺，finalUrl 对应脚本的 location.href（302/跳转后的最终 URL）。
+ * pageData 为脚本抓取结果（协议）：title/text/html/href/rateLimited；
+ * 服务端对外展开平铺，finalUrl 对应脚本的 location.href（302/跳转后的最终 URL）；
+ * rateLimited=脚本检测到站点限流/拒答页的显式标志（1.3.34，文案命中即置位），
+ * 引擎限流判定显式优先、URL 形态推断兜底。
  */
 export type OpenAndGetHtmlResult =
   | {
@@ -35,6 +37,7 @@ export type OpenAndGetHtmlResult =
       text: string;
       html: string;
       finalUrl: string;
+      rateLimited?: boolean;
     }
   | { ok: false; error: string };
 
@@ -596,13 +599,19 @@ function handleClientMessage(
     }
 
     const pageData = parsed.pageData as
-      | { title?: unknown; text?: unknown; html?: unknown; href?: unknown }
+      | {
+          title?: unknown;
+          text?: unknown;
+          html?: unknown;
+          href?: unknown;
+          rateLimited?: unknown;
+        }
       | undefined;
     if (parsed.ok === true && pageData && typeof pageData.html === "string") {
       const finalUrl =
         typeof pageData.href === "string" ? pageData.href : task.url;
       console.log(
-        `[extensionWs] 任务完成 taskId=${taskId} html长度=${pageData.html.length} finalUrl=${finalUrl} tabId=${clientTabId}`,
+        `[extensionWs] 任务完成 taskId=${taskId} html长度=${pageData.html.length} finalUrl=${finalUrl} rateLimited=${pageData.rateLimited === true} tabId=${clientTabId}`,
       );
       resolveTask(taskId, {
         ok: true,
@@ -610,6 +619,7 @@ function handleClientMessage(
         text: typeof pageData.text === "string" ? pageData.text : "",
         html: pageData.html,
         finalUrl,
+        rateLimited: pageData.rateLimited === true,
       });
     } else {
       const error = String(parsed.error ?? "未知错误");

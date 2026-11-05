@@ -40,6 +40,9 @@ export type StrResponse = {
   headers: Record<string, string>;
   statusCode?: number;
   statusMessage?: string;
+  /** WS 油猴通道（1.3.34）：脚本检测到站点限流/拒答页的显式标志，页面自白，
+   *  供引擎限流判定显式优先使用；其余请求路径不产出（undefined=falsy 走 URL 推断） */
+  rateLimited?: boolean;
 };
 
 export type UrlFetchOptions = {
@@ -780,8 +783,14 @@ export class AnalyzeUrl {
         ? this.applyTypeHexBody(r.html)
         : r.html;
       // url 取 finalUrl（跳转后的最终页 URL）：对齐静态快通道语义，
-      // 登录检测/loginCheckJs 靠它识别「被重定向到登录页」
-      return { url: r.finalUrl || this.url, body, headers: {} };
+      // 登录检测/loginCheckJs 靠它识别「被重定向到登录页」；
+      // rateLimited=脚本对限流/拒答页的显式检测（1.3.34），原样上行
+      return {
+        url: r.finalUrl || this.url,
+        body,
+        headers: {},
+        rateLimited: r.rateLimited === true,
+      };
     }
 
     if (useWebView && (this.method === "GET" || this.method === "POST")) {

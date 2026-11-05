@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ColorTxt 找书通道（油猴版 WS 客户端）
 // @namespace    colortxt-find-book
-// @version      1.3.32
+// @version      1.3.35
 // @description  连接 ColorTxt 桌面端 WS 服务（ws://127.0.0.1:8888/ws，与 Web 展示服务共用 8888 端口）：主 tab 持锁收任务，抓页任务开后台 tab 真实加载（导航执行 _dsign 挑战 JS 过墙）经 worker 池取页；表单 POST（附件购买）/ 附件下载同源 fetch。单连接锁 + 心跳 + 断线指数退避，行为清单见脚本内注释
 // @updateURL    http://127.0.0.1:8888/background.user.js
 // @downloadURL  http://127.0.0.1:8888/background.user.js
@@ -556,18 +556,37 @@
                 }
             } catch (e) { /* URL 解析失败不采集 */ }
         }
+        // 限流页跳转目标（2026-11-05 实抓确认）：拒答页内联
+        // setTimeout("window.location.href ='search.php?mod=forum';", 2000)，2 秒后跳
+        // 无参搜索页，但 worker 回报+ACK 自关抢在跳转前，location.href 永远停在提交
+        // URL。检测到限流文案时把回报 url 改为页面声明的跳转目标（解析为绝对 URL，
+        // &amp; 实体还原），服务端 kw 判定与日志语义更明确；不劫持 setTimeout——本
+        // 脚本 document-idle 才注入，内联定时器在 HTML 解析时已注册，拦不到。
+        // rateLimited 显式随回报上行（1.3.34）：文案命中即置位（不依赖跳转 URL 提取
+        // 成功），task_result 透传引擎判限流——页面自白，引擎侧显式优先、kw 推断兜底
+        let rejectJumpUrl = "";
+        let rateLimited = false;
+        if (itemBody.includes("只能进行一次搜索")) {
+            rateLimited = true;
+            const m = itemBody.match(/setTimeout\((["'])\s*window\.location\.href\s*=\s*(['"])(.+?)\2[^"']*\1\s*,\s*(\d+)\s*\)/);
+            if (m) {
+                try { rejectJumpUrl = new URL(m[3].replace(/&amp;/g, "&"), location.origin).href; } catch (e) { /* 解析失败保底回报原 URL */ }
+                console.log(`[限流] 检测到限流页定时跳转 ${m[4]}ms → ${rejectJumpUrl}，回报 url 改为跳转目标`);
+            }
+        }
         const msgId = Date.now().toString(36) + Math.random().toString(36).slice(2);
         let ackPromise = null;
         try {
             pageChannel.postMessage({
                 type: "page_result",
                 msgId,
-                url: itemUrl,
+                url: rejectJumpUrl || itemUrl,
                 body: itemBody,
                 token,
                 threadKey: itemThreadKey,
                 searchKey: itemSearchKey,
                 diag,
+                rateLimited,
                 ts: Date.now(),
             });
             console.log(`[Cache] 页面已广播回报（帖子键=${itemThreadKey || "无"} 搜索键=${itemSearchKey || "无"} token=${token ? "有" : "无"}）`, itemUrl);
@@ -859,6 +878,7 @@
         let workerTab = null;
         let html;
         let finalUrl = url;
+        let rateLimited = false;
         try {
             const got = await new Promise((resolve, reject) => {
                 // 一次性 spawn token：任务关联键（搜索 302 searchid 后 URL 不匹配，靠
@@ -889,6 +909,8 @@
             });
             html = got.body;
             if (got.url) finalUrl = got.url;
+            // got 声明在 try 块内，外层 pageData 取不到——值拷到外层 let（同 html/finalUrl 模式）
+            rateLimited = got.rateLimited === true;
         } finally {
             // 任务终态（成功/超时/异常）统一主动关 worker tab——开 tab 的人负责关
             // tab，用户手动打开的页面永不触碰；worker 侧 hash 自关仅作 close()
@@ -909,6 +931,9 @@
                 text: extractText(html),
                 html,
                 href: finalUrl,
+                // worker 显式限流标志（1.3.34）透传引擎；搜索缓存命中路径提前 return
+                // 自带 pageData（缓存值本就非限流页，rateLimited 缺省=false）
+                rateLimited,
             },
         });
         // 搜索结果写缓存（用户拍板：写缓存一律放回复服务器之后，降任务链路延迟）：
