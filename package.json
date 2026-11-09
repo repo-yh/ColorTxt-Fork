@@ -30,7 +30,7 @@
     "opencc": "^1.3.1",
     "sharp": "file:scripts/sharp-pack-stub",
     "sqlite-vec": "^0.1.6",
-    "ws": "^8.18.0"
+    "ws": "^8.22.1"
   },
   "overrides": {
     "sharp": "$sharp",
