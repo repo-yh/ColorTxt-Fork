@@ -94,7 +94,11 @@ jobs:
             electron-${{ runner.os }}-
 
       - name: Install dependencies
-        run: npm ci
+        # npm 12 的 overrides 作用域语义与 npm 10 不同（子树传播 vs 仅直接依赖）；
+        # package-lock.json 由本地 npm 12.1.0 生成，npm 10 的 npm ci 校验会误报不同步
+        run: |
+          npm install -g npm@12.1.0
+          npm ci
 
       - name: Build application
         run: npx electron-vite build
@@ -165,7 +169,9 @@ jobs:
           cache: npm
 
       - name: Install electron-builder
-        run: npm ci --ignore-scripts
+        run: |
+          npm install -g npm@12.1.0
+          npm ci --ignore-scripts
 
       - name: Download build artifacts
         uses: actions/download-artifact@v8.0.2
