@@ -1146,6 +1146,16 @@ async function onDownloadOrStop() {
     );
     if (dl.status === "downloaded") {
       appToast(`已开始下载 ${dl.count} 个附件`, { kind: "success" });
+      // 主下载固定取最新章节帖：对齐章节点击，书架「最后阅读」同步到最新帖
+      if (item && inBookshelf.value) {
+        updateReadProgress(
+          item.bookUrl,
+          item.origin,
+          0,
+          latest.title?.trim(),
+          latest.url,
+        );
+      }
     } else if (dl.status === "needBuy") {
       appToast("已取消购买", { kind: "info" });
     } else if (dl.status === "failed") {
