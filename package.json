@@ -93,7 +93,7 @@
     "markmap-view": "^0.18.12",
     "monaco-editor": "^0.55.1",
     "pako": "^3.0.3",
-    "pdfjs-dist": "^6.4.299",
+    "pdfjs-dist": "^6.5.438",
     "puppeteer-core": "^25.16.0",
     "socks-proxy-agent": "^10.1.0",
     "sortablejs": "^1.15.7",
