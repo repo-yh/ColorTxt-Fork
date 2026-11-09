@@ -94,11 +94,11 @@ jobs:
             electron-${{ runner.os }}-
 
       - name: Install dependencies
-        # npm 12 的 overrides 作用域语义与 npm 10 不同（子树传播 vs 仅直接依赖）；
-        # package-lock.json 由本地 npm 12.1.0 生成，npm 10 的 npm ci 校验会误报不同步
-        run: |
-          npm install -g npm@12.1.0
-          npm ci
+        # lock 由本地 npm 12.1.0 生成（npm 12 的 overrides 传播到整个子树，npm 10 只覆盖直接依赖，
+        # npm 10 校验会误报 lock 不同步）；npm 12 默认 allow-remote=none 会拒装 lock 里的 npmmirror 镜像
+        # URL（runner 环境若覆盖 registry 则 host 不匹配），ci 场景 URL+integrity 均由本仓 lock 锁定，显式放行；
+        # 不用 npm install -g 自更新（npm 10 在部分平台 self-update 会崩），统一经 npx 临时运行 npm 12
+        run: npx -y npm@12.1.0 ci --registry=https://registry.npmmirror.com --allow-remote=all
 
       - name: Build application
         run: npx electron-vite build
@@ -169,9 +169,7 @@ jobs:
           cache: npm
 
       - name: Install electron-builder
-        run: |
-          npm install -g npm@12.1.0
-          npm ci --ignore-scripts
+        run: npx -y npm@12.1.0 ci --ignore-scripts --registry=https://registry.npmmirror.com --allow-remote=all
 
       - name: Download build artifacts
         uses: actions/download-artifact@v8.0.2
