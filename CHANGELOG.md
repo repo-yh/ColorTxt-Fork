@@ -1,3 +1,14 @@
+## 3.8.23
+
+修复：
+
+- 找书详情「下载本书」成功后同步书架「最后阅读」到最新章节帖：searchUpdate 书源主下载固定取最新章节帖（contentChapterList[0]）发起附件下载，但下发成功只弹 toast 未同步进度（章节点击路径有 updateReadProgress 同步，主下载路径漏了），现对齐章节点击补同步（下标 0=数据层最新章，URL 锚定免疫新帖插队下标漂移）
+
+依赖升级：
+
+- electron 42.11.16 → 42.11.18、tldts 7.4.18 → 7.4.19、pako 3.0.2 → 3.0.3、xpath 0.0.35 → 0.0.36（Dependabot 4 项，均同大版本内 patch 级）
+- minimatch 强制 ^11.0.1（package.json overrides 定向 electron-builder、@electron/universal、@vue/language-core、editorconfig、js-beautify→glob 五条消费路径，依赖树统一 11.0.5）——修 Dependabot #221 中危告警「globparts amplification DoS」（嵌套传递依赖 Dependabot 开不出自动修复 PR，overrides 是可靠解法）；@electron/asar 与 glob@7 原生声明 ^3 被子树 override 语义统一抬到 11.0.5（其消费的 minimatch()/Minimatch/set/globParts API 在 v11 全保留，打包链由 CI 构建验证）；typecheck 通过，书源字段右键「格式化」（js-beautify 链）实测正常
+
 ## 3.8.22
 
 新功能：
