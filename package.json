@@ -89,7 +89,7 @@
     "katex": "^0.19.1",
     "marked": "^14.1.3",
     "marked-katex-extension": "^5.1.8",
-    "markmap-lib": "^0.18.12",
+    "markmap-lib": "^0.18.13",
     "markmap-view": "^0.18.12",
     "monaco-editor": "^0.55.1",
     "pako": "^3.0.3",
