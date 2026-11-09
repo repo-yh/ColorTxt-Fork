@@ -102,7 +102,7 @@
     "typescript": "^5.8.2",
     "vite": "^6.4.5",
     "vite-plugin-monaco-editor": "^1.1.0",
-    "vue": "^3.5.44",
+    "vue": "^3.5.45",
     "vue-tsc": "^2.2.8",
     "xpath": "^0.0.36"
   },
