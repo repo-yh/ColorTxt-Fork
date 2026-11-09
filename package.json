@@ -44,7 +44,24 @@
       "@xmldom/xmldom": "^0.8.15"
     },
     "katex": "$katex",
-    "dompurify": "^3.4.17"
+    "dompurify": "^3.4.17",
+    "electron-builder": {
+      "minimatch": "^11.0.1"
+    },
+    "editorconfig": {
+      "minimatch": "^11.0.1"
+    },
+    "js-beautify": {
+      "glob": {
+        "minimatch": "^11.0.1"
+      }
+    },
+    "@electron/universal": {
+      "minimatch": "^11.0.1"
+    },
+    "@vue/language-core": {
+      "minimatch": "^11.0.1"
+    }
   },
   "devDependencies": {
     "@electron/rebuild": "^4.2.1",
