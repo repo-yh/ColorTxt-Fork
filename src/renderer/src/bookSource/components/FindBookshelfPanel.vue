@@ -25,7 +25,10 @@ import {
   isManualBookshelfBook,
   type BookshelfBook,
 } from "../findBookBookshelf";
-import { findFirstSearchUpdateSource } from "../searchUpdateService";
+import {
+  findFirstSearchUpdateSource,
+  setFindBookBookshelfHasUpdate,
+} from "../searchUpdateService";
 import {
   isBookshelfManualSort,
   reorderBookshelfManual,
@@ -601,6 +604,15 @@ function onRowMenuToggleCanUpdate() {
   setCanUpdate(item.bookUrl, item.origin, next);
 }
 
+/** 清除「有更新」角标：置位时基线已同步推进，只删标记，下轮有真新帖才会再亮 */
+function onRowMenuClearHasUpdate() {
+  const item = rowMenuItem.value;
+  closeRowMenu();
+  if (!item) return;
+  const next = setFindBookBookshelfHasUpdate(item.bookUrl, item.origin, false);
+  if (next) applyBooks(next);
+}
+
 async function removeBook(item: BookshelfBook, skipConfirm = false) {
   if (!skipConfirm) {
     const ok = await appConfirm(`确定从书架移除「${item.name}」？`);
@@ -851,6 +863,15 @@ defineExpose({ refresh, updateAll, enterManage, exitManage, manualAdd });
         @click="onRowMenuUpdate"
       >
         更新目录
+      </button>
+      <button
+        v-if="rowMenuItem?.hasUpdate"
+        type="button"
+        class="appShellMenuItem"
+        role="menuitem"
+        @click="onRowMenuClearHasUpdate"
+      >
+        清除更新提醒
       </button>
       <div
         class="appShellMenuSubWrap"
