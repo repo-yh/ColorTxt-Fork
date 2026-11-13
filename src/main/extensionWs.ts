@@ -978,8 +978,11 @@ async function handleDebugRequest(
         ),
       );
     } catch (err: unknown) {
+      console.error("[extensionWs] 调试端点下载失败:", err);
       res.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
-      res.end(JSON.stringify({ ok: false, error: String(err) }));
+      res.end(
+        JSON.stringify({ ok: false, error: "下载任务处理失败，请查看服务端日志" }),
+      );
     }
     return;
   }
