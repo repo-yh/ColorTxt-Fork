@@ -1002,9 +1002,39 @@
      * 未购/登录失效时服务端返回 HTML 提示页而非附件 → 不推 start，直接报失败（对齐油猴通道）。
      */
     async function runDownloadTask(payload, taskId) {
-        const url = new URL(payload.url, location.origin).href;
         const postUrl = typeof payload.postUrl === "string" ? payload.postUrl : "";
         const bookName = typeof payload.bookName === "string" ? payload.bookName : "";
+        const rawUrl = typeof payload.url === "string" ? payload.url : "";
+        let urlObj;
+        try {
+            urlObj = new URL(rawUrl, location.origin);
+        } catch (e) {
+            sendJson({
+                type: "download_result",
+                taskId,
+                url: "",
+                postUrl,
+                bookName,
+                name: "",
+                ok: false,
+                error: "非法下载地址",
+            });
+            return;
+        }
+        if (!/^https?:$/.test(urlObj.protocol) || urlObj.origin !== location.origin) {
+            sendJson({
+                type: "download_result",
+                taskId,
+                url: urlObj.href,
+                postUrl,
+                bookName,
+                name: "",
+                ok: false,
+                error: "下载地址不在允许范围（仅允许当前站点同源 http/https）",
+            });
+            return;
+        }
+        const url = urlObj.href;
         const ctrl = new AbortController();
         const timer = setTimeout(() => ctrl.abort(), DOWNLOAD_TIMEOUT_MS);
         // meta 响应头到手后记住文件名：body 阶段失败也带 name 推送，服务端有归属感知（对齐油猴通道）
