@@ -589,7 +589,7 @@
                 rateLimited,
                 ts: Date.now(),
             });
-            console.log(`[Cache] 页面已广播回报（帖子键=${itemThreadKey || "无"} 搜索键=${itemSearchKey || "无"} token=${token ? "有" : "无"}）`, itemUrl);
+            console.log("[Cache] 页面已广播回报（帖子键=%s 搜索键=%s token=%s） %s", itemThreadKey || "无", itemSearchKey || "无", token ? "有" : "无", itemUrl);
             // ACK 等待：主 tab 回 ack 时由 onmessage 的 ack 分支兑现 resolve；
             // 2s 超时 reject（主 tab 刷新中/不在场——消息本就丢弃，超时让调用方
             // 兜底关闭 tab 防滞留）
