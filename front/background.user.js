@@ -1215,7 +1215,12 @@
             } catch (err) {
                 return;
             }
-            if (href.origin !== location.origin || href.protocol === "javascript:") return;
+            if (
+                href.origin !== location.origin ||
+                href.protocol === "javascript:" ||
+                href.protocol === "data:" ||
+                href.protocol === "vbscript:"
+            ) return;
             const cur = new URL(location.href);
             cur.hash = "";
             href.hash = "";
