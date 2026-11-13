@@ -1,11 +1,11 @@
 // ==UserScript==
 // @name         ColorTxt 找书通道（油猴版 WS 客户端）
 // @namespace    colortxt-find-book
-// @version      1.3.35
+// @version      1.3.36
 // @description  连接 ColorTxt 桌面端 WS 服务（ws://127.0.0.1:8888/ws，与 Web 展示服务共用 8888 端口）：主 tab 持锁收任务，抓页任务开后台 tab 真实加载（导航执行 _dsign 挑战 JS 过墙）经 worker 池取页；表单 POST（附件购买）/ 附件下载同源 fetch。单连接锁 + 心跳 + 断线指数退避，行为清单见脚本内注释
 // @updateURL    http://127.0.0.1:8888/background.user.js
 // @downloadURL  http://127.0.0.1:8888/background.user.js
-// @match        https://sxsy33.com/*
+// @match        https://sxsy.*.com/*
 // @grant        GM_setValue
 // @grant        GM_getValue
 // @grant        GM_deleteValue
@@ -25,7 +25,7 @@
     // ColorTxt 主进程 WS 服务（extensionWs.ts）：与 Web 展示服务共用 8888 端口（/ws 路径）；
     // 绑 127.0.0.1，不用 localhost（可能解析到 ::1 连不上）
     const WS_SERVER = "ws://127.0.0.1:8888/ws";
-    // 按书源站点修改 @match；抓取任务 URL 必与页面同源（服务端只对 enabledWebSocket 书源走本通道）
+    // @match 通配 sxsy 系域名（站点换域无需改脚本）；抓取任务 URL 必与页面同源（服务端只对 enabledWebSocket 书源走本通道）
     const LOCK_KEY = "ws_single_conn_lock";
     const LOCK_TTL = 12000;
     const RENEW_INTERVAL = LOCK_TTL / 2;
