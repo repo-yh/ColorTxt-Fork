@@ -154,6 +154,18 @@ function ensureScriptConnectedBeforeTask(
   return autoOpenWaiter;
 }
 
+function getSafeExternalHttpUrl(raw: string): string | null {
+  try {
+    const parsed = new URL(raw);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      return null;
+    }
+    return parsed.toString();
+  } catch {
+    return null;
+  }
+}
+
 async function doEnsureScriptConnected(
   openUrl: string,
 ): Promise<string | null> {
@@ -162,8 +174,13 @@ async function doEnsureScriptConnected(
   console.log(
     `[extensionWs] 脚本未连接，自动打开书源页拉起脚本: ${openUrl}（等待连入 ≤${Math.round(AUTO_OPEN_WAIT_MS / 1000)}s）`,
   );
+  const safeOpenUrl = getSafeExternalHttpUrl(openUrl);
+  if (!safeOpenUrl) {
+    console.warn(`[extensionWs] 拒绝打开不安全 URL: ${openUrl}`);
+    return "脚本未连接（自动拉起被拒绝：URL 非法或协议不受支持）";
+  }
   try {
-    await shell.openExternal(openUrl);
+    await shell.openExternal(safeOpenUrl);
   } catch (err) {
     console.warn(`[extensionWs] 自动打开书源页失败: ${String(err)}`);
   }
