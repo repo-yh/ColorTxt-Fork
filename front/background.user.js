@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ColorTxt 找书通道（油猴版 WS 客户端）
 // @namespace    colortxt-find-book
-// @version      1.3.36
+// @version      1.3.37
 // @description  连接 ColorTxt 桌面端 WS 服务（ws://127.0.0.1:8888/ws，与 Web 展示服务共用 8888 端口）：主 tab 持锁收任务，抓页任务开后台 tab 真实加载（导航执行 _dsign 挑战 JS 过墙）经 worker 池取页；表单 POST（附件购买）/ 附件下载同源 fetch。单连接锁 + 心跳 + 断线指数退避，行为清单见脚本内注释
 // @updateURL    http://127.0.0.1:8888/background.user.js
 // @downloadURL  http://127.0.0.1:8888/background.user.js

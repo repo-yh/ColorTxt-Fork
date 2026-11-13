@@ -1,3 +1,25 @@
+## 3.8.24
+
+新功能：
+
+- 找书书架条目下拉菜单新增「清除更新提醒」：仅该书有「有更新」角标时显示，一键清除（置位时基线已同步推进，下轮检查更新只有出现真正新帖才会再次亮起）
+- 油猴脚本 @1.3.37（随本版自动更新）：@match 通配 sxsy 系域名（https://sxsy.*.com/*），站点换域无需改脚本
+
+## What's Changed
+
+* Potential fix for code scanning alert no. 64: Server-side request forgery by @laz-xyr in https://github.com/repo-yh/ColorTxt-Fork/pull/77
+* Potential fix for code scanning alert no. 67: Use of externally-controlled format string by @laz-xyr in https://github.com/repo-yh/ColorTxt-Fork/pull/78
+* build(deps): bump ws from 8.22.0 to 8.22.1 by @dependabot[bot] in https://github.com/repo-yh/ColorTxt-Fork/pull/73
+* build(deps-dev): bump tough-cookie from 6.0.2 to 6.1.0 by @dependabot[bot] in https://github.com/repo-yh/ColorTxt-Fork/pull/72
+* build(deps-dev): bump d3-scale from 4.0.2 to 4.0.3 by @dependabot[bot] in https://github.com/repo-yh/ColorTxt-Fork/pull/71
+* build(deps-dev): bump pdfjs-dist from 6.4.299 to 6.5.438 by @dependabot[bot] in https://github.com/repo-yh/ColorTxt-Fork/pull/76
+* build(deps-dev): bump vue from 3.5.44 to 3.5.45 by @dependabot[bot] in https://github.com/repo-yh/ColorTxt-Fork/pull/75
+* build(deps-dev): bump markmap-lib from 0.18.12 to 0.18.13 by @dependabot[bot] in https://github.com/repo-yh/ColorTxt-Fork/pull/70
+* Potential fix for code scanning alert no. 69: Client-side URL redirect by @laz-xyr in https://github.com/repo-yh/ColorTxt-Fork/pull/79
+* Potential fix for code scanning alert no. 65: Incomplete URL scheme check by @laz-xyr in https://github.com/repo-yh/ColorTxt-Fork/pull/80
+
+**Full Changelog**: https://github.com/repo-yh/ColorTxt-Fork/compare/v3.8.23...v3.8.24
+
 ## 3.8.23
 
 修复：
