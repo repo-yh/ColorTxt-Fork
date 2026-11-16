@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ColorTxt 找书通道（油猴版 WS 客户端）
 // @namespace    colortxt-find-book
-// @version      1.3.38
+// @version      1.3.40
 // @description  连接 ColorTxt 桌面端 WS 服务（ws://127.0.0.1:8888/ws，与 Web 展示服务共用 8888 端口）：主 tab 持锁收任务，抓页任务开后台 tab 真实加载（导航执行 _dsign 挑战 JS 过墙）经 worker 池取页；表单 POST（附件购买）/ 附件下载同源 fetch。单连接锁 + 心跳 + 断线指数退避，行为清单见脚本内注释
 // @updateURL    http://127.0.0.1:8888/background.user.js
 // @downloadURL  http://127.0.0.1:8888/background.user.js
@@ -82,6 +82,23 @@
     const SPAWN_HASH_MARK = "_colortxt_spawn=";
     const SPAWN_TOKEN_KEY = "ws_spawn_token";
 
+    // 服务器拉起主 tab 的接管令牌（URL hash #ctws_spawn=<随机>，与 worker spawn
+    // token 同机制）：服务器探测失败/断线恢复拉起新 tab 时下发，脚本解析到即
+    // 无条件抢占锁当主——不参与锁 TTL 竞争（旧 tab 冻结不续约，锁 12s 内不过期，
+    // 等锁释放会连环开 tab）。读后立即 replaceState 剥离 hash：网站 JS/统计读
+    // 不到 URL 里的 token，刷新也无法重放；挑战跳转丢 hash 无碍——同 tab 新文档
+    // 凭同 tabId 认领本 tab 已抢的锁照常当主。令牌仅客户端消费，服务端不校验
+    // （连接仲裁由现有 lockAcquiredAt 逻辑覆盖：本 tab 文档最新必然赢）
+    const OPEN_HASH_MARK = "ctws_spawn=";
+    const OPEN_TOKEN = (() => {
+        try {
+            if (!location.hash.startsWith("#" + OPEN_HASH_MARK)) return null;
+            const token = location.hash.slice(1 + OPEN_HASH_MARK.length);
+            history.replaceState(null, "", location.pathname + location.search);
+            return token || null;
+        } catch (e) { return null; }
+    })();
+
     // 自更新：脚本下发与检查更新的统一来源（Web 展示服务 /background.user.js 端点）。
     // 主 tab 每次加载比对远程 @version，有新版当前 tab 跳该链接触发 Tampermonkey 安装页
     const UPDATE_SCRIPT_URL = "http://127.0.0.1:8888/background.user.js";
@@ -156,6 +173,14 @@
 
     /** 启动分流：锁活跃且非本 tab → worker；否则当主 tab（初始启动仅一次） */
     function startup() {
+        // 服务器拉起的接管 tab（带令牌）：无条件抢占锁当主，跳过锁 TTL 检查——
+        // 锁可能被冻结旧 tab 持有且 12s 内不过期，等锁会连环开 tab；连接仲裁由
+        // 服务端现有 lockAcquiredAt 逻辑处理（本 tab 文档最新必然赢）
+        if (OPEN_TOKEN) {
+            console.log("[Tab] 检测到服务器接管令牌，无条件抢占锁当主");
+            becomeMain();
+            return;
+        }
         const lock = GM_getValue(LOCK_KEY, null);
         const lockIsMine = !!(lock && lock.holderId === myHolderId);
         if (lock && lock.active && !lockIsMine && Date.now() - lock.ts < LOCK_TTL) {
@@ -340,6 +365,13 @@
             // 服务端返回pong，重置心跳超时计时器
             if (payload.type === "pong") {
                 resetHeartbeatTimer();
+                return;
+            }
+
+            // 服务端链路探测：必须 renderer 真活着（JS 在跑）才能应答——协议层
+            // pong 会被浏览器网络层代答，探测应答不会，是可信存活判据
+            if (payload.type === "probe") {
+                sendJson({ type: "probe_ack", probeId: payload.probeId });
                 return;
             }
 
@@ -1196,6 +1228,19 @@
         if (ws) {
             ws.close(1000, "tab unload");
         }
+    });
+
+    // 浏览器内存节省器把 tab 睡眠（冻结）前的最后执行窗口：主动断开 WS。冻结后
+    // renderer JS 全面暂停（消息不消费、定时器不跑），而 WS TCP 连接与协议层 pong
+    // 由浏览器网络层持有并自动应答、不经过 renderer——服务端凭 pong 无法识别冻结，
+    // 任务会推进黑洞空转重推直到用户手动点击 tab。freeze 主动 close 让服务端立即
+    // 感知断开走恢复链路（8s 无重连自动拉起新 tab），比任务 40s 超时判定快得多。
+    // 解冻恢复无需专门处理：onclose 排的退避重试定时器解冻后到期执行 tryConnect，
+    // 锁过期/被恢复拉起的新 tab 抢走由 resignIfLockStolen 仲裁退位
+    document.addEventListener("freeze", () => {
+        if (!ws) return;
+        console.log("[Tab] tab 即将休眠（freeze），主动断开 WS 便于服务端感知恢复");
+        try { ws.close(1000, "tab frozen"); } catch (e) { /* 已关则忽略 */ }
     });
 
     // 同源链接点击即释放锁：click 在导航前触发（页面活跃，GM 写可靠），比 pagehide

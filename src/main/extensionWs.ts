@@ -17,12 +17,41 @@ const WS_PATH = "/ws";
  */
 const HEARTBEAT_INTERVAL_MS = 30_000;
 /**
- * 单次下发超时（大于脚本侧页面 30s 加载超时）。
- * 超时未收到 task_result → 服务端重新下发同一条 task（带上缓存的 tabId）。
+ * 单次下发超时（大于脚本侧页面 30s 加载超时，脚本存活时 30s 内必有成功/失败回声）。
+ * 超时未收到 task_result → 连接必然不可用：半开（readyState OPEN 但 pong 停）或
+ * 脚本 tab 被浏览器睡眠冻结（协议层 pong 由浏览器网络层自动应答不经过 renderer，
+ * 连接照常「健康」但任务消息无人消费）→ 断开等恢复：close 排断线恢复拉起新 tab，
+ * 重连后 acceptConnection 统一重推挂起任务。
  */
 const TASK_TIMEOUT_MS = 40_000;
 /** 超时重推上限，超过后向调用方报失败（上限自定，防调用方永久等待） */
 const TASK_MAX_RETRIES = 3;
+/**
+ * 链路激活状态（探测状态）机：未激活时任务队列禁止弹出，下发前先发应用层探测
+ * （probe），脚本 renderer 消费消息回 probe_ack 才激活——协议层 pong 由浏览器
+ * 网络层代答（tab 被睡眠冻结后照回不误），不能作为 renderer 存活凭据；激活不随
+ * 收到任何消息自动更新，只有探测通过触发。空闲（队列空一段时间无新任务）自动
+ * 回到未激活，下批任务重新探测。
+ */
+/** 激活态空闲回收：队列为空且无在飞任务起算，到期回到未激活（下次任务先探测） */
+const LINK_IDLE_DEACTIVATE_MS = 60_000;
+/** 激活后队列弹出节奏：每 1s 弹一个，堆积任务逐个放行避免浏览器瞬时开大量 worker tab */
+const QUEUE_POP_INTERVAL_MS = 1_000;
+/** 探测应答超时：probe 发出后超时未收 probe_ack → renderer 冻结/死亡 → 断开走恢复 */
+const PROBE_TIMEOUT_MS = 5_000;
+/** 链路是否已激活（探测通过）；连接断开即作废，重连后重新探测 */
+let linkActive = false;
+/** 探测等待计时器（probe 发出后超时未 ack 判冻结断开）与当前探测 id（应答匹配） */
+let probeTimer: NodeJS.Timeout | null = null;
+let currentProbeId: string | null = null;
+let probeIdSeq = 0;
+/** 探测等待者（下载等非队列任务的下发前等激活）：激活/超时/断线时统一兑现 */
+const probeWaiters: Array<(ok: boolean) => void> = [];
+/** 队列弹出节拍器（单实例防重入）与激活态空闲倒计时 */
+let queuePopTimer: NodeJS.Timeout | null = null;
+let idleDeactivateTimer: NodeJS.Timeout | null = null;
+/** 已下发未回包的在飞任务计数（并发上限已撤，仅作日志与让位参考） */
+let activeTaskCount = 0;
 
 /**
  * pageData 为脚本抓取结果（协议）：title/text/html/href/rateLimited；
@@ -50,6 +79,9 @@ type PendingTask = {
   /** 上次尝试使用的标签页；重试时带上，脚本校验失效自动新建并回报新 tabId */
   tabId: number | null;
   retries: number;
+  /** 已下发未终态（在飞计数依据）：排队中 false，下发置 true；断线挂起等
+   * 重推时由 acceptConnection 重置为 false 重新入队 */
+  sent: boolean;
   /** 表单 POST 任务（kind=form_post）：下发 body 与 referer */
   kind?: "form_post";
   body?: string;
@@ -180,7 +212,13 @@ async function doEnsureScriptConnected(
     return "脚本未连接（自动拉起被拒绝：URL 非法或协议不受支持）";
   }
   try {
-    await shell.openExternal(safeOpenUrl);
+    // 拉起 URL hash 带一次性接管令牌（与 worker spawn token 同机制）：脚本解析到
+    // 即无条件抢占锁当主，绕开旧 tab 锁 TTL 竞争（冻结 tab 不续约、锁 12s 内不过
+    // 期，等锁会连环开 tab）。令牌仅客户端消费，服务端不校验——连接仲裁由现有
+    // lockAcquiredAt 逻辑天然覆盖（新 tab 文档最新，时间必然更大）
+    const spawnToken =
+      Date.now().toString(36) + Math.random().toString(36).slice(2);
+    await shell.openExternal(`${safeOpenUrl}#ctws_spawn=${spawnToken}`);
   } catch (err) {
     console.warn(`[extensionWs] 自动打开书源页失败: ${String(err)}`);
   }
@@ -245,7 +283,11 @@ function resolveTask(taskId: string, result: OpenAndGetHtmlResult): void {
   if (!task) return;
   clearTimeout(task.timer);
   pendingTasks.delete(taskId);
+  // 活跃任务终态让位：在飞计数减一，排队任务继续按节拍弹出；队列弹尽转入空闲倒计时
+  if (task.sent && activeTaskCount > 0) activeTaskCount -= 1;
   task.resolve(result);
+  scheduleQueuePop();
+  refreshIdleTimer();
 }
 
 /** 文件重名时加时间戳后缀（下载目录内去重，保证每次落盘不覆盖既有文件） */
@@ -305,17 +347,139 @@ function emitDownloadEvent(ev: ExtensionWsDownloadEvent): void {
   }
 }
 
-/** 下发任务并启动本次尝试的 40s 超时计时；超时按服务端规则重推或判失败 */
-function dispatchTask(taskId: string): void {
-  const task = pendingTasks.get(taskId);
-  if (!task) return;
-  if (!client || client.readyState !== WebSocket.OPEN) {
-    console.warn(
-      `[extensionWs] 任务下发时无可用连接，挂起等待重连/拉起恢复 taskId=${taskId}`,
-    );
+/**
+ * 队列弹出放行入口（三个调用时机：任务创建入队、活跃任务终态让位、连接接受挂起
+ * 任务重推）：激活 → 排弹出节拍；未激活 → 触发探测（通过后自动开始弹出）。
+ * 任务堆积 + WS 不可用（断连/tab 睡眠冻结）期间任务全部滞留队列，探测通过后按
+ * 节奏逐个放行，避免连接恢复瞬间全量下发让脚本同时开大量 worker tab
+ */
+function enqueueOrProbe(): void {
+  // 新任务到达，取消空闲倒计时（链路即将干活，不回收激活态）
+  if (idleDeactivateTimer) {
+    clearTimeout(idleDeactivateTimer);
+    idleDeactivateTimer = null;
+  }
+  if (linkActive) {
+    scheduleQueuePop();
     return;
   }
+  startProbe();
+}
 
+/**
+ * 下发应用层探测：脚本 renderer 必须消费 WS 消息并回 probe_ack 才算通过——协议层
+ * pong 由浏览器网络层代答（tab 被睡眠冻结后照回），无法证明脚本上下文存活。
+ * 超时未应答 = tab 可能已失效 → 主动断开走恢复链路（close 排 8s 拉起新 tab），
+ * 新 tab 连入后重新探测，通过才放行队列
+ */
+function startProbe(): void {
+  if (linkActive || probeTimer) return;
+  if (!isScriptConnected()) return;
+  // 无排队任务也无等待者时不空探（连接刚接受无任务、探测已通过后的入队等）
+  const hasQueued = [...pendingTasks.values()].some((t) => !t.sent);
+  if (!hasQueued && probeWaiters.length === 0) return;
+  const probeId = `probe-${Date.now()}-${++probeIdSeq}`;
+  currentProbeId = probeId;
+  try {
+    client!.send(JSON.stringify({ type: "probe", probeId }));
+  } catch {
+    currentProbeId = null;
+    return;
+  }
+  console.log(`[extensionWs] 链路未激活，下发探测 ${probeId}（等待 renderer 应答）`);
+  probeTimer = setTimeout(() => {
+    probeTimer = null;
+    currentProbeId = null;
+    // 断线/已激活场景等待者已在别处兑现，这里只处理「连接在但脚本无应答」
+    resetProbeState(false);
+    if (linkActive || !isScriptConnected()) return;
+    console.warn(
+      "[extensionWs] 探测超时无应答（renderer 冻结/失效，协议层 pong 不可信），断开等恢复拉起新 tab",
+    );
+    try {
+      client?.terminate();
+    } catch {
+      // onclose 兜底清引用
+    }
+  }, PROBE_TIMEOUT_MS);
+}
+
+/** 重置探测状态：清计时器与探测 id，统一兑现等待者（ok=探测是否通过） */
+function resetProbeState(ok: boolean): void {
+  if (probeTimer) {
+    clearTimeout(probeTimer);
+    probeTimer = null;
+  }
+  currentProbeId = null;
+  const waiters = probeWaiters.splice(0);
+  for (const w of waiters) w(ok);
+}
+
+/**
+ * 队列弹出节拍：激活态每 1s 弹一个未下发任务（Map FIFO），堆积任务逐个放行——
+ * 浏览器逐个开 worker tab 有喘息，防瞬时全量下发开一片；节拍器单实例防重入，
+ * 队列弹尽后转入空闲倒计时
+ */
+function scheduleQueuePop(): void {
+  if (!linkActive) return;
+  if (queuePopTimer) return;
+  queuePopTimer = setTimeout(() => {
+    queuePopTimer = null;
+    if (!linkActive || !isScriptConnected()) return;
+    for (const [taskId, task] of pendingTasks) {
+      if (task.sent) continue;
+      task.sent = true;
+      activeTaskCount += 1;
+      sendTaskToClient(taskId, task);
+      break;
+    }
+    if ([...pendingTasks.values()].some((t) => !t.sent)) {
+      scheduleQueuePop();
+    } else {
+      refreshIdleTimer();
+    }
+  }, QUEUE_POP_INTERVAL_MS);
+}
+
+/**
+ * 激活态空闲回收：队列为空且无在飞任务起倒计时，到期回到未激活——激活只代表
+ * 「探测那一刻 renderer 活着」，空闲越久 tab 被睡眠的可能性越大，下次新任务必须
+ * 重新探测（不因收到任何消息自动续期，协议层 pong 不可信）
+ */
+function refreshIdleTimer(): void {
+  if (idleDeactivateTimer) {
+    clearTimeout(idleDeactivateTimer);
+    idleDeactivateTimer = null;
+  }
+  if (!linkActive) return;
+  if (pendingTasks.size > 0) return;
+  idleDeactivateTimer = setTimeout(() => {
+    idleDeactivateTimer = null;
+    if (!linkActive || pendingTasks.size > 0) return;
+    linkActive = false;
+    console.log(
+      `[extensionWs] 队列空闲超 ${Math.round(LINK_IDLE_DEACTIVATE_MS / 1000)}s，链路回到未激活（下次任务先探测）`,
+    );
+  }, LINK_IDLE_DEACTIVATE_MS);
+}
+
+/**
+ * 下载等非队列任务的下发前置：未激活时先探测并等待结果（激活/超时/断线兑现）。
+ * 探测失败已断开走恢复链路，调用方应放弃本次下发让用户重试
+ */
+function ensureLinkActive(): Promise<boolean> {
+  if (linkActive) return Promise.resolve(true);
+  if (!isScriptConnected()) return Promise.resolve(false);
+  const waiter = new Promise<boolean>((resolve) => {
+    probeWaiters.push(resolve);
+  });
+  startProbe();
+  return waiter;
+}
+
+/** 发送任务消息并启动本次尝试的 40s 超时计时（仅 scheduleQueuePop 弹出节拍内调用） */
+function sendTaskToClient(taskId: string, task: PendingTask): void {
+  if (!client || client.readyState !== WebSocket.OPEN) return;
   client.send(
     JSON.stringify({
       type: "task",
@@ -329,13 +493,30 @@ function dispatchTask(taskId: string): void {
     }),
   );
   console.log(
-    `[extensionWs] 任务下发（第 ${task.retries + 1} 次） taskId=${taskId} url=${task.url} tabId=${task.tabId ?? "无"}`,
+    `[extensionWs] 任务下发（第 ${task.retries + 1} 次） taskId=${taskId} url=${task.url} tabId=${task.tabId ?? "无"}（在飞 ${activeTaskCount}）`,
   );
 
   clearTimeout(task.timer);
   task.timer = setTimeout(() => {
+    // 连接处理先行：任务超时 = 本次尝试失败，连接必然不可用——半开（pong 停）或
+    // 脚本 renderer 被浏览器睡眠冻结（协议层 pong 由浏览器网络层自动应答，连接
+    // 照常「健康」但脚本侧页面任务 30s 内必有回声，40s 超时即消息无人消费）。
+    // 统一断开走恢复链路：close 排 8s 断线恢复拉起新 tab，重连后 acceptConnection
+    // 统一重推挂起任务（重新探测激活后按节拍弹出）；链路新鲜时盲重推只会在冻结 tab 上空转重推，
+    // 直到用户手动点击 tab 触发恢复
+    console.warn(
+      `[extensionWs] 任务超时，链路${
+        isClientLinkFresh()
+          ? "新鲜但脚本无回声（疑似 tab 被睡眠冻结）"
+          : "不新鲜（超一个心跳周期无 pong，半开）"
+      }，断开等重连恢复 taskId=${taskId} url=${task.url}`,
+    );
+    try {
+      client?.terminate();
+    } catch {
+      // onclose 兜底清引用
+    }
     if (task.noRetry || task.retries + 1 >= TASK_MAX_RETRIES) {
-      pendingTasks.delete(taskId);
       console.warn(
         `[extensionWs] 任务超时（${
           task.noRetry
@@ -343,7 +524,9 @@ function dispatchTask(taskId: string): void {
             : `已重推 ${task.retries} 次，放弃`
         }） taskId=${taskId} url=${task.url}`,
       );
-      task.resolve({
+      // 走 resolveTask 统一终态出口：在飞计数让位 + 队列空后转空闲倒计时
+      // （直接 delete+resolve 会漏这两步，链路激活态滞留、在飞计数失真）
+      resolveTask(taskId, {
         ok: false,
         error: task.noRetry
           ? "表单提交超时（结果未知，可能已提交成功，请重新检查购买状态）"
@@ -351,26 +534,7 @@ function dispatchTask(taskId: string): void {
       });
       return;
     }
-    // 重推前先验链路新鲜度：半开连接 readyState 仍 OPEN 但 pong 已停，盲推会把
-    // 本轮尝试又推进死连接。不新鲜（或已无连接）→ 断开等恢复：close 排断线恢复
-    // 拉起新 tab，重连后 acceptConnection 统一重推挂起任务
-    if (!isClientLinkFresh()) {
-      task.retries += 1;
-      console.warn(
-        `[extensionWs] 任务超时且链路不新鲜（超一个心跳周期无 pong），断开等重连恢复 taskId=${taskId}`,
-      );
-      try {
-        client?.terminate();
-      } catch {
-        // onclose 兜底清引用
-      }
-      return;
-    }
     task.retries += 1;
-    console.warn(
-      `[extensionWs] 任务超时，重新下发（带缓存 tabId=${task.tabId ?? "无"}） taskId=${taskId}`,
-    );
-    dispatchTask(taskId);
   }, TASK_TIMEOUT_MS);
 }
 
@@ -436,11 +600,13 @@ function acceptConnection(
   );
 
   // WS 断开期间的 pending 任务视为待重试，脚本重连后重新下发（服务端断线重试规则）；
-  // 表单 POST（非幂等）例外：断线不重推直接判失败，防止重复扣金钱
+  // 表单 POST（非幂等）例外：断线不重推直接判失败，防止重复扣金钱。
+  // 重推不直接 send：挂起任务重置为未下发，链路按「新连接未激活」处理——先探测
+  // （renderer 消费消息回 ack 才算活），通过后按节奏逐个弹出，防止恢复瞬间全量
+  // 下发开大量 worker tab
   if (pendingTasks.size > 0) {
-    for (const taskId of [...pendingTasks.keys()]) {
-      const task = pendingTasks.get(taskId);
-      if (task?.noRetry) {
+    for (const [taskId, task] of [...pendingTasks]) {
+      if (task.noRetry) {
         pendingTasks.delete(taskId);
         console.warn(
           `[extensionWs] 断线期间表单 POST 任务不重推，判失败 taskId=${taskId} url=${task.url}`,
@@ -452,8 +618,21 @@ function acceptConnection(
         });
         continue;
       }
-      dispatchTask(taskId);
+      task.sent = false;
     }
+    activeTaskCount = 0;
+    // 探测状态不随连接自动激活（协议层 pong 不可信）：重连/新 tab 连入后重新探测
+    linkActive = false;
+    resetProbeState(false);
+    if (queuePopTimer) {
+      clearTimeout(queuePopTimer);
+      queuePopTimer = null;
+    }
+    if (idleDeactivateTimer) {
+      clearTimeout(idleDeactivateTimer);
+      idleDeactivateTimer = null;
+    }
+    enqueueOrProbe();
   }
 }
 
@@ -485,6 +664,27 @@ function handleClientMessage(
 
   if (parsed.type === "ping") {
     ws.send(JSON.stringify({ type: "pong" }));
+    return;
+  }
+
+  // 探测应答（脚本 renderer 消费消息后回——协议层 pong 由浏览器网络层代答不可信，
+  // 应用层 ack 才能证明脚本上下文存活）：激活链路，队列开始按节奏弹出。
+  // probeId 不匹配的迟到应答（超时已判死）忽略
+  if (parsed.type === "probe_ack") {
+    if (linkActive) return;
+    if (
+      typeof parsed.probeId !== "string" ||
+      parsed.probeId !== currentProbeId
+    ) {
+      console.warn(
+        `[extensionWs] 收到不匹配的探测应答 probeId=${String(parsed.probeId)}（当前 ${currentProbeId ?? "无"}），忽略`,
+      );
+      return;
+    }
+    linkActive = true;
+    resetProbeState(true);
+    console.log("[extensionWs] 探测通过，链路激活，队列开始按节奏弹出");
+    scheduleQueuePop();
     return;
   }
 
@@ -769,6 +969,20 @@ export function startExtensionWsServer(): Promise<{
           for (const task of pendingTasks.values()) {
             clearTimeout(task.timer);
           }
+          // 在飞计数随连接作废：挂起任务重连后由 acceptConnection 重置 sent
+          // 重新入队补发
+          activeTaskCount = 0;
+          // 链路随连接作废：探测态/节拍/空闲倒计时一并复位，重连后重新探测
+          linkActive = false;
+          resetProbeState(false);
+          if (queuePopTimer) {
+            clearTimeout(queuePopTimer);
+            queuePopTimer = null;
+          }
+          if (idleDeactivateTimer) {
+            clearTimeout(idleDeactivateTimer);
+            idleDeactivateTimer = null;
+          }
           // 下载为主动推送模式：断线期间脚本的 download_result 直接丢弃（脚本不暂存），
           // 服务器无 pending 可清；用户重新触发下载即可
           console.log(
@@ -805,9 +1019,12 @@ export function openAndGetHtml(
         resolve,
         tabId: clientTabId,
         retries: 0,
+        sent: false,
         skipCache: opts?.skipCache === true,
       });
-      dispatchTask(taskId);
+      // 入队即走放行入口：激活直接排节拍弹出，未激活先探测（排队中不计时，
+      // 下发才启动 40s 超时）
+      enqueueOrProbe();
     });
   });
 }
@@ -833,6 +1050,14 @@ export async function downloadBookSourceFileViaExtension(
   // await 之后 client 收窄失效：send 前再判一次（断开则不创建任务直接失败）
   if (!client || client.readyState !== WebSocket.OPEN) {
     return { ok: false, error: SCRIPT_NOT_CONNECTED_ERROR };
+  }
+  // 下载虽不入队，下发前同样要过链路探测：未激活先探测一波，通过才放行
+  // （防 tab 冻结后协议层 pong 被代答、下载静默黑洞）
+  if (!(await ensureLinkActive())) {
+    return {
+      ok: false,
+      error: "脚本无响应（疑似标签页被浏览器睡眠），已断开等待恢复，请重试",
+    };
   }
 
   taskIdSeq += 1;
@@ -885,12 +1110,15 @@ export function formPostViaExtension(
         resolve,
         tabId: clientTabId,
         retries: 0,
+        sent: false,
         kind: "form_post",
         body,
         referer,
         noRetry: true,
       });
-      dispatchTask(taskId);
+      // 入队即走放行入口（表单 POST 同样先探测/排节拍；排队中不计时，下发才
+      // 启动 40s 超时）
+      enqueueOrProbe();
     });
   });
 }
@@ -1026,6 +1254,22 @@ export function stopExtensionWsServer(): void {
   }
   clientTabId = null;
   clientLockAcquiredAt = null;
+  activeTaskCount = 0;
+  // 探测状态机一并复位：清探测/节拍/空闲倒计时，激活态归零
+  if (probeTimer) {
+    clearTimeout(probeTimer);
+    probeTimer = null;
+  }
+  if (queuePopTimer) {
+    clearTimeout(queuePopTimer);
+    queuePopTimer = null;
+  }
+  if (idleDeactivateTimer) {
+    clearTimeout(idleDeactivateTimer);
+    idleDeactivateTimer = null;
+  }
+  linkActive = false;
+  resetProbeState(false);
 
   server.close(() => {
     console.log("[extensionWs] WS 服务已停止");
