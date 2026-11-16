@@ -100,7 +100,7 @@
     "tldts": "^7.4.19",
     "tough-cookie": "^6.1.0",
     "typescript": "^5.8.2",
-    "vite": "^6.4.5",
+    "vite": "^6.4.6",
     "vite-plugin-monaco-editor": "^1.1.0",
     "vue": "^3.5.45",
     "vue-tsc": "^2.2.8",
