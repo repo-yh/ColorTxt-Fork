@@ -94,7 +94,7 @@
     "monaco-editor": "^0.55.1",
     "pako": "^3.0.3",
     "pdfjs-dist": "^6.5.438",
-    "puppeteer-core": "^25.16.0",
+    "puppeteer-core": "^25.18.1",
     "socks-proxy-agent": "^10.1.0",
     "sortablejs": "^1.15.7",
     "tldts": "^7.4.19",
